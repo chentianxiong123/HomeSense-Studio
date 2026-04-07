@@ -1,0 +1,7 @@
+provider: "openai-compatible"
+model: "your-model-name"
+base_url: "https://your-openai-compatible-endpoint"
+api_key_env: "DEEPSEEK_API_KEY"
+api_key: ""
+max_iterations: 5
+timeout_ms: 30000

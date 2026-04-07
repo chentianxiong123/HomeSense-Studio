@@ -1,0 +1,106 @@
+<script setup lang='ts'>
+import type { CSSProperties } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { NButton, NLayoutSider } from 'naive-ui'
+import Footer from './Footer.vue'
+import { useAppStore } from '@/store'
+import { useBasicLayout } from '@/hooks/useBasicLayout'
+import { PromptStore, SvgIcon } from '@/components/common'
+
+const router = useRouter()
+const appStore = useAppStore()
+
+const { isMobile } = useBasicLayout()
+const show = ref(false)
+
+const collapsed = computed(() => appStore.siderCollapsed)
+
+function handleUpdateCollapsed() {
+  appStore.setSiderCollapsed(!collapsed.value)
+}
+
+const getMobileClass = computed<CSSProperties>(() => {
+  if (isMobile.value) {
+    return {
+      position: 'fixed',
+      zIndex: 50,
+    }
+  }
+  return {}
+})
+
+const mobileSafeArea = computed(() => {
+  if (isMobile.value) {
+    return {
+      paddingBottom: 'env(safe-area-inset-bottom)',
+    }
+  }
+  return {}
+})
+
+watch(
+  isMobile,
+  (val) => {
+    appStore.setSiderCollapsed(val)
+  },
+  {
+    immediate: true,
+    flush: 'post',
+  },
+)
+</script>
+
+<template>
+  <NLayoutSider
+    :collapsed="collapsed"
+    :collapsed-width="0"
+    :width="260"
+    :show-trigger="isMobile ? false : 'arrow-circle'"
+    collapse-mode="transform"
+    position="absolute"
+    bordered
+    :style="getMobileClass"
+    @update-collapsed="handleUpdateCollapsed"
+  >
+    <div class="flex flex-col h-full" :style="mobileSafeArea">
+      <main class="flex flex-col flex-1 min-h-0">
+        <div class="p-4">
+          <h2 class="text-lg font-bold text-gray-800 dark:text-white">HomeSense</h2>
+          <p class="text-xs text-gray-500 mt-1">智能家居控制中心</p>
+        </div>
+        <div class="flex-1 min-h-0" />
+        <div class="px-4 py-2 space-y-2">
+          <NButton quaternary block @click="router.push('/chat')">
+            <template #icon>
+              <SvgIcon icon="ri:chat-1-line" />
+            </template>
+            对话
+          </NButton>
+          <NButton quaternary block @click="router.push('/devices')">
+            <template #icon>
+              <SvgIcon icon="ri:device-line" />
+            </template>
+            设备管理
+          </NButton>
+          <NButton quaternary block @click="router.push('/config')">
+            <template #icon>
+              <SvgIcon icon="ri:settings-3-line" />
+            </template>
+            工具配置
+          </NButton>
+        </div>
+        <div class="p-4">
+          <NButton block @click="show = true">
+            提示词库
+          </NButton>
+        </div>
+      </main>
+      <Footer />
+    </div>
+  </NLayoutSider>
+  <template v-if="isMobile">
+    <div v-show="!collapsed" class="fixed inset-0 z-40 w-full h-full bg-black/40" @click="handleUpdateCollapsed" />
+  </template>
+  <PromptStore v-model:visible="show" />
+</template>

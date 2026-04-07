@@ -1,0 +1,2 @@
+dbPath: "./data/paths.json"
+minSuccessRate: 0.8

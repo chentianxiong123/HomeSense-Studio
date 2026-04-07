@@ -1,0 +1,21 @@
+device:
+  ip: "127.0.0.1"
+  port: 5555
+  adb_path: "adb"
+  timeout_ms: 10000
+
+perception:
+  ui_tree:
+    enabled: true
+  ocr:
+    enabled: false
+    provider: local
+  multimodal:
+    enabled: false
+    provider: disabled
+
+strategy:
+  tv:
+    text_target_order: [ui_tree, ocr, multimodal]
+  phone:
+    text_target_order: [ui_tree, ocr]
