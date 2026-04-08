@@ -40,9 +40,22 @@ export function fetchSession<T>() {
   })
 }
 
-export function fetchMessages<T = any>(limit: number, offset: number) {
+export interface FetchMessagesParams {
+  limit?: number
+  direction?: 'latest' | 'older' | 'newer'
+  cursorId?: number
+}
+
+export function fetchMessages<T = any>(params: FetchMessagesParams = {}) {
+  const query = new URLSearchParams()
+  query.set('limit', String(params.limit ?? 20))
+  if (params.direction)
+    query.set('direction', params.direction)
+  if (typeof params.cursorId === 'number')
+    query.set('cursorId', String(params.cursorId))
+
   return get<T>({
-    url: `/api/messages?limit=${limit}&offset=${offset}`,
+    url: `/api/messages?${query.toString()}`,
   })
 }
 

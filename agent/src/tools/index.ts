@@ -7,9 +7,11 @@ import { hamiTool } from "./hami/wrapper.js";
 import { successPathsTool } from "./success_paths/tool.js";
 import { webSearchTool } from "./web_search/tool.js";
 import { localIntentTool } from "./local_intent/tool.js";
-import { llmAgentTool } from "./llm_agent/tool.js";
+import { llmAgentTool, callChatModel, loadLlmAgentConfig } from "./llm_agent/tool.js";
+import { intentClassifierTool } from "./intent_classifier/tool.js";
 
 export const allTools = [
+  intentClassifierTool,
   ruleEngineTool,
   memoryTool,
   adbTool,
@@ -19,6 +21,8 @@ export const allTools = [
   localIntentTool,
   llmAgentTool,
 ] as const;
+
+export { intentClassifierTool, callChatModel, loadLlmAgentConfig };
 
 export function getTool(name: string) {
   return allTools.find((t) => t.name === name);

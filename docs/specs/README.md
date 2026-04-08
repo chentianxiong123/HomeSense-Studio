@@ -1,5 +1,10 @@
 # HomeSense
 
+1. 先读 `PROJECT_SUMMARY.md`
+2. 再读 `CONTRACT_FREEZE_V0_1_2026-04-08.md`
+3. 再读 `PARALLEL_WORKSTREAM_ASSIGNMENT_2026-04-08.md`
+4. 按 `AGENTS.md` / `CLAUDE.md` 执行开发
+
 HomeSense is a local-first smart home agent project focused on natural-language control, tool routing, and reusable execution experience.
 
 HomeSense 是一个本地优先的智能家居 Agent 项目，目标是把自然语言控制、工具路由、经验复用和可扩展自动化能力结合在一起。
@@ -11,20 +16,20 @@ This repository is an active prototype.
 Current main parts:
 - `agent/`: Fastify + LangGraph based backend orchestrator
 - `homesense-frontend/`: Vue 3 + Vite frontend
-- `ARCHITECTURE_V0_1.md`: current architecture draft
+- `docs/specs/ARCHITECTURE_V0_1.md`: current architecture draft
 - `PROJECT_SUMMARY.md`: project overview and notes
 
 ## Repository Structure / 仓库结构
 
 ```text
 HomeSense/
-├── agent/                  # Backend agent service
-├── homesense-frontend/     # Frontend UI
-├── ARCHITECTURE_V0_1.md    # Architecture draft
-├── PROJECT_SUMMARY.md      # Project summary
-├── start-backend.ps1       # Start backend on Windows PowerShell
-├── start-frontend.ps1      # Start frontend on Windows PowerShell
-└── start-all.ps1           # Start both services
+├── agent/                              # Backend agent service
+├── homesense-frontend/                 # Frontend UI
+├── docs/specs/ARCHITECTURE_V0_1.md     # Architecture draft
+├── PROJECT_SUMMARY.md                  # Project summary
+├── start-backend.ps1                   # Start backend on Windows PowerShell
+├── start-frontend.ps1                  # Start frontend on Windows PowerShell
+└── start-all.ps1                       # Start both services
 ```
 
 ## Backend / 后端
@@ -98,7 +103,7 @@ Before running locally, update these files with your own environment:
 ## Publishing Notes / 发布说明
 
 Excluded from this repository:
-- `References/`
+- `docs/history/References/`
 - `.claude/`
 - `.trae/`
 - `node_modules/`

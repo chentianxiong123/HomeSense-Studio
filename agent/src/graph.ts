@@ -10,13 +10,23 @@ import {
   toTraceEntry,
   type ToolAction,
 } from "./state.js";
-import { executeToolAction, isValidToolAction, llmAgentTool, localIntentTool, ruleEngineTool, successPathsTool, toolActionToCapabilityCommand } from "./tools/index.js";
+import { executeToolAction, isValidToolAction, llmAgentTool, localIntentTool, ruleEngineTool, successPathsTool, toolActionToCapabilityCommand, intentClassifierTool } from "./tools/index.js";
 import { getRecentUserMessages } from "./tools/memory/chatDb.js";
+import { createPendingLlmCase, updateLlmCase } from "./tools/memory/llmCaseDb.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TOOLS_DIR = join(__dirname, "tools");
 
 type SelectedSkillSection = NonNullable<ReturnType<typeof readSkillSection>>;
+type RuntimeToolResult = {
+  tool: string;
+  action: string;
+  success: boolean;
+  data?: unknown;
+  error?: string;
+};
+
+
 
 function addPolicySection(policy: Array<{ tool: string; sections: string[] }>, tool: string, section: string) {
   const existing = policy.find((item) => item.tool === tool);
@@ -220,6 +230,7 @@ async function buildDeepMatchedPathCandidates(input: string, intent: string | un
   const paths = Array.isArray(parsed.paths) ? parsed.paths : [];
   const fallbackCandidates = paths
     .filter((item: Record<string, any>) => item.id !== best?.id)
+    .filter((item: Record<string, any>) => typeof item.successRate === "number" && Number(item.successRate) > 0.99)
     .filter((item: Record<string, any>) => Array.isArray(item.actions) && item.actions.length > 0)
     .filter((item: Record<string, any>) => !item.failureReason)
     .filter((item: Record<string, any>) => !intent || !item.intent || item.intent === intent)
@@ -248,7 +259,7 @@ async function contextBuilderNode(state: typeof AgentState.State): Promise<Parti
   const stageResult = createStageResult({
     ok: true,
     stage: "context_builder",
-    next: "rule_engine",
+    next: "intent_router",
     message: "上下文已准备",
     reason: "context_ready",
     data: { recentMentionedDevices },
@@ -256,11 +267,82 @@ async function contextBuilderNode(state: typeof AgentState.State): Promise<Parti
   });
 
   return {
-    currentStage: "rule_engine",
+    currentStage: "intent_router",
     context: { recentMentionedDevices },
     stageResult,
     stageTrace: [toTraceEntry(stageResult)],
   };
+}
+
+async function intentRouterNode(state: typeof AgentState.State): Promise<Partial<typeof AgentState.State>> {
+  try {
+    const result = await intentClassifierTool.invoke({ text: state.input });
+    const parsed = typeof result === "string" ? JSON.parse(result) : result;
+    const intentType = parsed.intentType || parsed.intent || "command";
+    const confidence = typeof parsed.confidence === "number" ? parsed.confidence : 0;
+
+    if (intentType === "chat" && confidence >= 0.55) {
+      const reply = "嗯，说说看？";
+      const stageResult = createStageResult({
+        ok: true,
+        stage: "intent_router",
+        next: "end",
+        message: reply,
+        reason: "chat_intent_routed",
+        confidence,
+        data: { intentType, method: parsed.method },
+        meta: { source: "intent_router" },
+      });
+
+      return {
+        currentStage: "end",
+        stageResult,
+        stageTrace: [toTraceEntry(stageResult)],
+        finalResponse: reply,
+        context: { ...state.context, intentType: "chat" },
+      };
+    }
+
+    const stageResult = createStageResult({
+      ok: true,
+      stage: "intent_router",
+      next: "intent_normalizer",
+      message: "意图路由判定为任务请求，进入意图标准化",
+      reason: "command_intent_routed",
+      confidence,
+      data: { intentType, method: parsed.method },
+      meta: { source: "intent_router" },
+    });
+
+    return {
+      currentStage: "intent_normalizer",
+      stageResult,
+      stageTrace: [toTraceEntry(stageResult)],
+      context: {
+        ...state.context,
+        intentType,
+        coarseIntentConfidence: confidence,
+      },
+    };
+  } catch (error) {
+    const stageResult = createStageResult({
+      ok: false,
+      stage: "intent_router",
+      next: "intent_normalizer",
+      message: "意图路由失败，默认按任务请求进入意图标准化",
+      reason: "intent_router_error",
+      confidence: 0,
+      data: { error: String(error) },
+      meta: { source: "intent_router" },
+    });
+
+    return {
+      currentStage: "intent_normalizer",
+      stageResult,
+      stageTrace: [toTraceEntry(stageResult)],
+      context: { ...state.context, intentType: "command" },
+    };
+  }
 }
 
 async function ruleEngineNode(state: typeof AgentState.State): Promise<Partial<typeof AgentState.State>> {
@@ -270,63 +352,85 @@ async function ruleEngineNode(state: typeof AgentState.State): Promise<Partial<t
     const matched = Boolean(parsed.matched);
     const actions = Array.isArray(parsed.actions) ? parsed.actions : [];
 
+    if (parsed.intent === "chat" || parsed.intentSource === "keyword_match") {
+      const chatReply = "嗯，说说看？";
+      const stageResult = createStageResult({
+        ok: true,
+        stage: "rule_engine",
+        next: "end",
+        message: chatReply,
+        reason: "chat_intent",
+        confidence: parsed.intentConfidence ?? 0.8,
+        data: { intent: "chat", source: "rule_engine_keyword" },
+        meta: { source: "rule_engine" },
+      });
+      return {
+        currentStage: "end",
+        stageResult,
+        stageTrace: [toTraceEntry(stageResult)],
+        finalResponse: chatReply,
+        context: { ...state.context, intentType: "chat" },
+      };
+    }
+
+    const ruleCandidate = matched && actions.length > 0
+      ? {
+          trigger: parsed.matchedTrigger ?? state.input,
+          intent: parsed.intent || "matched_rule",
+          actions,
+          confidence: 1,
+          source: "rule_engine",
+        }
+      : null;
+
     const stageResult = createStageResult({
       ok: matched,
       stage: "rule_engine",
-      next: matched ? (actions.length > 0 ? "tool_executor" : "end") : "local_intent",
-      message: matched ? parsed.response || "已命中规则" : undefined,
-      reason: matched ? "matched_rule" : "no_rule_match",
+      next: "intent_normalizer",
+      message: matched ? "规则命中，提供候选方案" : "规则未命中，进入意图标准化",
+      reason: matched ? "rule_candidate_provided" : "no_rule_match",
       confidence: matched ? 1 : 0,
-      intent: matched
-        ? createIntent(state.input, parsed.intent || "matched_rule", actions[0]?.action, {
-            recentMentionedDevices: (state.context.recentMentionedDevices as Array<{ device: string; score: number }> | undefined) ?? [],
-          })
-        : undefined,
-      commands: actionsToCommands(actions, "rule_engine"),
-      actions,
+      intent: matched ? createIntent(state.input, parsed.intent || "matched_rule") : state.intent,
       data: {
         matched,
+        ruleCandidate,
         matchedTrigger: parsed.matchedTrigger ?? null,
-        commandSummary: summarizeCapabilityCommands(actionsToCommands(actions, "rule_engine")),
       },
       meta: { source: "rule_engine" },
     });
 
     return {
-      currentStage: stageResult.next,
+      currentStage: "intent_normalizer",
       stageResult,
       stageTrace: [toTraceEntry(stageResult)],
       ruleMatched: matched,
-      resolutionSource: matched ? "rule_engine" : undefined,
-      ruleActions: actions,
-      commandSummary: summarizeCapabilityCommands(stageResult.commands ?? []),
-      intent: stageResult.intent,
-      intentConfidence: stageResult.confidence ?? 0,
-      needsToolExecution: stageResult.next === "tool_executor",
-      finalResponse: stageResult.next === "end" ? stageResult.message || "好的" : "",
+      context: {
+        ...state.context,
+        ruleCandidate,
+      },
     };
   } catch (error) {
     const stageResult = createStageResult({
       ok: false,
       stage: "rule_engine",
-      next: "end",
-      message: "规则引擎执行失败",
-      reason: "rule_engine_error",
+      next: "intent_normalizer",
+      message: "规则引擎异常",
+      reason: "error",
+      confidence: 0,
       data: { error: String(error) },
       meta: { source: "rule_engine" },
     });
 
     return {
-      currentStage: "end",
+      currentStage: "intent_normalizer",
       stageResult,
       stageTrace: [toTraceEntry(stageResult)],
-      error: `Rule engine error: ${error}`,
-      finalResponse: stageResult.message,
+      error: String(error),
     };
   }
 }
 
-async function localIntentNode(state: typeof AgentState.State): Promise<Partial<typeof AgentState.State>> {
+async function intentNormalizerNode(state: typeof AgentState.State): Promise<Partial<typeof AgentState.State>> {
   try {
     const result = await localIntentTool.invoke({
       text: state.input,
@@ -335,69 +439,64 @@ async function localIntentNode(state: typeof AgentState.State): Promise<Partial<
     const parsed = typeof result === "string" ? JSON.parse(result) : result;
     const matched = Boolean(parsed.matched);
     const confidence = typeof parsed.confidence === "number" ? parsed.confidence : 0;
-    const reply = createFallbackReply(state.input);
 
-    const hasExecutableActions = Array.isArray(parsed.actions) && parsed.actions.length > 0;
-    const shouldAcceptLocalIntent = matched && confidence >= 0.85 && hasExecutableActions;
+    const normalizedIntent = matched
+      ? createIntent(state.input, parsed.intent || "normalized_intent", parsed.action, {
+          recentMentionedDevices: (state.context.recentMentionedDevices as Array<{ device: string; score: number }> | undefined) ?? [],
+        })
+      : state.intent;
 
     const stageResult = createStageResult({
-      ok: shouldAcceptLocalIntent,
-      stage: "local_intent",
-      next: shouldAcceptLocalIntent ? "tool_executor" : "success_paths",
-      message: shouldAcceptLocalIntent ? parsed.message || "已识别本地意图" : reply,
-      reason: shouldAcceptLocalIntent ? "matched_local_intent" : matched ? "local_intent_below_bar" : "no_local_intent_match",
+      ok: matched,
+      stage: "intent_normalizer",
+      next: "success_experience_retrieval",
+      message: matched ? `意图标准化：${parsed.intent || "normalized_intent"}` : "意图未标准化，进入经验检索",
+      reason: matched ? "intent_normalized" : "no_intent_match",
       confidence,
-      intent: shouldAcceptLocalIntent
-        ? createIntent(state.input, parsed.intent || "local_intent", parsed.action, {
-            recentMentionedDevices: (state.context.recentMentionedDevices as Array<{ device: string; score: number }> | undefined) ?? [],
-          })
-        : state.intent,
-      commands: actionsToCommands(shouldAcceptLocalIntent ? parsed.actions : [], "local_intent"),
-      actions: shouldAcceptLocalIntent ? parsed.actions : [],
+      intent: normalizedIntent,
+      commands: [],
+      actions: [],
       data: {
         matched,
-        hasExecutableActions,
-        commandSummary: summarizeCapabilityCommands(actionsToCommands(shouldAcceptLocalIntent ? parsed.actions : [], "local_intent")),
+        normalizedIntent: normalizedIntent?.intent ?? null,
+        normalizationSource: "intent_normalizer",
+        ruleCandidate: state.context.ruleCandidate ?? null,
       },
-      meta: { source: "local_intent" },
+      meta: { source: "intent_normalizer" },
     });
 
     return {
-      currentStage: stageResult.next,
+      currentStage: "success_experience_retrieval",
       stageResult,
       stageTrace: [toTraceEntry(stageResult)],
-      ruleMatched: shouldAcceptLocalIntent,
-      resolutionSource: shouldAcceptLocalIntent ? "local_intent" : state.resolutionSource,
-      intent: stageResult.intent,
+      intent: normalizedIntent,
       intentConfidence: confidence,
-      ruleActions: stageResult.actions ?? [],
-      commandSummary: summarizeCapabilityCommands(stageResult.commands ?? []),
-      needsToolExecution: stageResult.next === "tool_executor",
-      finalResponse: stageResult.next === "end" ? stageResult.message || reply : state.finalResponse,
+      context: {
+        ...state.context,
+        ruleCandidate: state.context.ruleCandidate,
+      },
     };
   } catch (error) {
-    const reply = createFallbackReply(state.input);
     const stageResult = createStageResult({
       ok: false,
-      stage: "local_intent",
-      next: "success_paths",
-      message: reply,
-      reason: "local_intent_error",
+      stage: "intent_normalizer",
+      next: "success_experience_retrieval",
+      message: "意图标准化异常",
+      reason: "intent_normalizer_error",
       data: { error: String(error) },
-      meta: { source: "local_intent" },
+      meta: { source: "intent_normalizer" },
     });
 
     return {
-      currentStage: "success_paths",
+      currentStage: "success_experience_retrieval",
       stageResult,
       stageTrace: [toTraceEntry(stageResult)],
-      error: `Local intent error: ${error}`,
-      finalResponse: reply,
+      error: `Intent normalizer error: ${error}`,
     };
   }
 }
 
-async function successPathsNode(state: typeof AgentState.State): Promise<Partial<typeof AgentState.State>> {
+async function successExperienceRetrievalNode(state: typeof AgentState.State): Promise<Partial<typeof AgentState.State>> {
   try {
     const result = await successPathsTool.invoke({
       action: "search",
@@ -408,19 +507,8 @@ async function successPathsNode(state: typeof AgentState.State): Promise<Partial
     const matches = Array.isArray(parsed.matches) ? parsed.matches : [];
     const best = matches[0];
     const hasReusableActions = Array.isArray(best?.actions) && best.actions.length > 0;
-    const matched = Boolean(best) && (Boolean(best?.isFailurePath) || hasReusableActions);
-    const isFailurePath = Boolean(best?.isFailurePath);
-    const shouldEscalateToDeep = Boolean(best) && !isFailurePath && !hasReusableActions;
-    const fallbackReason = Boolean(best) ? "success_path_non_actionable" : "no_success_path_match";
-    const nextStage = matched ? (isFailurePath ? "end" : "tool_executor") : "llm_agent";
-    const stageReason = matched ? (isFailurePath ? "matched_failure_path" : "matched_success_path") : fallbackReason;
-    const fallbackReply = state.finalResponse || createFallbackReply(state.input);
-    const stageMessage = matched
-      ? (isFailurePath ? `命中过往失败经验：${best.description || best.name}` : `复用经验路径：${best.name}`)
-      : shouldEscalateToDeep
-        ? `找到相似经验但当前不可直接执行：${best?.name || "unknown_path"}`
-        : fallbackReply;
-    const stageConfidence = matched ? best.score : shouldEscalateToDeep ? Math.max(best?.score || 0, 0.4) : 0;
+    const matched = Boolean(best);
+
     const historicalSkillRefs = Array.isArray(best?.llmSummary?.selectedSkills)
       ? best.llmSummary.selectedSkills
       : Array.isArray(best?.contextSnapshot?.selectedSkills)
@@ -428,72 +516,75 @@ async function successPathsNode(state: typeof AgentState.State): Promise<Partial
         : Array.isArray(best?.contextSnapshot?.skillsHint)
           ? best.contextSnapshot.skillsHint
           : [];
-    const resolvedIntent = matched
-      ? (state.intent ?? createIntent(state.input, best.intent || "success_path_match", best.actions?.[0]?.action, {
+
+    const resolvedIntent = state.intent ?? (matched
+      ? createIntent(state.input, best.intent || "success_path_match", undefined, {
           recentMentionedDevices: (state.context.recentMentionedDevices as Array<{ device: string; score: number }> | undefined) ?? [],
-        }))
-      : state.intent;
+        })
+      : state.intent);
 
     const matchedPathCandidates = await buildDeepMatchedPathCandidates(state.input, state.intent?.intent, matches, best);
 
+    const pendingLlmCaseId = createPendingLlmCase({
+      rawInput: state.input,
+      normalizedIntent: resolvedIntent?.intent ?? null,
+      context: {
+        recentMentionedDevices: state.context.recentMentionedDevices ?? [],
+        historicalSkillRefs,
+      },
+      matchedCandidates: matchedPathCandidates as Array<Record<string, unknown>>,
+    });
+
     const stageResult = createStageResult({
       ok: matched,
-      stage: "success_paths",
-      next: nextStage,
-      message: stageMessage,
-      reason: stageReason,
-      confidence: stageConfidence,
+      stage: "success_experience_retrieval",
+      next: "llm_agent",
+      message: matched
+        ? `找到成功经验：${best.name}`
+        : "未找到成功经验，进入 LLM 主决策",
+      reason: matched ? "success_experience_found" : "no_success_experience",
+      confidence: matched ? best.score : 0,
       intent: resolvedIntent,
-      commands: actionsToCommands(matched && !isFailurePath ? best.actions : [], "success_paths"),
-      actions: matched && !isFailurePath ? best.actions : [],
+      commands: [],
+      actions: [],
       data: {
         matches,
         matchedPath: best ?? null,
         matchedPathCandidates,
-        isFailurePath,
         hasReusableActions,
-        shouldEscalateToDeep,
         historicalSkillRefs,
-        commandSummary: summarizeCapabilityCommands(actionsToCommands(matched && !isFailurePath ? best.actions : [], "success_paths")),
-        inputScore: best?.inputScore ?? 0,
-        intentScore: best?.intentScore ?? 0,
+        ruleCandidate: state.context.ruleCandidate ?? null,
       },
-      meta: { source: "success_paths", skillsHint: historicalSkillRefs },
-    });
-
-    return {
-      currentStage: stageResult.next,
-      stageResult,
-      stageTrace: [toTraceEntry(stageResult)],
-      ruleMatched: matched,
-      resolutionSource: matched ? (isFailurePath ? "success_paths_failure" : "success_paths") : state.resolutionSource,
-      intent: resolvedIntent,
-      ruleActions: matched && !isFailurePath ? (stageResult.actions ?? []) : [],
-      commandSummary: summarizeCapabilityCommands(stageResult.commands ?? []),
-      context: {
-        ...state.context,
-        historicalSkillRefs,
-      },
-      needsToolExecution: stageResult.next === "tool_executor",
-      finalResponse: stageResult.next === "end" ? stageResult.message || state.finalResponse : state.finalResponse,
-    };
-  } catch (error) {
-    const reply = state.finalResponse || createFallbackReply(state.input);
-    const stageResult = createStageResult({
-      ok: false,
-      stage: "success_paths",
-      next: "llm_agent",
-      message: reply,
-      reason: "success_path_error",
-      data: { error: String(error) },
-      meta: { source: "success_paths" },
+      meta: { source: "success_experience_retrieval", skillsHint: historicalSkillRefs },
     });
 
     return {
       currentStage: "llm_agent",
       stageResult,
       stageTrace: [toTraceEntry(stageResult)],
-      finalResponse: reply,
+      intent: resolvedIntent,
+      context: {
+        ...state.context,
+        historicalSkillRefs,
+        pendingLlmCaseId,
+        ruleCandidate: state.context.ruleCandidate,
+      },
+    };
+  } catch (error) {
+    const stageResult = createStageResult({
+      ok: false,
+      stage: "success_experience_retrieval",
+      next: "llm_agent",
+      message: "成功经验检索异常，进入 LLM 主决策",
+      reason: "success_experience_retrieval_error",
+      data: { error: String(error) },
+      meta: { source: "success_experience_retrieval" },
+    });
+
+    return {
+      currentStage: "llm_agent",
+      stageResult,
+      stageTrace: [toTraceEntry(stageResult)],
     };
   }
 }
@@ -681,7 +772,7 @@ async function toolExecutorNode(state: typeof AgentState.State): Promise<Partial
   };
 }
 
-async function writeBackNode(state: typeof AgentState.State): Promise<Partial<typeof AgentState.State>> {
+async function successWritebackNode(state: typeof AgentState.State): Promise<Partial<typeof AgentState.State>> {
   const actions = state.stageResult?.actions ?? state.ruleActions;
   const executedActions = state.toolResults.length > 0;
   const success = executedActions && state.toolResults.every((item) => item.success);
@@ -691,16 +782,31 @@ async function writeBackNode(state: typeof AgentState.State): Promise<Partial<ty
   const pathDescription = buildPathDescription(state, success, executedActions, isPlanOnly);
   const resolutionLabel = normalizedResolutionLabel(state.resolutionSource);
   const resolvedIntent = state.intent?.intent || "unknown_intent";
+  const pendingLlmCaseId = typeof state.context.pendingLlmCaseId === "number" ? state.context.pendingLlmCaseId : undefined;
 
-  if (!shouldWriteBack(state, executedActions, isPlanOnly)) {
+  const canWriteToSuccessExperience = shouldWriteToSuccessExperience(state, executedActions, isPlanOnly);
+
+  if (!canWriteToSuccessExperience) {
+    const skipReason = isLikelyProbeInput(state.input || "")
+      ? "probe_input"
+      : state.resolutionSource !== "llm_agent_actionable"
+        ? "not_llm_decision"
+        : isPlanOnly
+          ? "plan_only"
+          : !executedActions
+            ? "no_execution"
+            : "execution_failed";
+
+    if (pendingLlmCaseId) {
+      updateLlmCase(pendingLlmCaseId, {
+        status: isPlanOnly ? "plan_only" : executedActions ? "failure" : "non_executable",
+        finalResponse: state.finalResponse,
+      });
+    }
     const writeBackMeta = {
       skipped: true,
-      reason: isLikelyProbeInput(state.input || "")
-        ? "probe_input"
-        : state.resolutionSource === "llm_agent_actionable" && executedActions
-          ? "deep_action_requires_review"
-          : "non_recordable_state",
-      recordType: success ? "success" : isPlanOnly ? "plan_only" : executedActions ? "failure" : "non_executable",
+      reason: skipReason,
+      recordType: success ? "success_not_llm" : isPlanOnly ? "plan_only" : executedActions ? "failure" : "non_executable",
       resolutionSource: state.resolutionSource,
       resolutionLabel,
       gatedBySkills: Boolean(state.stageResult?.data?.gatedBySkills),
@@ -709,14 +815,14 @@ async function writeBackNode(state: typeof AgentState.State): Promise<Partial<ty
     };
     const writeBackResults = [
       { type: "execution_summary", success, message: state.finalResponse },
-      { type: "user_visible_reflection", success: true, message: "这次结果未写入经验库，以避免临时输入干扰后续判断。" },
+      { type: "user_visible_reflection", success: true, message: "这次结果未写入成功经验库。" },
     ];
     const stageResult = createStageResult({
       ok: true,
-      stage: "write_back",
+      stage: "success_writeback",
       next: "end",
       message: state.finalResponse,
-      reason: "write_back_skipped",
+      reason: "success_writeback_skipped",
       intent: state.intent,
       actions,
       data: {
@@ -790,6 +896,13 @@ async function writeBackNode(state: typeof AgentState.State): Promise<Partial<ty
     });
     const parsed = typeof recorded === "string" ? JSON.parse(recorded) : recorded;
     const recordSucceeded = Boolean(parsed.success);
+    if (pendingLlmCaseId) {
+      updateLlmCase(pendingLlmCaseId, {
+        status: "success",
+        finalResponse: state.finalResponse,
+        linkedPathId: typeof parsed.id === "string" ? parsed.id : null,
+      });
+    }
     const writeBackReason = success
       ? "success_path_recorded"
       : isPlanOnly
@@ -850,14 +963,14 @@ async function writeBackNode(state: typeof AgentState.State): Promise<Partial<ty
 
     const stageResult = createStageResult({
       ok: recordSucceeded,
-      stage: "write_back",
+      stage: "success_writeback",
       next: "end",
       message: state.finalResponse,
       reason: writeBackReason,
       intent: state.intent,
       actions,
       data: { writeBackMeta, writeBackResults, ruleCandidate, llmSummary, toolResultsSummary, failureReason, pathName, pathDescription, resolutionLabel },
-      meta: { source: "write_back", skillsHint: persistedSkillsHint },
+      meta: { source: "success_writeback", skillsHint: persistedSkillsHint },
     });
 
     return {
@@ -872,12 +985,12 @@ async function writeBackNode(state: typeof AgentState.State): Promise<Partial<ty
   } catch (error) {
     const stageResult = createStageResult({
       ok: false,
-      stage: "write_back",
+      stage: "success_writeback",
       next: "end",
       message: state.finalResponse,
-      reason: "write_back_error",
+      reason: "success_writeback_error",
       data: { error: String(error) },
-      meta: { source: "write_back" },
+      meta: { source: "success_writeback" },
     });
 
     return {
@@ -885,23 +998,27 @@ async function writeBackNode(state: typeof AgentState.State): Promise<Partial<ty
       stageResult,
       stageTrace: [toTraceEntry(stageResult)],
       resolutionSource: state.resolutionSource,
-      writeBackResults: [{ type: "write_back_error", success: false, error: String(error) }],
+      writeBackResults: [{ type: "success_writeback_error", success: false, error: String(error) }],
       llmData: state.llmData,
       finalResponse: state.finalResponse,
     };
   }
 }
 
-function routeFromRule(state: typeof AgentState.State) {
-  return state.stageResult?.next ?? "end";
+function routeFromIntentRouter(state: typeof AgentState.State) {
+  return state.stageResult?.next ?? "intent_normalizer";
 }
 
-function routeFromLocalIntent(state: typeof AgentState.State) {
-  return state.stageResult?.next ?? "end";
+function routeFromRuleEngine(state: typeof AgentState.State) {
+  return state.stageResult?.next ?? "intent_normalizer";
 }
 
-function routeFromSuccessPaths(state: typeof AgentState.State) {
-  return state.stageResult?.next ?? "end";
+function routeFromIntentNormalizer(state: typeof AgentState.State) {
+  return state.stageResult?.next ?? "success_experience_retrieval";
+}
+
+function routeFromSuccessExperienceRetrieval(state: typeof AgentState.State) {
+  return state.stageResult?.next ?? "llm_agent";
 }
 
 function routeFromLlmAgent(state: typeof AgentState.State) {
@@ -945,11 +1062,17 @@ function isLikelyProbeInput(input: string) {
     || /(测试|联调|调试|验证|探针|示例|样例|元数据)/.test(input);
 }
 
-function shouldWriteBack(state: typeof AgentState.State, executedActions: boolean, isPlanOnly: boolean) {
+function shouldWriteToSuccessExperience(state: typeof AgentState.State, executedActions: boolean, isPlanOnly: boolean) {
   if (isLikelyProbeInput(state.input || "")) return false;
-  if (!executedActions && !isPlanOnly) return false;
-  if (state.resolutionSource === "llm_agent_actionable" && executedActions) return false;
+  if (!executedActions) return false;
+  if (isPlanOnly) return false;
+  if (state.resolutionSource !== "llm_agent_actionable") return false;
+  if (!state.toolResults.every((item) => item.success)) return false;
   return true;
+}
+
+function shouldWriteBack(state: typeof AgentState.State, executedActions: boolean, isPlanOnly: boolean) {
+  return shouldWriteToSuccessExperience(state, executedActions, isPlanOnly);
 }
 
 function shouldCreateRuleCandidate(state: typeof AgentState.State, success: boolean, recordSucceeded: boolean, actions: Array<Record<string, any>>, resolvedIntent: string) {
@@ -963,38 +1086,33 @@ function shouldCreateRuleCandidate(state: typeof AgentState.State, success: bool
 export function createGraph() {
   const workflow = new StateGraph(AgentState)
     .addNode("context_builder", contextBuilderNode)
-    .addNode("rule_engine", ruleEngineNode)
-    .addNode("local_intent", localIntentNode)
-    .addNode("success_paths", successPathsNode)
+    .addNode("intent_router", intentRouterNode)
+    .addNode("intent_normalizer", intentNormalizerNode)
+    .addNode("success_experience_retrieval", successExperienceRetrievalNode)
     .addNode("llm_agent", llmAgentNode)
     .addNode("tool_executor", toolExecutorNode)
-    .addNode("write_back", writeBackNode)
+    .addNode("success_writeback", successWritebackNode)
     .addEdge(START, "context_builder")
-    .addEdge("context_builder", "rule_engine")
-    .addConditionalEdges("rule_engine", routeFromRule, {
-      tool_executor: "tool_executor",
-      local_intent: "local_intent",
+    .addEdge("context_builder", "intent_router")
+    .addConditionalEdges("intent_router", routeFromIntentRouter, {
+      intent_normalizer: "intent_normalizer",
       end: END,
     })
-    .addConditionalEdges("local_intent", routeFromLocalIntent, {
-      tool_executor: "tool_executor",
-      success_paths: "success_paths",
-      end: END,
+    .addConditionalEdges("intent_normalizer", routeFromIntentNormalizer, {
+      success_experience_retrieval: "success_experience_retrieval",
     })
-    .addConditionalEdges("success_paths", routeFromSuccessPaths, {
-      tool_executor: "tool_executor",
+    .addConditionalEdges("success_experience_retrieval", routeFromSuccessExperienceRetrieval, {
       llm_agent: "llm_agent",
-      end: END,
     })
     .addConditionalEdges("llm_agent", routeFromLlmAgent, {
       tool_executor: "tool_executor",
       end: END,
     })
     .addConditionalEdges("tool_executor", routeFromToolExecutor, {
-      write_back: "write_back",
+      success_writeback: "success_writeback",
       end: END,
     })
-    .addEdge("write_back", END);
+    .addEdge("success_writeback", END);
 
   return workflow.compile();
 }

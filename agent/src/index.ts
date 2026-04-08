@@ -10,7 +10,7 @@ import { buildSkillPolicyPreview, graph } from "./graph.js";
 import { buildRuntimeRegistryPreview, summarizeCapabilityCommands } from "./tools/skillsRegistry.js";
 import { allTools, executeToolAction } from "./tools/index.js";
 import { createWorkflowV0, type RuleAction, type WorkflowV0 } from "./state.js";
-import { saveMessage, getMessages, getMessageCount } from "./tools/memory/chatDb.js";
+import { saveMessage, getMessages, getMessageCount, getMessagesPage, type MessagePageDirection } from "./tools/memory/chatDb.js";
 import { listWorkflowCandidates, upsertWorkflowCandidate } from "./tools/memory/workflowCandidateDb.js";
 import { deleteRule, listRules, setRuleEnabled, upsertRule } from "./tools/rule_engine/database.js";
 import { buildWorkflowDraftFromCommands, listWorkflowsV0, mergeWorkflowRegistryEntry, previewWorkflowMerge, upsertWorkflowRegistryEntry } from "./workflowRegistry.js";
@@ -435,6 +435,7 @@ async function main() {
         status: "Success",
         data: {
           reply: assistantMsg.content,
+          messageId: assistantMsg.id,
           matched,
           confidence,
           outcomeType,
@@ -503,15 +504,40 @@ async function main() {
   });
 
   fastify.get("/api/messages", async (request) => {
-    const query = request.query as { limit?: string; offset?: string };
-    const limit = parseInt(query.limit || "5", 10);
-    const offset = parseInt(query.offset || "0", 10);
+    const query = request.query as {
+      limit?: string;
+      direction?: string;
+      cursorId?: string;
+    };
 
-    const messages = getMessages(limit, offset);
-    const total = getMessageCount();
+    const limit = Math.min(parseInt(query.limit || "20", 10), 100);
+    const direction = (query.direction as MessagePageDirection) || "latest";
+    const cursorId = query.cursorId ? parseInt(query.cursorId, 10) : undefined;
 
-    return { status: "Success", data: { messages, total, limit, offset } };
+    const page = getMessagesPage(limit, direction, cursorId);
+
+    return {
+      status: "Success",
+      data: {
+        messages: page.messages,
+        pageInfo: page.pageInfo,
+        limit,
+        direction,
+        cursorId: cursorId ?? null,
+      },
+    };
   });
+
+  // fastify.get("/api/messages", async (request) => {
+  //   const query = request.query as { limit?: string; offset?: string };
+  //   const limit = parseInt(query.limit || "5", 10);
+  //   const offset = parseInt(query.offset || "0", 10);
+
+  //   const messages = getMessages(limit, offset);
+  //   const total = getMessageCount();
+
+  //   return { status: "Success", data: { messages, total, limit, offset } };
+  // });
 
   fastify.post("/api/execute", async (request, reply) => {
     const body = request.body as { actions?: RuleAction[] };
