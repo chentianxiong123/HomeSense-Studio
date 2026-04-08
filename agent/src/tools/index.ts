@@ -1,4 +1,5 @@
-import type { ToolResult, ToolAction } from "../state.js";
+import type { ToolResult, ToolAction, CapabilityCommandV0 } from "../state.js";
+import { getCapabilityEntry, toolActionToCapabilityDraft, validateCapabilityCommandInput } from "./skillsRegistry.js";
 import { ruleEngineTool } from "./rule_engine/tool.js";
 import { memoryTool } from "./memory/tool.js";
 import { adbTool } from "./adb/wrapper.js";
@@ -34,6 +35,43 @@ export function isValidToolAction(action: unknown): action is ToolAction {
     && (candidate.params === undefined || (typeof candidate.params === "object" && candidate.params !== null && !Array.isArray(candidate.params)));
 }
 
+export function capabilityCommandToToolAction(command: CapabilityCommandV0): ToolAction | null {
+  const input = command.input ?? {};
+  const validation = validateCapabilityCommandInput(command.capability, input);
+  if (!validation.ok) return null;
+
+  const entry = getCapabilityEntry(command.capability);
+  if (!entry) return null;
+
+  return {
+    tool: entry.preferredTool,
+    action: entry.action,
+    params: entry.requiredInputs.length > 0 || Object.keys(input).length > 0 ? input : undefined,
+  };
+}
+
+export function commandsToToolActions(commands: CapabilityCommandV0[] | undefined): ToolAction[] {
+  if (!Array.isArray(commands)) return [];
+  return commands
+    .map(capabilityCommandToToolAction)
+    .filter((item): item is ToolAction => Boolean(item));
+}
+
+export function toolActionToCapabilityCommand(commandId: string, toolAction: ToolAction): CapabilityCommandV0 | null {
+  const draft = toolActionToCapabilityDraft(toolAction.tool, toolAction.action, toolAction.params);
+  if (!draft) return null;
+  return {
+    schemaVersion: "command_v0",
+    commandId,
+    capability: draft.capability,
+    input: draft.input,
+    execution: {
+      preferredTool: draft.entry.preferredTool,
+      riskLevel: draft.entry.riskLevel,
+    },
+  };
+}
+
 export async function executeToolAction(action: ToolAction): Promise<ToolResult> {
   const tool = getTool(action.tool);
   if (!tool) {
@@ -63,7 +101,9 @@ export async function executeToolAction(action: ToolAction): Promise<ToolResult>
 }
 
 export async function toolNode(state: typeof import("../state.js").AgentState.State): Promise<Partial<typeof import("../state.js").AgentState.State>> {
-  const actions = state.ruleActions;
+  const actions = (state.stageResult?.commands && state.stageResult.commands.length > 0)
+    ? commandsToToolActions(state.stageResult.commands)
+    : state.ruleActions;
   const results: ToolResult[] = [];
 
   for (const action of actions) {

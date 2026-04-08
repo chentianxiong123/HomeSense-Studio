@@ -71,71 +71,112 @@ export function fetchDevices<T = any>() {
   })
 }
 
+export function fetchRegistryPreview<T = any>(input = '', intent?: string) {
+  const query = new URLSearchParams()
+  if (input) query.set('input', input)
+  if (intent) query.set('intent', intent)
+  return get<T>({
+    url: `/api/registry${query.toString() ? `?${query.toString()}` : ''}`,
+  })
+}
+
+export function fetchWorkflowExamples<T = any>() {
+  return get<T>({
+    url: '/api/workflows',
+  })
+}
+
+export function fetchWorkflowCandidates<T = any>() {
+  return get<T>({
+    url: '/api/workflow-candidates',
+  })
+}
+
+export function upgradeWorkflowDraft<T = any>(payload: { workflowDraft: Record<string, any>, targetWorkflowId?: string | null }) {
+  return post<T>({
+    url: '/api/workflows/upgrade-draft',
+    data: payload,
+  })
+}
+
+export function saveWorkflowDraft<T = any>(payload: { workflowDraft: Record<string, any> }) {
+  return post<T>({
+    url: '/api/workflows/save-draft',
+    data: payload,
+  })
+}
+
+export function acceptWorkflowUpgrade<T = any>(payload: { workflowDraft: Record<string, any>, targetWorkflowId?: string | null }) {
+  return post<T>({
+    url: '/api/workflows/accept-upgrade',
+    data: payload,
+  })
+}
 export function fetchExperiencePaths<T = any>() {
   return get<T>({
-    url: '/api/experience-paths',
+    url: '/api/success-paths',
   })
 }
 
 export function repairExperiencePathSkills<T = any>() {
   return post<T>({
-    url: '/api/experience-paths/repair-skills',
+    url: '/api/success-paths/repair-skills',
   })
 }
 
 export function normalizeExperiencePathData<T = any>() {
   return post<T>({
-    url: '/api/experience-paths/normalize-data',
+    url: '/api/success-paths/normalize-data',
   })
 }
 
 export function fetchExperiencePathClusters<T = any>() {
   return get<T>({
-    url: '/api/experience-paths/clusters',
+    url: '/api/success-paths/clusters',
   })
 }
 
 export function mergeExperiencePathCluster<T = any>(payload: { primaryId: string, mergeIds: string[] }) {
   return post<T>({
-    url: '/api/experience-paths/merge-cluster',
+    url: '/api/success-paths/merge-cluster',
     data: payload,
   })
 }
 
 export function fetchStrongClusterMergePreview<T = any>() {
   return get<T>({
-    url: '/api/experience-paths/merge-strong-clusters/preview',
+    url: '/api/success-paths/merge-strong-clusters/preview',
   })
 }
 
 export function fetchWeakClusterMergePreview<T = any>() {
   return get<T>({
-    url: '/api/experience-paths/merge-weak-clusters/preview',
+    url: '/api/success-paths/merge-weak-clusters/preview',
   })
 }
 
 export function mergeStrongExperiencePathClusters<T = any>() {
   return post<T>({
-    url: '/api/experience-paths/merge-strong-clusters',
+    url: '/api/success-paths/merge-strong-clusters',
   })
 }
 
 export function mergeWeakExperiencePathClusters<T = any>() {
   return post<T>({
-    url: '/api/experience-paths/merge-weak-clusters',
+    url: '/api/success-paths/merge-weak-clusters',
   })
 }
 
 export function fetchExperiencePathMergeAudit<T = any>(mode?: string) {
   const query = mode ? `?mode=${encodeURIComponent(mode)}` : ''
   return get<T>({
-    url: `/api/experience-paths/merge-audit${query}`,
+    url: `/api/success-paths/merge-audit${query}`,
   })
 }
 
 export function clearExperiencePathMergeAudit<T = any>() {
   return post<T>({
-    url: '/api/experience-paths/merge-audit/clear',
+    url: '/api/success-paths/merge-audit/clear',
   })
 }
 

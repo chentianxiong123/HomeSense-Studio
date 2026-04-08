@@ -40,6 +40,78 @@ interface LlmData {
   }
 }
 
+interface CommandSummaryItem {
+  commandId?: string | null
+  capability?: string | null
+  preferredTool?: string | null
+  action?: string | null
+  riskLevel?: string | null
+  input?: Record<string, any>
+}
+
+interface SelectedSkillMetadataItem {
+  skill_id?: string
+  tool?: string
+  section?: string
+  capabilities?: string[]
+  exposure_level?: string | null
+  risk_level?: string | null
+  preconditions?: string[]
+}
+
+interface WorkflowDraftNode {
+  nodeId: string
+  type: string
+  label: string
+  capability?: string
+  command?: {
+    input?: Record<string, any>
+  }
+  policy?: {
+    riskLevel?: string
+  }
+}
+
+interface WorkflowDraftEdge {
+  edgeId: string
+  from: string
+  to: string
+  when?: {
+    result?: string
+    expression?: string
+  }
+}
+
+interface WorkflowDraft {
+  workflowId: string
+  name: string
+  description?: string
+  goal?: string
+  nodes?: WorkflowDraftNode[]
+  edges?: WorkflowDraftEdge[]
+}
+
+interface RegistryResolutionMeta {
+  commandSummary?: CommandSummaryItem[]
+  selectedSkillMetadata?: SelectedSkillMetadataItem[]
+  workflowDraft?: WorkflowDraft | null
+  blockedActions?: Array<Record<string, any>>
+  gatedBySkills?: boolean | null
+  gatedActionCount?: number | null
+  gatingReason?: string | null
+  preconditionsEnforced?: boolean | null
+}
+
+interface RegistryDebugPayload {
+  refs?: string[]
+  registry?: {
+    capabilities?: any[]
+    skills?: any[]
+  }
+  metadata?: SelectedSkillMetadataItem[]
+  resolutionMeta?: RegistryResolutionMeta
+}
+
 interface Props {
   dateTime?: string
   text?: string
@@ -50,6 +122,8 @@ interface Props {
   writeBackResults?: WriteBackResult[]
   llm?: LlmData
   skillsHint?: string[]
+  registryDebug?: RegistryDebugPayload
+  workflowDraft?: WorkflowDraft | null
 }
 
 interface Emit {
@@ -67,11 +141,87 @@ const message = useMessage()
 const asRawText = ref(props.inversion)
 const messageRef = ref<HTMLElement>()
 const showDebug = ref(false)
+const showDebugDetails = ref(false)
 
 const hasDebugInfo = computed(() => {
-  return (props.trace?.length || 0) > 0 || (props.writeBackResults?.length || 0) > 0 || Boolean(props.llm) || (props.skillsHint?.length || 0) > 0
+  return (props.trace?.length || 0) > 0 || (props.writeBackResults?.length || 0) > 0 || Boolean(props.llm) || (props.skillsHint?.length || 0) > 0 || Boolean(props.registryDebug)
 })
 const debugSummary = computed(() => (props.trace || []).map(item => item.stage).join(' → '))
+const registryRefs = computed(() => Array.isArray(props.registryDebug?.refs) ? props.registryDebug.refs : [])
+const registryCapabilities = computed(() => Array.isArray(props.registryDebug?.registry?.capabilities) ? props.registryDebug.registry.capabilities : [])
+const registrySkills = computed(() => Array.isArray(props.registryDebug?.registry?.skills) ? props.registryDebug.registry.skills : [])
+const selectedRegistryMetadata = computed(() => Array.isArray(props.registryDebug?.metadata) ? props.registryDebug.metadata : [])
+const registryResolutionMeta = computed(() => props.registryDebug?.resolutionMeta || null)
+const blockedActions = computed(() => Array.isArray(props.registryDebug?.resolutionMeta?.blockedActions) ? props.registryDebug.resolutionMeta.blockedActions : [])
+const commandSummary = computed(() => Array.isArray(props.registryDebug?.resolutionMeta?.commandSummary) ? props.registryDebug.resolutionMeta.commandSummary : [])
+const selectedRuntimeSkillMetadata = computed(() => Array.isArray(props.registryDebug?.resolutionMeta?.selectedSkillMetadata) ? props.registryDebug.resolutionMeta.selectedSkillMetadata : [])
+const workflowDraft = computed(() => props.workflowDraft || props.registryDebug?.resolutionMeta?.workflowDraft || null)
+const capabilityCountLabel = computed(() => `${registryCapabilities.value.length}`)
+const skillCountLabel = computed(() => `${registrySkills.value.length}`)
+const debugOverviewLines = computed(() => {
+  const lines: string[] = []
+
+  if (props.trace?.length)
+    lines.push(`trace stages: ${props.trace.length}`)
+  if (props.llm)
+    lines.push(`deep layer: ${(props.llm.plan?.length || 0)} planned steps`)
+  if (registryRefs.value.length || registryCapabilities.value.length || registrySkills.value.length)
+    lines.push(`registry: ${registryRefs.value.length} refs · ${registryCapabilities.value.length} capabilities · ${registrySkills.value.length} skills`)
+  if (workflowDraft.value)
+    lines.push(`workflow draft: ${workflowDraft.value.name}`)
+  if (props.writeBackResults?.length)
+    lines.push(`write-back records: ${props.writeBackResults.length}`)
+
+  return lines
+})
+const debugModeDescription = computed(() => {
+  return showDebugDetails.value ? 'Debug details are visible' : 'Showing the normal summary view'
+})
+const hasDebugOverview = computed(() => debugOverviewLines.value.length > 0)
+const shouldShowRuntimeGating = computed(() => {
+  return Boolean(registryResolutionMeta.value)
+    || commandSummary.value.length > 0
+    || selectedRuntimeSkillMetadata.value.length > 0
+    || blockedActions.value.length > 0
+    || Boolean(workflowDraft.value)
+})
+
+function formatRegistryMetadata(item: any) {
+  const capabilities = Array.isArray(item?.capabilities) ? item.capabilities.join('、') : 'none'
+  const risk = item?.risk_level || 'unknown'
+  const exposure = item?.exposure_level || 'unknown'
+  return `${item?.skill_id || item?.tool || 'unknown'} → ${capabilities} | risk: ${risk} | exposure: ${exposure}`
+}
+
+function formatBlockedAction(item: any) {
+  const base = `${item?.tool || 'unknown'}.${item?.action || 'unknown'}`
+  const capability = item?.capability ? ` → ${item.capability}` : ''
+  const reason = item?.reason ? ` (${item.reason})` : ''
+  return `${base}${capability}${reason}`
+}
+
+function formatCommandSummary(item: CommandSummaryItem) {
+  const capability = item.capability || 'unknown capability'
+  const tool = item.preferredTool || 'unknown tool'
+  const action = item.action || 'unknown action'
+  const risk = item.riskLevel || 'unknown'
+  const input = item.input && Object.keys(item.input).length > 0 ? ` | input: ${JSON.stringify(item.input)}` : ''
+  return `${capability} → ${tool}.${action} | risk: ${risk}${input}`
+}
+
+function formatWorkflowDraftNode(node: WorkflowDraftNode) {
+  if (node.capability)
+    return `${node.label} → ${node.capability}`
+  return `${node.label} (${node.type})`
+}
+
+function formatWorkflowDraftEdge(edge: WorkflowDraftEdge) {
+  if (edge.when?.result)
+    return `${edge.from} -> ${edge.to} [${edge.when.result}]`
+  if (edge.when?.expression)
+    return `${edge.from} -> ${edge.to} [${edge.when.expression}]`
+  return `${edge.from} -> ${edge.to}`
+}
 
 const options = computed(() => {
   const common = [
@@ -199,6 +349,24 @@ async function handleCopy() {
             </button>
 
             <div v-if="showDebug" class="mt-2 space-y-2">
+              <div class="flex items-center justify-between rounded bg-[#f6f8fa] px-2 py-1 dark:bg-[#1d1f23]">
+                <div>
+                  <div class="font-medium">Debug Mode</div>
+                  <div class="text-[11px] text-[#9ca3af]">{{ debugModeDescription }}</div>
+                </div>
+                <button
+                  class="rounded border border-[#d1d5db] px-2 py-0.5 text-[11px] dark:border-[#3a3a40]"
+                  @click="showDebugDetails = !showDebugDetails"
+                >
+                  {{ showDebugDetails ? 'Hide Debug' : 'Show Debug' }}
+                </button>
+              </div>
+
+              <div v-if="hasDebugOverview" class="rounded bg-[#f6f8fa] px-2 py-1 dark:bg-[#1d1f23]">
+                <div class="font-medium mb-1">Overview</div>
+                <div v-for="line in debugOverviewLines" :key="line">{{ line }}</div>
+              </div>
+
               <div v-if="trace?.length">
                 <div class="mb-1 font-medium">处理路径</div>
                 <div
@@ -222,25 +390,25 @@ async function handleCopy() {
                   <div v-if="llm.next_hint">下一步建议：{{ llm.next_hint }}</div>
                   <div v-if="llm.needs_model_config">模型状态：待配置</div>
                 </div>
-                <div v-if="stageSkillHints.length" class="mt-1 rounded bg-[#f6f8fa] px-2 py-1 dark:bg-[#1d1f23]">
+                <div v-if="showDebugDetails && stageSkillHints.length" class="mt-1 rounded bg-[#f6f8fa] px-2 py-1 dark:bg-[#1d1f23]">
                   <div class="font-medium mb-1">Stage Skills Hint</div>
                   <div v-for="(skill, index) in stageSkillHints" :key="`stage-${skill}-${index}`">
                     {{ formatSkillRef(skill) }}
                   </div>
                 </div>
-                <div v-if="selectedSkillRefs.length" class="mt-1 rounded bg-[#f6f8fa] px-2 py-1 dark:bg-[#1d1f23]">
+                <div v-if="showDebugDetails && selectedSkillRefs.length" class="mt-1 rounded bg-[#f6f8fa] px-2 py-1 dark:bg-[#1d1f23]">
                   <div class="font-medium mb-1">已加载 Skills</div>
                   <div v-for="(skill, index) in selectedSkillRefs" :key="`${skill}-${index}`">
                     {{ formatSkillRef(skill) }}
                   </div>
                 </div>
-                <div v-if="selectedSkillSummary.length" class="mt-1 rounded bg-[#f6f8fa] px-2 py-1 dark:bg-[#1d1f23]">
+                <div v-if="showDebugDetails && selectedSkillSummary.length" class="mt-1 rounded bg-[#f6f8fa] px-2 py-1 dark:bg-[#1d1f23]">
                   <div class="font-medium mb-1">Skills 摘要</div>
                   <div v-for="(skill, index) in selectedSkillSummary" :key="`${skill.tool}-${skill.section}-${index}`">
                     {{ skill.tool }}/{{ skill.section }}
                   </div>
                 </div>
-                <div v-if="llm.skill_insights?.length" class="mt-1 rounded bg-[#f6f8fa] px-2 py-1 dark:bg-[#1d1f23]">
+                <div v-if="showDebugDetails && llm.skill_insights?.length" class="mt-1 rounded bg-[#f6f8fa] px-2 py-1 dark:bg-[#1d1f23]">
                   <div class="font-medium mb-1">Skills 洞察</div>
                   <div v-for="(insight, index) in llm.skill_insights" :key="`${insight.tool}-${insight.section}-${index}`">
                     {{ formatSkillInsight(insight) }}
@@ -250,10 +418,65 @@ async function handleCopy() {
                   <div class="font-medium mb-1">规划步骤</div>
                   <div v-for="(step, index) in llm.plan" :key="`${step}-${index}`">{{ index + 1 }}. {{ step }}</div>
                 </div>
-                <div v-if="llm.suggested_actions?.length" class="mt-1 rounded bg-[#f6f8fa] px-2 py-1 dark:bg-[#1d1f23]">
+                <div v-if="showDebugDetails && llm.suggested_actions?.length" class="mt-1 rounded bg-[#f6f8fa] px-2 py-1 dark:bg-[#1d1f23]">
                   <div class="font-medium mb-1">建议动作</div>
                   <div v-for="(action, index) in llm.suggested_actions" :key="`${action.tool}-${action.action}-${index}`">
                     {{ formatSuggestedAction(action) }}
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="registryDebug" class="mt-1 rounded bg-[#f6f8fa] px-2 py-1 dark:bg-[#1d1f23]">
+                <div class="font-medium mb-1">Registry</div>
+                <div v-if="registryRefs.length">refs: {{ registryRefs.join('、') }}</div>
+                <div>capabilities: {{ capabilityCountLabel }}</div>
+                <div>skills: {{ skillCountLabel }}</div>
+                <div v-if="showDebugDetails && selectedRegistryMetadata.length" class="mt-1">
+                  <div class="font-medium mb-1">Selected Capability View</div>
+                  <div v-for="(item, index) in selectedRegistryMetadata" :key="`${item.skill_id || item.tool}-${index}`">
+                    {{ formatRegistryMetadata(item) }}
+                  </div>
+                </div>
+                <div v-if="showDebugDetails && selectedRuntimeSkillMetadata.length" class="mt-1">
+                  <div class="font-medium mb-1">Runtime Selected Skills</div>
+                  <div v-for="(item, index) in selectedRuntimeSkillMetadata" :key="`runtime-${item.skill_id || item.tool}-${index}`">
+                    {{ formatRegistryMetadata(item) }}
+                  </div>
+                </div>
+                <div v-if="shouldShowRuntimeGating" class="mt-2">
+                  <div class="font-medium mb-1">Runtime Gating</div>
+                  <div v-if="registryResolutionMeta">gated: {{ registryResolutionMeta.gatedBySkills ? 'yes' : 'no' }}</div>
+                  <div v-if="registryResolutionMeta">gated count: {{ registryResolutionMeta.gatedActionCount ?? 0 }}</div>
+                  <div v-if="registryResolutionMeta?.gatingReason">reason: {{ registryResolutionMeta.gatingReason }}</div>
+                  <div v-if="registryResolutionMeta">preconditions enforced: {{ registryResolutionMeta.preconditionsEnforced ? 'yes' : 'no' }}</div>
+                  <div v-if="showDebugDetails && commandSummary.length" class="mt-1">
+                    <div class="font-medium mb-1">Command Summary</div>
+                    <div v-for="(item, index) in commandSummary" :key="`command-${item.commandId || item.capability || index}`">
+                      {{ formatCommandSummary(item) }}
+                    </div>
+                  </div>
+                  <div v-if="showDebugDetails && workflowDraft" class="mt-1">
+                    <div class="font-medium mb-1">Workflow Draft</div>
+                    <div>{{ workflowDraft.name }}</div>
+                    <div class="text-[#9ca3af]">{{ workflowDraft.description || workflowDraft.goal || 'No description' }}</div>
+                    <div class="mt-1">
+                      <div class="font-medium mb-1">Draft Nodes</div>
+                      <div v-for="node in (workflowDraft.nodes || [])" :key="node.nodeId">
+                        {{ formatWorkflowDraftNode(node) }}
+                      </div>
+                    </div>
+                    <div class="mt-1">
+                      <div class="font-medium mb-1">Draft Edges</div>
+                      <div v-for="edge in (workflowDraft.edges || [])" :key="edge.edgeId">
+                        {{ formatWorkflowDraftEdge(edge) }}
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="showDebugDetails && blockedActions.length" class="mt-1">
+                    <div class="font-medium mb-1">Blocked Actions</div>
+                    <div v-for="(item, index) in blockedActions" :key="`blocked-${index}`">
+                      {{ formatBlockedAction(item) }}
+                    </div>
                   </div>
                 </div>
               </div>

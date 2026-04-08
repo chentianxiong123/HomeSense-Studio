@@ -7,11 +7,13 @@ import { dirname, join } from "path";
 import YAML from "yaml";
 import { HumanMessage } from "@langchain/core/messages";
 import { buildSkillPolicyPreview, graph } from "./graph.js";
+import { buildRuntimeRegistryPreview, summarizeCapabilityCommands } from "./tools/skillsRegistry.js";
 import { allTools, executeToolAction } from "./tools/index.js";
-import type { RuleAction } from "./state.js";
+import { createWorkflowV0, type RuleAction, type WorkflowV0 } from "./state.js";
 import { saveMessage, getMessages, getMessageCount } from "./tools/memory/chatDb.js";
+import { listWorkflowCandidates, upsertWorkflowCandidate } from "./tools/memory/workflowCandidateDb.js";
 import { deleteRule, listRules, setRuleEnabled, upsertRule } from "./tools/rule_engine/database.js";
-
+import { buildWorkflowDraftFromCommands, listWorkflowsV0, mergeWorkflowRegistryEntry, previewWorkflowMerge, upsertWorkflowRegistryEntry } from "./workflowRegistry.js";
 const PORT = parseInt(process.env.PORT || "3000", 10);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TOOLS_DIR = join(__dirname, "tools");
@@ -36,6 +38,82 @@ function getToolSkillsPath(name: string, section = "index"): string | null {
   return existsSync(skillsPath) ? skillsPath : null;
 }
 
+function invokeToolByName(name: string, input: Record<string, unknown>) {
+  const tool = allTools.find((item) => item.name === name);
+  if (!tool) return null;
+  return (tool as { invoke: (i: Record<string, unknown>) => Promise<unknown> }).invoke(input);
+}
+
+async function invokeJsonToolByName(name: string, input: Record<string, unknown>) {
+  const result = await invokeToolByName(name, input);
+  if (result == null) return null;
+  return typeof result === "string" ? JSON.parse(result) : result;
+}
+
+const SUCCESS_PATHS_TOOL_NAME = "success_paths";
+
+function successPathsMissingResponse() {
+  return { status: "Error", message: `${SUCCESS_PATHS_TOOL_NAME} tool not found` };
+}
+
+async function buildSuccessPathsResponse(
+  input: Record<string, unknown>,
+  options?: {
+    data?: (parsed: any) => unknown;
+    status?: (parsed: any) => "Success" | "Error";
+  },
+) {
+  try {
+    const parsed = await invokeJsonToolByName(SUCCESS_PATHS_TOOL_NAME, input);
+    if (!parsed) return successPathsMissingResponse();
+    return {
+      status: options?.status ? options.status(parsed) : parsed?.success === false ? "Error" : "Success",
+      data: options?.data ? options.data(parsed) : parsed,
+    };
+  } catch (error) {
+    return { status: "Error", message: String(error) };
+  }
+}
+
+async function updateSuccessPathPromotion(sourcePathId: string | undefined, promotedRule: boolean) {
+  if (!sourcePathId) return;
+  await invokeJsonToolByName(SUCCESS_PATHS_TOOL_NAME, {
+    action: "update",
+    pathId: sourcePathId,
+    promotedRule,
+  });
+}
+
+function buildRuleCandidatesFromPaths(paths: Array<Record<string, unknown>>) {
+  return paths
+    .filter((path) => path.promotedRule !== true)
+    .map((path) => {
+      const reuseCount = typeof path.reuseCount === "number" ? path.reuseCount : 0;
+      const successRate = typeof path.successRate === "number" ? path.successRate : 0;
+      const recommended = reuseCount >= 3 && successRate >= 0.6;
+      const recommendationReason = recommended
+        ? `复用 ${reuseCount} 次，成功率 ${(successRate * 100).toFixed(0)}%`
+        : undefined;
+
+      return {
+        trigger: typeof path.input === "string" && path.input.trim() ? path.input : typeof path.name === "string" ? path.name : "",
+        intent: typeof path.intent === "string" ? path.intent : "unknown",
+        actions: Array.isArray(path.actions) ? path.actions : [],
+        responsePreview: typeof path.responsePreview === "string" ? path.responsePreview : typeof path.description === "string" ? path.description : undefined,
+        successRate,
+        reuseCount,
+        maturity: typeof path.maturity === "string" ? path.maturity : undefined,
+        recommended,
+        recommendationReason,
+        sourcePathId: typeof path.id === "string" ? path.id : "",
+        status: path.promotedRule === true ? "promoted" : "pending",
+        contextSnapshot: typeof path.contextSnapshot === "object" && path.contextSnapshot !== null ? path.contextSnapshot : undefined,
+        llmSummary: typeof path.llmSummary === "object" && path.llmSummary !== null ? path.llmSummary : undefined,
+      };
+    })
+    .filter((candidate) => candidate.trigger && candidate.sourcePathId);
+}
+
 function listToolSkillSections(name: string): string[] {
   const skillsDir = getToolSkillsDir(name);
   if (!skillsDir) return [];
@@ -52,6 +130,184 @@ async function main() {
   fastify.get("/health", async () => ({ status: "ok", timestamp: Date.now() }));
 
   fastify.get("/tools", async () => allTools.map((t) => ({ name: t.name, description: t.description })));
+
+  fastify.get("/api/registry", async (request) => {
+    const query = request.query as { input?: string; intent?: string };
+    const preview = buildSkillPolicyPreview(query.input || "", query.intent);
+    return {
+      status: "Success",
+      data: preview,
+    };
+  });
+
+  fastify.get("/api/workflows", async () => {
+    return {
+      status: "Success",
+      data: {
+        workflows: listWorkflowsV0(),
+      },
+    };
+  });
+
+  fastify.get("/api/workflow-candidates", async () => {
+    return {
+      status: "Success",
+      data: {
+        workflows: listWorkflowCandidates(),
+      },
+    };
+  });
+
+  function analyzeWorkflowDraftUpgrade(body: { workflowDraft?: Record<string, unknown>; targetWorkflowId?: string | null }) {
+    const workflowDraft = body.workflowDraft as {
+      workflowId?: string;
+      name?: string;
+      description?: string;
+      goal?: string;
+      nodes?: Array<Record<string, unknown>>;
+      edges?: Array<Record<string, unknown>>;
+    };
+    const examples = listWorkflowsV0();
+    const target = body.targetWorkflowId
+      ? examples.find((item) => item.workflowId === body.targetWorkflowId) ?? null
+      : null;
+
+    const draftCapabilities = Array.isArray(workflowDraft.nodes)
+      ? workflowDraft.nodes
+          .map((item) => (typeof item.capability === "string" ? item.capability : null))
+          .filter((item): item is string => Boolean(item))
+      : [];
+    const matchedExample = target ?? examples.find((item) => {
+      const exampleCapabilities = item.nodes
+        .map((node) => (typeof node.capability === "string" ? node.capability : null))
+        .filter((capability): capability is string => Boolean(capability));
+      return exampleCapabilities.some((capability) => draftCapabilities.includes(capability));
+    }) ?? null;
+
+    return {
+      workflowDraft,
+      matchedExample,
+      sharedCapabilities: matchedExample
+        ? matchedExample.nodes
+            .map((node) => (typeof node.capability === "string" ? node.capability : null))
+            .filter((capability): capability is string => typeof capability === "string")
+            .filter((capability) => draftCapabilities.includes(capability))
+        : [],
+    };
+  }
+
+  fastify.post("/api/workflows/upgrade-draft", async (request, reply) => {
+    const body = request.body as { workflowDraft?: Record<string, unknown>; targetWorkflowId?: string | null };
+    if (!body?.workflowDraft || typeof body.workflowDraft !== "object") {
+      return reply.status(400).send({ status: "Error", message: "Missing workflowDraft" });
+    }
+
+    const { workflowDraft, matchedExample, sharedCapabilities } = analyzeWorkflowDraftUpgrade(body);
+
+    return {
+      status: "Success",
+      data: {
+        accepted: true,
+        mode: matchedExample ? "merge_candidate" : "new_candidate",
+        draft: workflowDraft,
+        targetWorkflowId: matchedExample?.workflowId ?? null,
+        targetWorkflowName: matchedExample?.name ?? null,
+        sharedCapabilities,
+        next: matchedExample ? "review_merge" : "save_new_workflow",
+        message: matchedExample
+          ? `Draft can be upgraded toward ${matchedExample.name}`
+          : "Draft can be upgraded into a new workflow",
+      },
+    };
+  });
+
+  fastify.post("/api/workflows/save-draft", async (request, reply) => {
+    const body = request.body as { workflowDraft?: Record<string, unknown> };
+    if (!body?.workflowDraft || typeof body.workflowDraft !== "object") {
+      return reply.status(400).send({ status: "Error", message: "Missing workflowDraft" });
+    }
+
+    const draftInput = body.workflowDraft as Record<string, unknown>;
+    const workflowDraft = createWorkflowV0({
+      workflowId: typeof draftInput.workflowId === "string" ? draftInput.workflowId : `saved_${Date.now()}`,
+      name: typeof draftInput.name === "string" ? draftInput.name : "untitled draft",
+      description: typeof draftInput.description === "string" ? draftInput.description : undefined,
+      goal: typeof draftInput.goal === "string" ? draftInput.goal : undefined,
+      inputs: Array.isArray(draftInput.inputs) ? draftInput.inputs as unknown as WorkflowV0["inputs"] : undefined,
+      nodes: Array.isArray(draftInput.nodes) ? draftInput.nodes as unknown as WorkflowV0["nodes"] : [],
+      edges: Array.isArray(draftInput.edges) ? draftInput.edges as unknown as WorkflowV0["edges"] : [],
+      metadata: typeof draftInput.metadata === "object" && draftInput.metadata !== null ? draftInput.metadata as WorkflowV0["metadata"] : undefined,
+    });
+    const saved = upsertWorkflowCandidate({
+      workflow: workflowDraft,
+      status: "pending",
+      source: "save_draft",
+    });
+    return {
+      status: "Success",
+      data: {
+        accepted: true,
+        saved: true,
+        workflowId: saved.workflowId,
+        name: saved.name,
+        next: "persist_workflow",
+        mode: "pending_candidate",
+        message: "Draft saved as pending workflow candidate",
+      },
+    };
+  });
+
+  fastify.post("/api/workflows/accept-upgrade", async (request, reply) => {
+    const body = request.body as { workflowDraft?: Record<string, unknown>; targetWorkflowId?: string | null };
+    if (!body?.workflowDraft || typeof body.workflowDraft !== "object") {
+      return reply.status(400).send({ status: "Error", message: "Missing workflowDraft" });
+    }
+
+    const { workflowDraft, matchedExample, sharedCapabilities } = analyzeWorkflowDraftUpgrade(body);
+    const normalizedWorkflow = createWorkflowV0({
+      workflowId: typeof workflowDraft.workflowId === "string" ? workflowDraft.workflowId : `promoted_${Date.now()}`,
+      name: typeof workflowDraft.name === "string" ? workflowDraft.name : "promoted draft",
+      description: typeof workflowDraft.description === "string" ? workflowDraft.description : undefined,
+      goal: typeof workflowDraft.goal === "string" ? workflowDraft.goal : undefined,
+      nodes: Array.isArray(workflowDraft.nodes) ? workflowDraft.nodes as unknown as WorkflowV0["nodes"] : [],
+      edges: Array.isArray(workflowDraft.edges) ? workflowDraft.edges as unknown as WorkflowV0["edges"] : [],
+    });
+    const mergePreview = matchedExample?.workflowId ? previewWorkflowMerge(matchedExample.workflowId, normalizedWorkflow) : null;
+    const persistedWorkflow = matchedExample?.workflowId
+      ? mergeWorkflowRegistryEntry(matchedExample.workflowId, normalizedWorkflow)
+      : upsertWorkflowRegistryEntry(normalizedWorkflow);
+    const saved = upsertWorkflowCandidate({
+      workflow: persistedWorkflow,
+      status: "accepted",
+      source: matchedExample ? "accept_upgrade_merge" : "accept_upgrade_new",
+      targetWorkflowId: matchedExample?.workflowId ?? null,
+      targetWorkflowName: matchedExample?.name ?? null,
+    });
+
+    return {
+      status: "Success",
+      data: {
+        accepted: true,
+        upgraded: true,
+        mode: matchedExample ? "merge_into_existing" : "promote_as_new",
+        workflowId: saved.workflowId,
+        workflowName: persistedWorkflow.name,
+        targetWorkflowId: saved.targetWorkflowId,
+        targetWorkflowName: saved.targetWorkflowName,
+        sharedCapabilities,
+        mergedNodeCount: matchedExample
+          ? (mergePreview?.mergedNodeCount ?? 0)
+          : normalizedWorkflow.nodes.length,
+        mergedEdgeCount: matchedExample
+          ? (mergePreview?.mergedEdgeCount ?? 0)
+          : normalizedWorkflow.edges.length,
+        next: matchedExample ? "persist_merge_result" : "persist_new_workflow",
+        message: matchedExample
+          ? `Draft accepted and merged into ${matchedExample.name}`
+          : "Draft accepted as new workflow candidate",
+      },
+    };
+  });
 
   fastify.post("/api/chat", async (request, reply) => {
     const body = request.body as { text?: string };
@@ -144,7 +400,6 @@ async function main() {
         : null;
 
       const executionSourceSummary = (stageResult?.data?.executionSourceSummary as Record<string, unknown> | undefined) ?? null;
-
       const writeBackMeta = (stageResult?.data?.writeBackMeta as Record<string, unknown> | undefined) ?? null;
       const toolFailureAttribution = (result.toolFailureAttribution as Record<string, unknown> | undefined)
         ?? ((stageResult?.data?.failureAttribution as Record<string, unknown> | undefined) ?? null);
@@ -164,6 +419,17 @@ async function main() {
         writeBackRecordType,
         executionSourceSummary,
       };
+      const runtimeRefs = stageResult?.meta?.skillsHint
+        ?? ((result.llmData as { selected_skills?: string[] } | undefined)?.selected_skills ?? []);
+      const registryPreview = (result.registryDebug as Record<string, unknown> | undefined)
+        ?? buildRuntimeRegistryPreview(TOOLS_DIR, runtimeRefs, body.text, result.intent?.intent);
+      const commandSummary = Array.isArray(result.commandSummary) && result.commandSummary.length > 0
+        ? result.commandSummary
+        : summarizeCapabilityCommands(stageResult?.commands ?? []);
+      const workflowDraft = buildWorkflowDraftFromCommands(body.text, stageResult?.commands ?? [], {
+        name: stageResult?.stage ? `${stageResult.stage} draft` : undefined,
+        description: stageResult?.reason ? `由 ${stageResult.reason} 生成的 workflow 草稿` : undefined,
+      });
 
       return {
         status: "Success",
@@ -184,8 +450,15 @@ async function main() {
             intentScore: typeof stageResult?.data?.intentScore === "number" ? stageResult.data.intentScore : null,
             hasExecutablePlan: typeof stageResult?.data?.hasExecutablePlan === "boolean" ? stageResult.data.hasExecutablePlan : null,
             droppedActionCount: typeof stageResult?.data?.droppedActionCount === "number" ? stageResult.data.droppedActionCount : null,
+            gatedBySkills: typeof stageResult?.data?.gatedBySkills === "boolean" ? stageResult.data.gatedBySkills : null,
+            gatedActionCount: typeof stageResult?.data?.gatedActionCount === "number" ? stageResult.data.gatedActionCount : null,
+            gatingReason: typeof stageResult?.data?.gatingReason === "string" ? stageResult.data.gatingReason : null,
+            blockedActions: Array.isArray(stageResult?.data?.blockedActions) ? stageResult.data.blockedActions : [],
+            commandSummary,
+            workflowDraft,
+            selectedSkillMetadata: Array.isArray(stageResult?.data?.selectedSkillMetadata) ? stageResult.data.selectedSkillMetadata : registryPreview.metadata,
+            preconditionsEnforced: typeof stageResult?.data?.preconditionsEnforced === "boolean" ? stageResult.data.preconditionsEnforced : null,
             isFailurePath: typeof stageResult?.data?.isFailurePath === "boolean" ? stageResult.data.isFailurePath : null,
-            hasReusableActions: typeof stageResult?.data?.hasReusableActions === "boolean" ? stageResult.data.hasReusableActions : null,
             shouldEscalateToDeep: typeof stageResult?.data?.shouldEscalateToDeep === "boolean" ? stageResult.data.shouldEscalateToDeep : null,
             matchedPathName: typeof (stageResult?.data?.matchedPath as { name?: string } | undefined)?.name === "string" ? (stageResult?.data?.matchedPath as { name?: string }).name ?? null : null,
             matchedPathCandidates: Array.isArray(stageResult?.data?.matchedPathCandidates)
@@ -210,6 +483,8 @@ async function main() {
             writeBackRecordType,
             toolFailureAttribution,
           },
+          registryDebug: registryPreview,
+          workflowDraft,
           intent: result.intent,
           trace: result.stageTrace ?? [],
           toolResults: result.toolResults ?? [],
@@ -260,426 +535,295 @@ async function main() {
     }
   });
 
-  fastify.get("/api/tools", async () => {
-    const toolDirs = readdirSync(TOOLS_DIR, { withFileTypes: true })
-      .filter((d) => d.isDirectory() && existsSync(join(TOOLS_DIR, d.name, "config.yaml")))
-      .map((d) => d.name);
-    return toolDirs.map((name) => {
-      const t = allTools.find((tool) => tool.name === name);
-      return {
-        name,
-        description: t?.description ?? "",
-        hasConfig: true,
-      };
-    });
+  fastify.get("/api/tools/:name/config", async (request, reply) => {
+    const { name } = request.params as { name: string };
+    const toolDir = getToolDir(name);
+    if (!toolDir) return reply.status(404).send({ error: `Tool not found: ${name}` });
+    const configPath = join(toolDir, "config.yaml");
+    const content = readFileSync(configPath, "utf-8");
+    const parsed = YAML.parse(content);
+    return { name, config: parsed, raw: content };
   });
 
-  fastify.get<{ Params: { name: string } }>("/api/tools/:name/config", async (request, reply) => {
-    const { name } = request.params;
-    const dir = getToolDir(name);
-    if (!dir) return reply.status(404).send({ error: `Tool not found: ${name}` });
-    try {
-      const content = readFileSync(join(dir, "config.yaml"), "utf-8");
-      const parsed = YAML.parse(content);
-      return { name, config: parsed, raw: content };
-    } catch (error) {
-      return reply.status(500).send({ error: `Failed to read config: ${error}` });
-    }
-  });
-
-  fastify.get<{ Params: { name: string } }>("/api/tools/:name/skills-sections", async (request, reply) => {
-    const { name } = request.params;
+  fastify.get("/api/tools/:name/skills", async (request, reply) => {
+    const { name } = request.params as { name: string };
+    const skillsDir = getToolSkillsDir(name);
+    if (!skillsDir) return reply.status(404).send({ error: `Skills not found for tool: ${name}` });
     const sections = listToolSkillSections(name);
-    if (!sections.length) return reply.status(404).send({ error: `No skills sections found for tool: ${name}` });
     return { name, sections };
   });
 
-  fastify.get<{ Params: { name: string; section: string } }>("/api/tools/:name/skills/:section", async (request, reply) => {
-    const { name, section } = request.params;
-    const skillsPath = getToolSkillsPath(name, section);
-    if (!skillsPath) return reply.status(404).send({ error: `Skill section not found: ${name}/${section}` });
-    try {
-      const content = readFileSync(skillsPath, "utf-8");
-      return { name, section, content };
-    } catch (error) {
-      return reply.status(500).send({ error: `Failed to read skill section: ${error}` });
-    }
+  fastify.get("/api/tools/:name/skills-sections", async (request, reply) => {
+    const { name } = request.params as { name: string };
+    const skillsDir = getToolSkillsDir(name);
+    if (!skillsDir) return reply.status(404).send({ status: "Error", message: `Skills not found for tool: ${name}` });
+    return { status: "Success", data: listToolSkillSections(name) };
   });
 
-  fastify.get<{ Params: { name: string } }>("/api/tools/:name/skills", async (request, reply) => {
-    const { name } = request.params;
-    const skillsPath = getToolSkillsPath(name, "index");
-    if (!skillsPath) return reply.status(404).send({ error: `Skills not found for tool: ${name}` });
-    try {
-      const content = readFileSync(skillsPath, "utf-8");
-      return { name, section: "index", content };
-    } catch (error) {
-      return reply.status(500).send({ error: `Failed to read skills: ${error}` });
-    }
-  });
-
-  fastify.get<{ Params: { name: string }; Querystring: { input?: string; intent?: string } }>("/api/tools/:name/skills-policy", async (request, reply) => {
-    const { name } = request.params;
+  fastify.get("/api/tools/:name/skills-policy", async (request) => {
+    const { name } = request.params as { name: string };
     const query = request.query as { input?: string; intent?: string };
-    const dir = getToolDir(name);
-    if (!dir) return reply.status(404).send({ error: `Tool not found: ${name}` });
     const input = query.input || "";
     const preview = buildSkillPolicyPreview(input, query.intent);
     return {
-      tool: name,
-      input,
-      intent: query.intent ?? null,
-      stages: preview.stages.filter((item) => item.refs.some((ref) => ref.startsWith(`${name}/`))),
-      refs: preview.refs.filter((ref) => ref.startsWith(`${name}/`)),
-      globalStages: preview.stages,
-      globalRefs: preview.refs,
-    };
-  });
-
-  fastify.put<{ Params: { name: string }; Body: { config: Record<string, unknown> } }>("/api/tools/:name/config", async (request, reply) => {
-    const { name } = request.params;
-    const body = request.body as { config?: Record<string, unknown>; raw?: string };
-    const dir = getToolDir(name);
-    if (!dir) return reply.status(404).send({ error: `Tool not found: ${name}` });
-    try {
-      const configPath = join(dir, "config.yaml");
-      if (body.raw) {
-        writeFileSync(configPath, body.raw, "utf-8");
-      } else if (body.config) {
-        const yamlStr = YAML.stringify(body.config, { lineWidth: 0, indent: 2 });
-        writeFileSync(configPath, yamlStr, "utf-8");
-      } else {
-        return reply.status(400).send({ error: "Missing config or raw field" });
-      }
-      return { success: true, message: `Config saved for ${name}` };
-    } catch (error) {
-      return reply.status(500).send({ error: `Failed to write config: ${error}` });
-    }
-  });
-
-  fastify.get("/api/experience-paths", async () => {
-    const tool = allTools.find((t) => t.name === "success_paths");
-    if (!tool) return { status: "Error", message: "success_paths tool not found" };
-
-    try {
-      const result = await (tool as { invoke: (i: Record<string, unknown>) => Promise<unknown> }).invoke({ action: "list" });
-      const parsed = typeof result === "string" ? JSON.parse(result) : result;
-      return { status: "Success", data: parsed?.paths ?? [] };
-    } catch (error) {
-      return { status: "Error", message: String(error) };
-    }
-  });
-
-  fastify.post("/api/experience-paths/repair-skills", async () => {
-    const tool = allTools.find((t) => t.name === "success_paths");
-    if (!tool) return { status: "Error", message: "success_paths tool not found" };
-
-    try {
-      const result = await (tool as { invoke: (i: Record<string, unknown>) => Promise<unknown> }).invoke({ action: "repair_skills" });
-      const parsed = typeof result === "string" ? JSON.parse(result) : result;
-      return { status: "Success", data: parsed };
-    } catch (error) {
-      return { status: "Error", message: String(error) };
-    }
-  });
-
-  fastify.post("/api/experience-paths/normalize-data", async () => {
-    const tool = allTools.find((t) => t.name === "success_paths");
-    if (!tool) return { status: "Error", message: "success_paths tool not found" };
-
-    try {
-      const result = await (tool as { invoke: (i: Record<string, unknown>) => Promise<unknown> }).invoke({ action: "normalize_data" });
-      const parsed = typeof result === "string" ? JSON.parse(result) : result;
-      return { status: "Success", data: parsed };
-    } catch (error) {
-      return { status: "Error", message: String(error) };
-    }
-  });
-
-  fastify.get("/api/experience-paths/clusters", async () => {
-    const tool = allTools.find((t) => t.name === "success_paths");
-    if (!tool) return { status: "Error", message: "success_paths tool not found" };
-
-    try {
-      const result = await (tool as { invoke: (i: Record<string, unknown>) => Promise<unknown> }).invoke({ action: "clusters" });
-      const parsed = typeof result === "string" ? JSON.parse(result) : result;
-      return { status: "Success", data: parsed?.clusters ?? [] };
-    } catch (error) {
-      return { status: "Error", message: String(error) };
-    }
-  });
-
-  fastify.post("/api/experience-paths/merge-cluster", async (request, reply) => {
-    const tool = allTools.find((t) => t.name === "success_paths");
-    if (!tool) return { status: "Error", message: "success_paths tool not found" };
-
-    const body = request.body as { primaryId?: string; mergeIds?: string[] };
-    if (!body?.primaryId || !Array.isArray(body.mergeIds)) {
-      return reply.status(400).send({ status: "Error", message: "Missing primaryId or mergeIds" });
-    }
-
-    try {
-      const result = await (tool as { invoke: (i: Record<string, unknown>) => Promise<unknown> }).invoke({
-        action: "merge_cluster",
-        pathId: body.primaryId,
-        actions: body.mergeIds.map((id) => ({ id })),
-      });
-      const parsed = typeof result === "string" ? JSON.parse(result) : result;
-      return { status: parsed?.success ? "Success" : "Error", data: parsed };
-    } catch (error) {
-      return { status: "Error", message: String(error) };
-    }
-  });
-
-  fastify.get("/api/experience-paths/merge-strong-clusters/preview", async () => {
-    const tool = allTools.find((t) => t.name === "success_paths");
-    if (!tool) return { status: "Error", message: "success_paths tool not found" };
-
-    try {
-      const result = await (tool as { invoke: (i: Record<string, unknown>) => Promise<unknown> }).invoke({ action: "preview_merge_strong_clusters" });
-      const parsed = typeof result === "string" ? JSON.parse(result) : result;
-      return { status: parsed?.success ? "Success" : "Error", data: parsed };
-    } catch (error) {
-      return { status: "Error", message: String(error) };
-    }
-  });
-
-  fastify.get("/api/experience-paths/merge-weak-clusters/preview", async () => {
-    const tool = allTools.find((t) => t.name === "success_paths");
-    if (!tool) return { status: "Error", message: "success_paths tool not found" };
-
-    try {
-      const result = await (tool as { invoke: (i: Record<string, unknown>) => Promise<unknown> }).invoke({ action: "preview_merge_weak_clusters" });
-      const parsed = typeof result === "string" ? JSON.parse(result) : result;
-      return { status: parsed?.success ? "Success" : "Error", data: parsed };
-    } catch (error) {
-      return { status: "Error", message: String(error) };
-    }
-  });
-
-  fastify.post("/api/experience-paths/merge-strong-clusters", async () => {
-    const tool = allTools.find((t) => t.name === "success_paths");
-    if (!tool) return { status: "Error", message: "success_paths tool not found" };
-
-    try {
-      const result = await (tool as { invoke: (i: Record<string, unknown>) => Promise<unknown> }).invoke({ action: "merge_strong_clusters" });
-      const parsed = typeof result === "string" ? JSON.parse(result) : result;
-      return { status: parsed?.success ? "Success" : "Error", data: parsed };
-    } catch (error) {
-      return { status: "Error", message: String(error) };
-    }
-  });
-
-  fastify.post("/api/experience-paths/merge-weak-clusters", async () => {
-    const tool = allTools.find((t) => t.name === "success_paths");
-    if (!tool) return { status: "Error", message: "success_paths tool not found" };
-
-    try {
-      const result = await (tool as { invoke: (i: Record<string, unknown>) => Promise<unknown> }).invoke({ action: "merge_weak_clusters" });
-      const parsed = typeof result === "string" ? JSON.parse(result) : result;
-      return { status: parsed?.success ? "Success" : "Error", data: parsed };
-    } catch (error) {
-      return { status: "Error", message: String(error) };
-    }
-  });
-
-  fastify.get("/api/experience-paths/merge-audit", async (request) => {
-    const tool = allTools.find((t) => t.name === "success_paths");
-    if (!tool) return { status: "Error", message: "success_paths tool not found" };
-
-    try {
-      const query = request.query as { mode?: string };
-      const result = await (tool as { invoke: (i: Record<string, unknown>) => Promise<unknown> }).invoke({ action: "merge_audit", intent: query.mode });
-      const parsed = typeof result === "string" ? JSON.parse(result) : result;
-      return { status: parsed?.success ? "Success" : "Error", data: { current: parsed?.current ?? null, history: parsed?.history ?? [] } };
-    } catch (error) {
-      return { status: "Error", message: String(error) };
-    }
-  });
-
-  fastify.post("/api/experience-paths/merge-audit/clear", async () => {
-    const tool = allTools.find((t) => t.name === "success_paths");
-    if (!tool) return { status: "Error", message: "success_paths tool not found" };
-
-    try {
-      const result = await (tool as { invoke: (i: Record<string, unknown>) => Promise<unknown> }).invoke({ action: "clear_merge_audit" });
-      const parsed = typeof result === "string" ? JSON.parse(result) : result;
-      return { status: parsed?.success ? "Success" : "Error", data: { current: parsed?.current ?? null, history: parsed?.history ?? [] } };
-    } catch (error) {
-      return { status: "Error", message: String(error) };
-    }
-  });
-
-  fastify.get("/api/rule-candidates", async () => {
-    const tool = allTools.find((t) => t.name === "success_paths");
-    if (!tool) return { status: "Error", message: "success_paths tool not found" };
-
-    try {
-      const result = await (tool as { invoke: (i: Record<string, unknown>) => Promise<unknown> }).invoke({ action: "list" });
-      const parsed = typeof result === "string" ? JSON.parse(result) : result;
-      const paths = parsed?.paths ?? [];
-      const candidates = paths
-        .filter((item: Record<string, unknown>) => typeof item.intent === "string")
-        .map((item: Record<string, unknown>) => {
-          const status = item.promotedRule ? "promoted" : "candidate";
-          const recommended = !item.promotedRule && item.maturity === 'ready' && typeof item.successRate === 'number' && item.successRate >= 0.6;
-          const recommendationReason = recommended
-            ? `已复用 ${item.reuseCount} 次，成功率 ${(Number(item.successRate) * 100).toFixed(0)}%`
-            : undefined;
-          const llmSummaryRecord = typeof item.llmSummary === "object" && item.llmSummary ? item.llmSummary as Record<string, unknown> : {};
-          const contextSnapshotRecord = typeof item.contextSnapshot === "object" && item.contextSnapshot ? item.contextSnapshot as Record<string, unknown> : {};
-          const backfilledSkills = Array.isArray(llmSummaryRecord.selectedSkills)
-            ? llmSummaryRecord.selectedSkills
-            : Array.isArray(contextSnapshotRecord.selectedSkills)
-              ? contextSnapshotRecord.selectedSkills
-              : Array.isArray(contextSnapshotRecord.skillsHint)
-                ? contextSnapshotRecord.skillsHint
-                : [];
-          const selectedSkillsSource = typeof llmSummaryRecord.selectedSkillsSource === "string"
-            ? llmSummaryRecord.selectedSkillsSource
-            : typeof contextSnapshotRecord.skillsTraceSource === "string"
-              ? contextSnapshotRecord.skillsTraceSource
-              : undefined;
-          return {
-            trigger: typeof item.input === "string" && item.input.length > 0 ? item.input : item.name,
-            intent: item.intent,
-            actions: Array.isArray(item.actions) ? item.actions : [],
-            responsePreview: item.responsePreview,
-            successRate: item.successRate,
-            reuseCount: item.reuseCount,
-            maturity: item.maturity,
-            recommended,
-            recommendationReason,
-            sourcePathId: item.id,
-            status,
-            contextSnapshot: {
-              ...(typeof item.contextSnapshot === "object" && item.contextSnapshot ? item.contextSnapshot : {}),
-              skillsHint: backfilledSkills,
-            },
-            llmSummary: {
-              ...llmSummaryRecord,
-              selectedSkills: backfilledSkills,
-              selectedSkillsSource,
-            },
-          };
-        });
-      return { status: "Success", data: candidates };
-    } catch (error) {
-      return { status: "Error", message: String(error) };
-    }
-  });
-
-  fastify.post("/api/rule-candidates/promote", async (request, reply) => {
-    const body = request.body as { trigger?: string; intent?: string; actions?: Array<Record<string, unknown>>; sourcePathId?: string };
-    if (!body?.trigger || !body?.intent) {
-      return reply.status(400).send({ status: "Error", message: "Missing trigger or intent" });
-    }
-
-    const responses: Record<string, string> = {
-      open_device: `好的，执行${body.trigger}`,
-      navigate_back: "好的，返回上一页",
-      go_home: "好的，返回主页",
-      play_media: `好的，执行${body.trigger}`,
-    };
-
-    const result = upsertRule(body.trigger, responses[body.intent] || `好的，执行${body.trigger}`, body.actions);
-
-    const successPathsToolEntry = allTools.find((t) => t.name === "success_paths");
-    if (successPathsToolEntry && body.sourcePathId) {
-      await (successPathsToolEntry as { invoke: (i: Record<string, unknown>) => Promise<unknown> }).invoke({
-        action: "update",
-        pathId: body.sourcePathId,
-        promotedRule: true,
-      });
-    }
-
-    return {
       status: "Success",
       data: {
-        promoted: true,
-        inserted: result.inserted,
-        trigger: body.trigger,
-        intent: body.intent,
+        tool: name,
+        input,
+        intent: query.intent || null,
+        stages: preview.stages,
+        refs: preview.refs,
+        globalStages: preview.stages,
+        globalRefs: preview.refs,
       },
     };
   });
 
+  fastify.get("/api/tools/:name/skills/:section", async (request, reply) => {
+    const { name, section } = request.params as { name: string; section: string };
+    const skillsPath = getToolSkillsPath(name, section);
+    if (!skillsPath) return reply.status(404).send({ error: `Skill section not found: ${name}/${section}` });
+    const content = readFileSync(skillsPath, "utf-8");
+    return { name, section, content };
+  });
+
+  fastify.get("/api/tools/:name/skill", async (request, reply) => {
+    const { name } = request.params as { name: string };
+    const skillsPath = getToolSkillsPath(name, "index");
+    if (!skillsPath) return reply.status(404).send({ error: `Skill not found for tool: ${name}` });
+    const content = readFileSync(skillsPath, "utf-8");
+    return { name, section: "index", content };
+  });
+
+  fastify.get("/api/skill-policy-preview", async (request) => {
+    const query = request.query as { input?: string; intent?: string };
+    const input = query.input || "";
+    const preview = buildSkillPolicyPreview(input, query.intent);
+    return {
+      status: "Success",
+      data: preview,
+    };
+  });
+
+  fastify.put("/api/tools/:name/config", async (request, reply) => {
+    const { name } = request.params as { name: string };
+    const body = request.body as { config?: Record<string, unknown>; raw?: string };
+    const toolDir = getToolDir(name);
+    if (!toolDir) return reply.status(404).send({ error: `Tool not found: ${name}` });
+    const configPath = join(toolDir, "config.yaml");
+    if (typeof body?.raw === "string") {
+      writeFileSync(configPath, body.raw, "utf-8");
+    } else if (body?.config && typeof body.config === "object") {
+      writeFileSync(configPath, YAML.stringify(body.config), "utf-8");
+    } else {
+      return reply.status(400).send({ error: "Missing config or raw" });
+    }
+    return { success: true, message: `Config saved for ${name}` };
+  });
+
+  function registerSuccessPathsGet(
+    path: string,
+    input: Record<string, unknown> | ((request: { query: unknown }) => Record<string, unknown>),
+    options?: Parameters<typeof buildSuccessPathsResponse>[1],
+  ) {
+    fastify.get(path, async (request) => {
+      const resolvedInput = typeof input === "function"
+        ? input(request as { query: unknown })
+        : input;
+      return buildSuccessPathsResponse(resolvedInput, options);
+    });
+  }
+
+  function registerSuccessPathsPost(
+    path: string,
+    input: Record<string, unknown> | ((request: { body: unknown }) => Record<string, unknown>),
+    options?: Parameters<typeof buildSuccessPathsResponse>[1],
+  ) {
+    fastify.post(path, async (request) => {
+      const resolvedInput = typeof input === "function"
+        ? input(request as { body: unknown })
+        : input;
+      return buildSuccessPathsResponse(resolvedInput, options);
+    });
+  }
+
+  function registerRuleToggleRoute(path: string, enabled: boolean) {
+    fastify.post(path, async (request, reply) => {
+      const body = request.body as { trigger?: string };
+      if (!body?.trigger) {
+        return reply.status(400).send({ status: "Error", message: "Missing trigger" });
+      }
+      setRuleEnabled(body.trigger, enabled);
+      return { status: "Success", message: `Rule ${body.trigger} ${enabled ? "enabled" : "disabled"}` };
+    });
+  }
+
   fastify.get("/api/rules", async () => {
-    return { status: "Success", data: listRules().map((item) => ({
-      ...item,
-      enabled: item.enabled !== 0,
-      actions: typeof item.actions === "string" ? JSON.parse(item.actions as string) : item.actions,
-    })) };
+    const rules = listRules();
+    return { status: "Success", data: rules };
   });
 
-  fastify.post("/api/rules/disable", async (request, reply) => {
-    const body = request.body as { trigger?: string };
-    if (!body?.trigger) {
-      return reply.status(400).send({ status: "Error", message: "Missing trigger" });
-    }
-    setRuleEnabled(body.trigger, false);
-    return { status: "Success", data: { trigger: body.trigger, enabled: false } };
+  registerSuccessPathsGet("/api/success-paths", { action: "list" }, { data: parsed => parsed?.paths ?? [] });
+
+  registerSuccessPathsGet("/api/experience-paths", { action: "list" }, { data: parsed => parsed?.paths ?? [] });
+
+  registerSuccessPathsPost("/api/success-paths/repair-skills", { action: "repair_skills" });
+
+  registerSuccessPathsPost("/api/experience-paths/repair-skills", { action: "repair_skills" });
+
+  registerSuccessPathsPost("/api/success-paths/normalize-data", { action: "normalize_data" });
+
+  registerSuccessPathsPost("/api/experience-paths/normalize-data", { action: "normalize_data" });
+
+  fastify.get("/api/rule-candidates", async () => {
+    return buildSuccessPathsResponse(
+      { action: "list" },
+      { data: parsed => buildRuleCandidatesFromPaths(parsed?.paths ?? []) },
+    );
   });
 
-  fastify.post("/api/rules/enable", async (request, reply) => {
-    const body = request.body as { trigger?: string };
-    if (!body?.trigger) {
-      return reply.status(400).send({ status: "Error", message: "Missing trigger" });
+  fastify.post("/api/rule-candidates/promote", async (request, reply) => {
+    const body = request.body as { trigger?: string; intent?: string; actions?: Array<Record<string, unknown>>; sourcePathId?: string };
+    if (!body?.trigger || !body?.intent || !Array.isArray(body.actions)) {
+      return reply.status(400).send({ status: "Error", message: "Missing trigger, intent, or actions" });
     }
-    setRuleEnabled(body.trigger, true);
-    return { status: "Success", data: { trigger: body.trigger, enabled: true } };
+
+    upsertRule(body.trigger, body.intent, body.actions as unknown as RuleAction[]);
+    await updateSuccessPathPromotion(body.sourcePathId, true);
+
+    return { status: "Success", message: `Rule promoted for ${body.trigger}` };
   });
+
+  registerSuccessPathsGet("/api/success-paths/clusters", { action: "clusters" });
+
+  registerSuccessPathsGet("/api/experience-paths/clusters", { action: "clusters" });
+
+  registerSuccessPathsGet("/api/success-paths/merge-strong-clusters/preview", { action: "preview_merge_strong_clusters" });
+
+  registerSuccessPathsGet("/api/experience-paths/merge-strong-clusters/preview", { action: "preview_merge_strong_clusters" });
+
+  registerSuccessPathsGet("/api/success-paths/merge-weak-clusters/preview", { action: "preview_merge_weak_clusters" });
+
+  registerSuccessPathsGet("/api/experience-paths/merge-weak-clusters/preview", { action: "preview_merge_weak_clusters" });
+
+  registerSuccessPathsPost("/api/success-paths/merge-cluster", (request) => {
+    const body = request.body as { primaryId?: string; mergeIds?: string[] };
+    return { action: "merge_cluster", pathId: body.primaryId, actions: body.mergeIds };
+  });
+
+  registerSuccessPathsPost("/api/experience-paths/merge-cluster", (request) => {
+    const body = request.body as { primaryId?: string; mergeIds?: string[] };
+    return { action: "merge_cluster", pathId: body.primaryId, actions: body.mergeIds };
+  });
+
+  registerSuccessPathsPost("/api/success-paths/merge-strong-clusters", { action: "merge_strong_clusters" });
+
+  registerSuccessPathsPost("/api/experience-paths/merge-strong-clusters", { action: "merge_strong_clusters" });
+
+  registerSuccessPathsPost("/api/success-paths/merge-weak-clusters", { action: "merge_weak_clusters" });
+
+  registerSuccessPathsPost("/api/experience-paths/merge-weak-clusters", { action: "merge_weak_clusters" });
+
+  registerSuccessPathsGet(
+    "/api/success-paths/merge-audit",
+    (request) => {
+      const query = request.query as { mode?: string };
+      return { action: "merge_audit", intent: query.mode };
+    },
+    { data: parsed => ({ current: parsed?.current ?? null, history: parsed?.history ?? [] }) },
+  );
+
+  registerSuccessPathsGet(
+    "/api/experience-paths/merge-audit",
+    (request) => {
+      const query = request.query as { mode?: string };
+      return { action: "merge_audit", intent: query.mode };
+    },
+    { data: parsed => ({ current: parsed?.current ?? null, history: parsed?.history ?? [] }) },
+  );
+
+  registerSuccessPathsPost("/api/success-paths/merge-audit/clear", (request) => {
+    const body = request.body as { trigger?: string };
+    return { action: "clear_merge_audit", trigger: body.trigger };
+  });
+
+  registerSuccessPathsPost("/api/experience-paths/merge-audit/clear", (request) => {
+    const body = request.body as { trigger?: string };
+    return { action: "clear_merge_audit", trigger: body.trigger };
+  });
+
+  registerSuccessPathsGet("/api/success-paths/preview-merge-strong", { action: "preview_merge_strong_clusters" });
+
+  registerSuccessPathsGet("/api/success-paths/preview-merge-weak", { action: "preview_merge_weak_clusters" });
+
+  registerSuccessPathsPost("/api/success-paths/merge-strong", { action: "merge_strong_clusters" });
+
+  registerSuccessPathsPost("/api/success-paths/merge-weak", { action: "merge_weak_clusters" });
+
+  fastify.get("/api/devices", async () => {
+    return {
+      status: "Success",
+      data: [
+        { id: "tv_letv", name: "乐视电视", type: "tv", online: true },
+        { id: "stb", name: "机顶盒", type: "stb", online: true },
+        { id: "xiaoai_speaker", name: "小爱音箱", type: "speaker", online: true },
+      ],
+    };
+  });
+
+  fastify.post("/api/rules", async (request, reply) => {
+    const body = request.body as { trigger?: string; intent?: string; actions?: Array<Record<string, unknown>>; sourcePathId?: string };
+    if (!body?.trigger || !body?.intent || !Array.isArray(body.actions)) {
+      return reply.status(400).send({ status: "Error", message: "Missing trigger, intent, or actions" });
+    }
+    upsertRule(
+      body.trigger,
+      body.intent,
+      body.actions as unknown as RuleAction[],
+    );
+    return { status: "Success", message: `Rule upserted for ${body.trigger}` };
+  });
+
+  registerRuleToggleRoute("/api/rules/disable", false);
+
+  registerRuleToggleRoute("/api/rules/enable", true);
 
   fastify.post("/api/rules/rollback", async (request, reply) => {
     const body = request.body as { trigger?: string; sourcePathId?: string };
     if (!body?.trigger) {
       return reply.status(400).send({ status: "Error", message: "Missing trigger" });
     }
+
     deleteRule(body.trigger);
-    const successPathsToolEntry = allTools.find((t) => t.name === "success_paths");
-    if (successPathsToolEntry && body.sourcePathId) {
-      await (successPathsToolEntry as { invoke: (i: Record<string, unknown>) => Promise<unknown> }).invoke({
-        action: "update",
-        pathId: body.sourcePathId,
-        promotedRule: false,
-      });
-    }
-    return { status: "Success", data: { trigger: body.trigger, rolledBack: true } };
+    await updateSuccessPathPromotion(body.sourcePathId, false);
+
+    return { status: "Success", message: `Rule ${body.trigger} rolled back` };
   });
 
-  fastify.get("/api/devices", async () => {
-    const results: Array<{ tool: string; devices: unknown[]; error?: string }> = [];
-    const deviceTools = ["adb"];
-    for (const toolName of deviceTools) {
-      const tool = allTools.find((t) => t.name === toolName);
-      if (!tool) continue;
-      try {
-        const result = await (tool as { invoke: (i: Record<string, unknown>) => Promise<unknown> }).invoke({
-          action: "list_devices",
-        });
-        const parsed = typeof result === "string" ? JSON.parse(result) : result;
-        results.push({ tool: toolName, devices: Array.isArray(parsed) ? parsed : (parsed?.devices ?? []) });
-      } catch (error) {
-        results.push({ tool: toolName, devices: [], error: String(error) });
-      }
+  fastify.put("/api/rules/:trigger/enabled", async (request, reply) => {
+    const { trigger } = request.params as { trigger: string };
+    const body = request.body as { enabled?: boolean };
+    if (typeof body?.enabled !== "boolean") {
+      return reply.status(400).send({ status: "Error", message: "Missing enabled boolean" });
     }
-    const allDevices = results.flatMap((r) =>
-      (r.devices as Record<string, unknown>[]).map((d) => ({
-        ...d,
-        _source: r.tool,
-      })),
-    );
-    return { devices: allDevices, sources: results };
+    setRuleEnabled(trigger, body.enabled);
+    return { status: "Success", message: `Rule ${trigger} updated` };
   });
 
-  try {
-    await fastify.listen({ port: PORT, host: "0.0.0.0" });
-    console.log(`Server running at http://localhost:${PORT}`);
-    console.log("Available tools:", allTools.map((t) => t.name).join(", "));
-  } catch (err) {
-    fastify.log.error(err);
-    process.exit(1);
-  }
+  fastify.delete("/api/rules/:trigger", async (request) => {
+    const { trigger } = request.params as { trigger: string };
+    deleteRule(trigger);
+    return { status: "Success", message: `Rule ${trigger} deleted` };
+  });
+
+  fastify.listen({ port: PORT, host: "0.0.0.0" }, (err, address) => {
+    if (err) {
+      fastify.log.error(err);
+      process.exit(1);
+    }
+    console.log(`Server running at ${address}`);
+    console.log(`Available tools: ${allTools.map((t) => t.name).join(", ")}`);
+  });
 }
 
 main();
