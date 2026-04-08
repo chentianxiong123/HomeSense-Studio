@@ -387,6 +387,10 @@ async function callConfiguredModel(text: string, context: Record<string, any>, c
   const apiKey = config.api_key || process.env[config.api_key_env];
   if (!apiKey) return null;
 
+  if (config.provider === "anthropic") {
+    return callAnthropicModel(text, context, config, apiKey);
+  }
+
   const model = new ChatOpenAI({
     model: config.model,
     apiKey,
@@ -420,6 +424,70 @@ async function callConfiguredModel(text: string, context: Record<string, any>, c
   };
 }
 
+async function callAnthropicModel(text: string, context: Record<string, any>, config: LlmAgentConfig, apiKey: string) {
+  const url = `${config.base_url}/v1/messages`;
+  const systemPrompt = buildDeepSystemPrompt();
+  const userPrompt = buildDeepUserPrompt(text, context);
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: config.model,
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages: [
+        { role: "user", content: userPrompt }
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Anthropic API error: ${response.status} ${errorText}`);
+  }
+
+  const result = await response.json() as { content?: Array<{ type: string; text?: string }> };
+  const content = result.content?.[0]?.text || "";
+
+  const parsed = JSON.parse(extractJsonBlock(content));
+  const normalized = sanitizeStructuredOutput(applyFallbackActionPromotion(text, parsed, context));
+  return {
+    ...normalized,
+    provider: config.provider,
+    model: config.model,
+    needs_model_config: false,
+    selected_skill_refs: Array.isArray(context.selectedSkillRefs) ? context.selectedSkillRefs : [],
+    context_summary: normalized.context_summary || buildContextSummary(context),
+    skill_insights: Array.isArray(normalized.skill_insights) ? normalized.skill_insights : buildSkillInsights(context),
+  };
+}
+
+
+
+function simpleChatReply(text: string): string {
+  const lower = text.toLowerCase().trim();
+  if (lower.includes("你好") || lower.includes("您好") || lower === "hi" || lower === "hello") return "你好！有什么可以帮你的吗？";
+  if (lower.includes("在吗") || lower.includes("在不在")) return "在的！想说点什么？";
+  if (lower.includes("谢谢") || lower.includes("感谢")) return "不客气！";
+  if (lower.includes("拜拜") || lower.includes("再见") || lower.includes("走了")) return "拜拜，有事叫我！";
+  if (lower.includes("好的") || lower.includes("行") || lower.includes("可以")) return "好的！";
+  if (lower.includes("知道") || lower.includes("明白") || lower.includes("懂了")) return "嗯嗯！";
+  if (lower.includes("天气")) return "今天天气不错呢！";
+  if (lower.includes("新闻")) return "新闻我不太了解呢，说说别的吧。";
+  if (lower.includes("哈哈") || lower.includes("呵呵")) return "😄";
+  if (lower.includes("好玩") || lower.includes("有趣")) return "是挺好玩的~";
+  return "嗯，说说看？";
+}
+
+async function callChatModel(text: string, config: LlmAgentConfig): Promise<string> {
+  return simpleChatReply(text);
+}
+
 async function buildStructured(text: string, context: Record<string, any>, config: LlmAgentConfig) {
   const configured = await callConfiguredModel(text, context, config).catch(() => null);
   if (configured) return configured;
@@ -443,3 +511,5 @@ export const llmAgentTool = tool(
     }),
   },
 );
+
+export { callChatModel, loadConfig as loadLlmAgentConfig };

@@ -49,6 +49,8 @@ interface SuccessPath {
 interface SuccessPathsConfig {
   dbPath: string;
   minSuccessRate: number;
+  useVectorService?: boolean;
+  vectorServiceUrl?: string;
 }
 
 interface MergeAuditRecord {
@@ -145,6 +147,8 @@ function loadConfig(): SuccessPathsConfig {
     return {
       dbPath: "./data/paths.json",
       minSuccessRate: 0.8,
+      useVectorService: true,
+      vectorServiceUrl: "http://localhost:8001",
     };
   }
 }
@@ -216,6 +220,9 @@ function searchThreshold(path: SuccessPath, hasIntentMatch: boolean, isFailurePa
 }
 
 function canReusePath(path: SuccessPath, score: number, hasIntentMatch: boolean, isFailurePath: boolean, minSuccessRate: number): boolean {
+  if (path.successCount <= 0) return false;
+  if (path.failCount > 0) return false;
+  if (path.failureReason) return false;
   if (score < searchThreshold(path, hasIntentMatch, isFailurePath)) return false;
   if (isFailurePath) return hasIntentMatch || score >= 0.5;
   if (hasIntentMatch) return path.successCount > 0;
@@ -246,6 +253,90 @@ function rankSearchMatch(path: SuccessPath, userInput: string, intent?: string) 
 function searchSuccessPaths(paths: SuccessPath[], userInput: string, intent: string | undefined, minSuccessRate: number) {
   return paths
     .map((path) => rankSearchMatch(path, userInput, intent))
+    .filter((match) => canReusePath(match.path, match.score, match.hasIntentMatch, match.isFailurePath, minSuccessRate))
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (b.successRate !== a.successRate) return b.successRate - a.successRate;
+      return b.path.lastUsed - a.path.lastUsed;
+    })
+    .slice(0, 5);
+}
+
+async function scoreCandidatesByVectorService(
+  query: string,
+  candidates: string[],
+  vectorServiceUrl: string,
+  topK = 5,
+): Promise<Array<{ index: number; score: number }>> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const response = await fetch(`${vectorServiceUrl}/similarity`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, candidates, top_k: topK }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) return [];
+    const parsed = await response.json() as { matches?: Array<{ index: number; score: number }> };
+    return Array.isArray(parsed.matches) ? parsed.matches : [];
+  } catch {
+    return [];
+  }
+}
+
+function buildPathSemanticText(path: SuccessPath) {
+  return [
+    path.intent || "",
+    path.input || "",
+    path.name || "",
+    path.description || "",
+  ].filter(Boolean).join(" | ");
+}
+
+async function searchSuccessPathsWithVectorService(
+  paths: SuccessPath[],
+  userInput: string,
+  intent: string | undefined,
+  minSuccessRate: number,
+  vectorServiceUrl: string,
+) {
+  const ranked = paths.map((path) => rankSearchMatch(path, userInput, intent));
+  const candidates = ranked
+    .filter((match) => match.path.successCount > 0 && match.path.failCount === 0 && !match.path.failureReason)
+    .filter((match) => !intent || !match.path.intent || match.path.intent === intent)
+    .map((match) => ({
+      ...match,
+      semanticText: buildPathSemanticText(match.path),
+    }));
+
+  if (candidates.length === 0) return [];
+
+  const vectorMatches = await scoreCandidatesByVectorService(
+    userInput,
+    candidates.map((item) => item.semanticText),
+    vectorServiceUrl,
+    8,
+  );
+
+  if (vectorMatches.length === 0) {
+    return searchSuccessPaths(paths, userInput, intent, minSuccessRate);
+  }
+
+  return vectorMatches
+    .map((item) => {
+      const candidate = candidates[item.index];
+      if (!candidate) return null;
+      const finalScore = Math.max(item.score, candidate.score);
+      return {
+        ...candidate,
+        score: finalScore,
+        inputScore: item.score,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
     .filter((match) => canReusePath(match.path, match.score, match.hasIntentMatch, match.isFailurePath, minSuccessRate))
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
@@ -628,7 +719,9 @@ export const successPathsTool = tool(
 
         const paths = loadPaths();
         const config = loadConfig();
-        const matches = searchSuccessPaths(paths, userInput, intent, config.minSuccessRate);
+        const matches = config.useVectorService && config.vectorServiceUrl
+          ? await searchSuccessPathsWithVectorService(paths, userInput, intent, config.minSuccessRate, config.vectorServiceUrl)
+          : searchSuccessPaths(paths, userInput, intent, config.minSuccessRate);
 
         return JSON.stringify({
           success: true,
@@ -822,7 +915,9 @@ export const successPathsTool = tool(
         const paths = loadPaths();
         return JSON.stringify({
           success: true,
-          paths: paths.map((p) => {
+          paths: paths
+            .filter((p) => p.successCount > 0 && p.failCount === 0 && !p.failureReason)
+            .map((p) => {
             const reuseCount = p.successCount + p.failCount;
             const successRate = p.successCount / (reuseCount || 1);
             const maturity = p.promotedRule

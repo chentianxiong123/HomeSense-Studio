@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Ref } from 'vue'
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { NButton, NInput } from 'naive-ui'
 import { Message } from './components'
@@ -8,6 +8,7 @@ import { useScroll } from './hooks/useScroll'
 import HeaderComponent from './components/Header/index.vue'
 import { HoverButton, SvgIcon } from '@/components/common'
 import { useBasicLayout } from '@/hooks/useBasicLayout'
+import { useRuntimePanelStore } from '@/store'
 import { acceptWorkflowUpgrade, fetchChatAPI, fetchMessages, fetchRegistryPreview, fetchWorkflowCandidates, fetchWorkflowExamples, saveWorkflowDraft, upgradeWorkflowDraft } from '@/api'
 import { t } from '@/locales'
 import { setCachedMessages, clearCachedMessages } from '@/utils/cache'
@@ -16,6 +17,7 @@ useRoute()
 
 const { isMobile } = useBasicLayout()
 const { scrollRef, scrollToBottom, scrollToBottomIfAtBottom } = useScroll()
+const runtimePanelStore = useRuntimePanelStore()
 
 
 interface StageTraceEntry {
@@ -69,6 +71,23 @@ interface SelectedSkillMetadataItem {
 }
 
 interface ResolutionMeta {
+  resolutionSource?: string | null
+  outcomeType?: string | null
+  matched?: boolean | null
+  matchedTrigger?: string | null
+  matchedPathName?: string | null
+  matchedPathCandidates?: Array<{
+    id?: string | null
+    name?: string | null
+    score?: number | null
+    successRate?: number | null
+    isFailurePath?: boolean | null
+  }>
+  deepMatchedPathName?: string | null
+  deepTopCandidateNames?: string[]
+  deepCandidateCount?: number | null
+  gatingReason?: string | null
+  writeBackRecordType?: string | null
   commandSummary?: CommandSummaryItem[]
   selectedSkillMetadata?: SelectedSkillMetadataItem[]
   workflowDraft?: WorkflowDraft | null
@@ -126,6 +145,7 @@ interface RegistryDebugPayload {
 
 interface ChatMessage {
   workflowDraft?: WorkflowDraft
+  resolutionMeta?: ResolutionMeta
   id: number
   role: string
   content: string
@@ -142,11 +162,19 @@ interface ChatMessage {
   registryDebug?: RegistryDebugPayload
 }
 
+interface MessagePageInfo {
+  oldestCursorId: number | null
+  newestCursorId: number | null
+  hasOlder: boolean
+  hasNewer: boolean
+}
+
 const messages = ref<ChatMessage[]>([])
 const prompt = ref<string>('')
 const loading = ref<boolean>(false)
 const loadingMore = ref<boolean>(false)
-const hasMore = ref<boolean>(true)
+const hasMoreOlder = ref<boolean>(true)
+const oldestCursorId = ref<number | null>(null)
 const inputRef = ref<Ref | null>(null)
 
 const PAGE_SIZE = 20
@@ -162,6 +190,7 @@ const workflowSaveResult = ref<any | null>(null)
 const upgradingWorkflowDraft = ref(false)
 const savingWorkflowDraft = ref(false)
 const acceptingWorkflowUpgrade = ref(false)
+let loadRequestSequence = 0
 
 const latestWorkflowDraft = computed(() => {
   const drafts = messages.value
@@ -724,44 +753,120 @@ function formatMessage(msg: any): ChatMessage {
     llm: msg.llm,
     skillsHint: msg.skillsHint || [],
     registryDebug: msg.registryDebug,
+    resolutionMeta: msg.resolutionMeta || msg.registryDebug?.resolutionMeta,
     workflowDraft: msg.workflowDraft || msg.resolutionMeta?.workflowDraft,
   }
 }
 
-async function loadFromBackend(offset = 0, append = false) {
-  if (append) {
+function syncRuntimePanelFromMessages() {
+  const latestAssistant = [...messages.value].reverse().find(item => !item.inversion)
+  if (!latestAssistant) {
+    runtimePanelStore.clearRuntime()
+    return
+  }
+
+  runtimePanelStore.setLatestRuntime({
+    latestText: latestAssistant.text,
+    latestAt: latestAssistant.dateTime,
+    trace: (latestAssistant.trace || []).map(item => ({
+      stage: item.stage,
+      ok: item.ok,
+      next: item.next,
+    })),
+    resolutionMeta: latestAssistant.resolutionMeta || latestAssistant.registryDebug?.resolutionMeta || null,
+  })
+}
+
+function mergeMessagesById(existing: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
+  const merged = new Map<number, ChatMessage>()
+
+  for (const item of existing)
+    merged.set(item.id, item)
+
+  for (const item of incoming)
+    merged.set(item.id, item)
+
+  return [...merged.values()].sort((left, right) => left.id - right.id)
+}
+
+function syncPaginationState(pageInfo?: Partial<MessagePageInfo> | null) {
+  if (pageInfo?.oldestCursorId != null) {
+    oldestCursorId.value = pageInfo.oldestCursorId
+    return
+  }
+
+  oldestCursorId.value = messages.value[0]?.id ?? null
+}
+
+async function ensureScrollableHistory() {
+  let attempts = 0
+
+  while (hasMoreOlder.value && attempts < 10) {
+    await nextTick()
+    const container = scrollRef.value
+
+    if (!container)
+      return
+
+    if (container.scrollHeight > container.clientHeight + 8)
+      return
+
+    await loadFromBackend('older')
+    attempts += 1
+  }
+}
+
+async function loadFromBackend(direction: 'latest' | 'older' = 'latest') {
+  const isOlderLoad = direction === 'older'
+
+  if (isOlderLoad) {
+    if (loadingMore.value || !hasMoreOlder.value || oldestCursorId.value == null)
+      return
     loadingMore.value = true
   }
 
+  const requestId = ++loadRequestSequence
+
   try {
-    const res = await fetchMessages<{ messages: any[], total: number }>(PAGE_SIZE, offset)
+    const res = await fetchMessages<{ messages: any[], pageInfo?: MessagePageInfo }>({
+      limit: PAGE_SIZE,
+      direction,
+      cursorId: isOlderLoad ? oldestCursorId.value ?? undefined : undefined,
+    })
     const backendMessages = res.data?.messages || []
+    const pageInfo = res.data?.pageInfo
+    const formatted = backendMessages.map(formatMessage)
 
-    if (!append) {
-      const formatted = backendMessages.map(formatMessage)
-      messages.value = formatted
-      setCachedMessages(formatted)
-      hasMore.value = backendMessages.length === PAGE_SIZE
+    if (!isOlderLoad) {
+      if (requestId !== loadRequestSequence)
+        return
+
+      messages.value = mergeMessagesById([], formatted)
+      setCachedMessages(messages.value)
+      hasMoreOlder.value = pageInfo?.hasOlder ?? backendMessages.length === PAGE_SIZE
+      syncPaginationState(pageInfo)
+      syncRuntimePanelFromMessages()
       scrollToBottom()
-    } else {
-      if (backendMessages.length > 0) {
-        const container = scrollRef.value
-        const prevScrollHeight = container?.scrollHeight || 0
+    } else if (backendMessages.length > 0) {
+      const container = scrollRef.value
+      const prevScrollHeight = container?.scrollHeight || 0
 
-        const formatted = backendMessages.map(formatMessage)
-        messages.value = [...messages.value, ...formatted]
-        hasMore.value = backendMessages.length === PAGE_SIZE
+      messages.value = mergeMessagesById(formatted, messages.value)
+      setCachedMessages(messages.value)
+      hasMoreOlder.value = pageInfo?.hasOlder ?? backendMessages.length === PAGE_SIZE
+      syncPaginationState(pageInfo)
+      syncRuntimePanelFromMessages()
 
-        await new Promise(r => setTimeout(r, 50))
-        if (container) {
-          container.scrollTop = container.scrollHeight - prevScrollHeight
-        }
+      await nextTick()
+      if (container) {
+        container.scrollTop = container.scrollHeight - prevScrollHeight
       }
+    } else {
+      hasMoreOlder.value = pageInfo?.hasOlder ?? false
     }
 
-    if (backendMessages.length < PAGE_SIZE) {
-      hasMore.value = false
-    }
+    if (!backendMessages.length && !isOlderLoad)
+      hasMoreOlder.value = pageInfo?.hasOlder ?? false
   } catch (error) {
     console.error('Failed to load from backend:', error)
   } finally {
@@ -772,7 +877,9 @@ async function loadFromBackend(offset = 0, append = false) {
 async function initMessages() {
   // TODO: 暂时禁用缓存，直接从后端加载
   // loadFromCache()
-  await loadFromBackend(0, false)
+  await loadFromBackend('latest')
+  await ensureScrollableHistory()
+  await scrollToBottom()
   try {
     const [registryRes, workflowRes, candidateRes] = await Promise.all([
       fetchRegistryPreview<any>(),
@@ -798,9 +905,9 @@ async function initMessages() {
 
 async function handleScroll() {
   const container = scrollRef.value
-  if (!container || loadingMore.value || !hasMore.value) return
+  if (!container || loadingMore.value || !hasMoreOlder.value) return
   if (container.scrollTop < 50) {
-    await loadFromBackend(messages.value.length, true)
+    await loadFromBackend('older')
   }
 }
 
@@ -851,6 +958,7 @@ async function sendMessage() {
 
     messages.value[messages.value.length - 1] = {
       ...thinkingMsg,
+      id: typeof res.data?.messageId === 'number' ? res.data.messageId : thinkingMsg.id,
       text: res.data?.reply || '好的',
       content: res.data?.reply || '好的',
       error: false,
@@ -859,9 +967,11 @@ async function sendMessage() {
       writeBackResults: res.data?.writeBackResults || [],
       llm: res.data?.llm,
       skillsHint: res.data?.skillsHint || [],
-      registryDebug: res.data?.registryDebug,
+      registryDebug: res.data?.registryDebug || (res.data?.resolutionMeta ? { resolutionMeta: res.data.resolutionMeta } : undefined),
+      resolutionMeta: res.data?.resolutionMeta,
       workflowDraft: res.data?.workflowDraft || res.data?.resolutionMeta?.workflowDraft,
     }
+    syncRuntimePanelFromMessages()
     handleIncomingWorkflowDraft(previousDraftId)
     scrollToBottom()
   } catch (error: any) {
@@ -882,6 +992,9 @@ async function sendMessage() {
 function handleClear() {
   if (loading.value) return
   messages.value = []
+  hasMoreOlder.value = false
+  oldestCursorId.value = null
+  runtimePanelStore.clearRuntime()
   clearCachedMessages()
 }
 
@@ -936,7 +1049,8 @@ onMounted(() => {
       @handle-clear="handleClear"
     />
     <main class="flex-1 overflow-hidden">
-      <div class="w-full max-w-screen-xl m-auto px-4 pt-2">
+      <!-- Demo Mode: Capability & Workflow Preview 面板已隐藏 -->
+      <div v-if="false" class="w-full max-w-screen-xl m-auto px-4 pt-2">
         <div class="rounded-md border border-[#e5e7eb] bg-white/70 p-2 text-xs text-[#4b5563] dark:border-[#2a2a2d] dark:bg-[#151518] dark:text-[#c7c9d1]">
           <button class="flex w-full items-center justify-between" @click="showPreviewPanel = !showPreviewPanel">
             <span>Capability & Workflow Preview</span>
@@ -1016,16 +1130,16 @@ onMounted(() => {
                 <div :class="selectedWorkflowDescriptionClass">{{ selectedWorkflow.description || selectedWorkflow.goal || 'No description' }}</div>
                 <div class="mt-1 text-[#9ca3af]">workflowId: {{ selectedWorkflow.workflowId }}</div>
                 <div v-if="workflowComparisonSummary" class="mt-1 rounded bg-[#ffffff] px-2 py-1 text-[#4b5563] dark:bg-[#111214] dark:text-[#c7c9d1]">
-                  <div>matched example: {{ workflowComparisonSummary.name }}</div>
+                  <div>matched example: {{ workflowComparisonSummary?.name }}</div>
                   <div class="mt-1 flex flex-wrap gap-1">
                     <span
-                      v-for="capability in workflowComparisonSummary.sharedCapabilities"
+                      v-for="capability in (workflowComparisonSummary?.sharedCapabilities || [])"
                       :key="`shared-${capability}`"
                       :class="workflowCapabilityButtonClass(capability)"
                     >
                       {{ capability }}
                     </span>
-                    <span v-if="!workflowComparisonSummary.sharedCapabilities.length" class="text-[#9ca3af]">none</span>
+                    <span v-if="!(workflowComparisonSummary?.sharedCapabilities?.length)" class="text-[#9ca3af]">none</span>
                   </div>
                 </div>
                 <div v-if="selectedWorkflowIsDraft" class="mt-2">
