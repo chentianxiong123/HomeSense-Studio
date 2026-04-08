@@ -1,34 +1,30 @@
 import { StateGraph, START, END } from "@langchain/langgraph";
-import { readFileSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { buildRegistryPreviewV0, buildRuntimeRegistryPreview, enforceToolActionsByPolicy, readSkillSection, selectSkillSectionsByCapability, summarizeCapabilityCommands } from "./tools/skillsRegistry.js";
 import {
   AgentState,
   createFallbackReply,
   createIntent,
   createStageResult,
   toTraceEntry,
+  type ToolAction,
 } from "./state.js";
-import { executeToolAction, isValidToolAction, llmAgentTool, localIntentTool, ruleEngineTool, successPathsTool } from "./tools/index.js";
+import { executeToolAction, isValidToolAction, llmAgentTool, localIntentTool, ruleEngineTool, successPathsTool, toolActionToCapabilityCommand } from "./tools/index.js";
 import { getRecentUserMessages } from "./tools/memory/chatDb.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TOOLS_DIR = join(__dirname, "tools");
 
-interface SelectedSkillSection {
-  tool: string;
-  section: string;
-  content: string;
-}
+type SelectedSkillSection = NonNullable<ReturnType<typeof readSkillSection>>;
 
-function readSkillSection(toolName: string, section: string): SelectedSkillSection | null {
-  const skillsPath = join(TOOLS_DIR, toolName, "skills", `${section}.md`);
-  if (!existsSync(skillsPath)) return null;
-  return {
-    tool: toolName,
-    section,
-    content: readFileSync(skillsPath, "utf-8"),
-  };
+function addPolicySection(policy: Array<{ tool: string; sections: string[] }>, tool: string, section: string) {
+  const existing = policy.find((item) => item.tool === tool);
+  if (existing) {
+    if (!existing.sections.includes(section)) existing.sections.push(section);
+  } else {
+    policy.push({ tool, sections: [section] });
+  }
 }
 
 export function getSkillPolicy(state: typeof AgentState.State): Array<{ tool: string; sections: string[] }> {
@@ -37,15 +33,18 @@ export function getSkillPolicy(state: typeof AgentState.State): Array<{ tool: st
   ];
 
   if (state.intent?.intent) {
-    policy.push({ tool: "local_intent", sections: ["index", "context"] });
+    addPolicySection(policy, "local_intent", "index");
+    addPolicySection(policy, "local_intent", "context");
   }
 
   if (Array.isArray(state.stageTrace) && state.stageTrace.some((item) => item.stage === "rule_engine")) {
-    policy.push({ tool: "rule_engine", sections: ["index", "matching"] });
+    addPolicySection(policy, "rule_engine", "index");
+    addPolicySection(policy, "rule_engine", "matching");
   }
 
   if (Array.isArray(state.stageTrace) && state.stageTrace.some((item) => item.stage === "success_paths")) {
-    policy.push({ tool: "success_paths", sections: ["index", "retrieval"] });
+    addPolicySection(policy, "success_paths", "index");
+    addPolicySection(policy, "success_paths", "retrieval");
   }
 
   const historicalSkillRefs = Array.isArray(state.context?.historicalSkillRefs)
@@ -54,29 +53,29 @@ export function getSkillPolicy(state: typeof AgentState.State): Array<{ tool: st
   for (const ref of historicalSkillRefs) {
     const [tool, section] = String(ref).split("/");
     if (!tool || !section) continue;
-    const existing = policy.find((item) => item.tool === tool);
-    if (existing) {
-      if (!existing.sections.includes(section)) existing.sections.push(section);
-    } else {
-      policy.push({ tool, sections: [section] });
-    }
+    addPolicySection(policy, tool, section);
   }
 
   const input = state.input || "";
-  const needsAdbSkills = /(点击|坐标|界面|页面|按钮|截图|UI|ui|图标|电视|机顶盒)/.test(input)
-    || ((state.intent?.intent ?? "") === "navigate_back")
-    || ((state.intent?.intent ?? "") === "go_home");
+  const requestedAdbCapabilities: string[] = [];
+  if (/(点击|坐标|页面|按钮|文本)/.test(input)) requestedAdbCapabilities.push("device.tv.ui.find_text", "device.tv.ui.click_element");
+  if (/(截图|图标|识图|ocr|视觉|界面|UI|ui)/.test(input)) requestedAdbCapabilities.push("device.tv.ui.inspect.tree", "device.tv.ui.inspect.screenshot");
+  if ((state.intent?.intent ?? "") === "navigate_back") requestedAdbCapabilities.push("device.tv.navigate.back");
+  if ((state.intent?.intent ?? "") === "go_home") requestedAdbCapabilities.push("device.tv.navigate.home");
+  if (requestedAdbCapabilities.length > 0) {
+    addPolicySection(policy, "adb", "index");
+    for (const section of selectSkillSectionsByCapability(TOOLS_DIR, "adb", requestedAdbCapabilities, true)) {
+      addPolicySection(policy, "adb", section);
+    }
+  }
 
-  if (needsAdbSkills) {
-    const adbSections = ["index", "targeting"];
-    if (/(截图|图标|识图|ocr|视觉|界面)/.test(input)) adbSections.push("perception");
-    const existing = policy.find((item) => item.tool === "adb");
-    if (existing) {
-      for (const section of adbSections) {
-        if (!existing.sections.includes(section)) existing.sections.push(section);
-      }
-    } else {
-      policy.push({ tool: "adb", sections: adbSections });
+  const requestedHamiCapabilities: string[] = [];
+  if ((state.intent?.intent ?? "") === "open_device" || /(打开|开启|播放|小爱|音箱)/.test(input)) requestedHamiCapabilities.push("home.voice.execute", "home.voice.speak");
+  if (/(遥控|音量|静音|确认|方向键)/.test(input)) requestedHamiCapabilities.push("device.tv.remote.send");
+  if (requestedHamiCapabilities.length > 0) {
+    addPolicySection(policy, "hami", "index");
+    for (const section of selectSkillSectionsByCapability(TOOLS_DIR, "hami", requestedHamiCapabilities, true)) {
+      addPolicySection(policy, "hami", section);
     }
   }
 
@@ -102,20 +101,20 @@ export function flattenSkillPolicy(policy: Array<{ tool: string; sections: strin
 
 export function buildSkillPolicyPreview(input: string, intent?: string) {
   const policy = estimateSkillPolicy(input, intent);
+  const refs = flattenSkillPolicy(policy);
+  const runtimePreview = buildRuntimeRegistryPreview(TOOLS_DIR, refs, input, intent);
   return {
-    input,
-    intent: intent ?? null,
+    ...runtimePreview,
     stages: policy.map((item) => ({
       stage: item.tool,
       refs: item.sections.map((section) => `${item.tool}/${section}`),
     })),
-    refs: flattenSkillPolicy(policy),
   };
 }
 
 function collectSelectedSkills(state: typeof AgentState.State): SelectedSkillSection[] {
   const selected = getSkillPolicy(state)
-    .flatMap(({ tool, sections }) => sections.map((section) => readSkillSection(tool, section)))
+    .flatMap(({ tool, sections }) => sections.map((section) => readSkillSection(TOOLS_DIR, tool, section)))
     .filter((item): item is SelectedSkillSection => Boolean(item));
 
   const seen = new Set<string>();
@@ -136,7 +135,15 @@ function extractSkillPayload(skills: SelectedSkillSection[]) {
     tool: item.tool,
     section: item.section,
     content: item.content,
+    metadata: item.metadata,
   }));
+}
+
+function actionsToCommands(actions: ToolAction[] | undefined, prefix: string) {
+  if (!Array.isArray(actions)) return [];
+  return actions
+    .map((action, index) => toolActionToCapabilityCommand(`${prefix}_${index + 1}`, action))
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
 }
 
 function extractDeviceWeights(input: string) {
@@ -275,8 +282,13 @@ async function ruleEngineNode(state: typeof AgentState.State): Promise<Partial<t
             recentMentionedDevices: (state.context.recentMentionedDevices as Array<{ device: string; score: number }> | undefined) ?? [],
           })
         : undefined,
+      commands: actionsToCommands(actions, "rule_engine"),
       actions,
-      data: { matched, matchedTrigger: parsed.matchedTrigger ?? null },
+      data: {
+        matched,
+        matchedTrigger: parsed.matchedTrigger ?? null,
+        commandSummary: summarizeCapabilityCommands(actionsToCommands(actions, "rule_engine")),
+      },
       meta: { source: "rule_engine" },
     });
 
@@ -287,6 +299,7 @@ async function ruleEngineNode(state: typeof AgentState.State): Promise<Partial<t
       ruleMatched: matched,
       resolutionSource: matched ? "rule_engine" : undefined,
       ruleActions: actions,
+      commandSummary: summarizeCapabilityCommands(stageResult.commands ?? []),
       intent: stageResult.intent,
       intentConfidence: stageResult.confidence ?? 0,
       needsToolExecution: stageResult.next === "tool_executor",
@@ -339,8 +352,13 @@ async function localIntentNode(state: typeof AgentState.State): Promise<Partial<
             recentMentionedDevices: (state.context.recentMentionedDevices as Array<{ device: string; score: number }> | undefined) ?? [],
           })
         : state.intent,
+      commands: actionsToCommands(shouldAcceptLocalIntent ? parsed.actions : [], "local_intent"),
       actions: shouldAcceptLocalIntent ? parsed.actions : [],
-      data: { matched, hasExecutableActions },
+      data: {
+        matched,
+        hasExecutableActions,
+        commandSummary: summarizeCapabilityCommands(actionsToCommands(shouldAcceptLocalIntent ? parsed.actions : [], "local_intent")),
+      },
       meta: { source: "local_intent" },
     });
 
@@ -353,6 +371,7 @@ async function localIntentNode(state: typeof AgentState.State): Promise<Partial<
       intent: stageResult.intent,
       intentConfidence: confidence,
       ruleActions: stageResult.actions ?? [],
+      commandSummary: summarizeCapabilityCommands(stageResult.commands ?? []),
       needsToolExecution: stageResult.next === "tool_executor",
       finalResponse: stageResult.next === "end" ? stageResult.message || reply : state.finalResponse,
     };
@@ -425,6 +444,7 @@ async function successPathsNode(state: typeof AgentState.State): Promise<Partial
       reason: stageReason,
       confidence: stageConfidence,
       intent: resolvedIntent,
+      commands: actionsToCommands(matched && !isFailurePath ? best.actions : [], "success_paths"),
       actions: matched && !isFailurePath ? best.actions : [],
       data: {
         matches,
@@ -434,6 +454,7 @@ async function successPathsNode(state: typeof AgentState.State): Promise<Partial
         hasReusableActions,
         shouldEscalateToDeep,
         historicalSkillRefs,
+        commandSummary: summarizeCapabilityCommands(actionsToCommands(matched && !isFailurePath ? best.actions : [], "success_paths")),
         inputScore: best?.inputScore ?? 0,
         intentScore: best?.intentScore ?? 0,
       },
@@ -448,6 +469,7 @@ async function successPathsNode(state: typeof AgentState.State): Promise<Partial
       resolutionSource: matched ? (isFailurePath ? "success_paths_failure" : "success_paths") : state.resolutionSource,
       intent: resolvedIntent,
       ruleActions: matched && !isFailurePath ? (stageResult.actions ?? []) : [],
+      commandSummary: summarizeCapabilityCommands(stageResult.commands ?? []),
       context: {
         ...state.context,
         historicalSkillRefs,
@@ -498,7 +520,9 @@ async function llmAgentNode(state: typeof AgentState.State): Promise<Partial<typ
     });
     const parsed = typeof result === "string" ? JSON.parse(result) : result;
     const rawSuggestedActions = Array.isArray(parsed.suggested_actions) ? parsed.suggested_actions : [];
-    const suggestedActions = rawSuggestedActions.filter(isValidToolAction);
+    const validSuggestedActions = rawSuggestedActions.filter(isValidToolAction);
+    const enforcement = enforceToolActionsByPolicy(TOOLS_DIR, validSuggestedActions, skillRefs);
+    const suggestedActions = enforcement.allowed as typeof validSuggestedActions;
     const droppedActionCount = rawSuggestedActions.length - suggestedActions.length;
     const reply = parsed.answer || "已进入 Deep Layer。";
     const hasExecutablePlan = suggestedActions.length > 0;
@@ -515,8 +539,21 @@ async function llmAgentNode(state: typeof AgentState.State): Promise<Partial<typ
       message: reply,
       reason: llmReason,
       intent: state.intent ?? createIntent(state.input, parsed.intent_hint || "complex_task"),
+      commands: actionsToCommands(suggestedActions, "llm_agent"),
       actions: suggestedActions,
-      data: { llm: parsed, selectedSkills: skillRefs, hasExecutablePlan, droppedActionCount },
+      data: {
+        llm: parsed,
+        selectedSkills: skillRefs,
+        selectedSkillMetadata: buildRuntimeRegistryPreview(TOOLS_DIR, skillRefs, state.input, state.intent?.intent).metadata,
+        commandSummary: summarizeCapabilityCommands(actionsToCommands(suggestedActions, "llm_agent")),
+        hasExecutablePlan,
+        droppedActionCount,
+        gatedBySkills: enforcement.gatedBySkills,
+        gatedActionCount: enforcement.gatedActionCount,
+        gatingReason: enforcement.gatingReason,
+        blockedActions: enforcement.blocked,
+        preconditionsEnforced: true,
+      },
       meta: { source: "llm_agent", skillsHint: skillRefs },
     });
 
@@ -534,6 +571,8 @@ async function llmAgentNode(state: typeof AgentState.State): Promise<Partial<typ
         matched_path_name: (matchedPath as { name?: string } | null)?.name ?? null,
         used_history_hint: Boolean(shouldEscalateToDeep && (matchedPath as { name?: string } | null)?.name),
       },
+      registryDebug: buildRuntimeRegistryPreview(TOOLS_DIR, skillRefs, state.input, state.intent?.intent),
+      commandSummary: summarizeCapabilityCommands(stageResult.commands ?? []),
       needsToolExecution: stageResult.next === "tool_executor",
       finalResponse: stageResult.next === "end" ? reply : state.finalResponse,
     };
@@ -595,8 +634,11 @@ async function toolExecutorNode(state: typeof AgentState.State): Promise<Partial
     attemptedCount: toolResults.length,
     successCount,
     failedCount: failedResults.length,
+    gatedBySkills: Boolean(state.stageResult?.data?.gatedBySkills),
+    gatedActionCount: typeof state.stageResult?.data?.gatedActionCount === "number" ? state.stageResult.data.gatedActionCount : 0,
+    gatingReason: typeof state.stageResult?.data?.gatingReason === "string" ? state.stageResult.data.gatingReason : null,
+    blockedActions: Array.isArray(state.stageResult?.data?.blockedActions) ? state.stageResult.data.blockedActions : [],
   };
-
   const stageResult = createStageResult({
     ok: !hasActions || successCount === toolResults.length,
     stage: "tool_executor",
@@ -629,6 +671,10 @@ async function toolExecutorNode(state: typeof AgentState.State): Promise<Partial
     resolutionSource: state.resolutionSource,
     toolResults,
     llmData: state.llmData,
+    registryDebug: state.registryDebug,
+    commandSummary: Array.isArray(state.commandSummary) && state.commandSummary.length > 0
+      ? state.commandSummary
+      : summarizeCapabilityCommands(state.stageResult?.commands ?? []),
     toolFailureAttribution: toolFailureAttribution ?? undefined,
     needsToolExecution: false,
     finalResponse: message,
@@ -657,6 +703,9 @@ async function writeBackNode(state: typeof AgentState.State): Promise<Partial<ty
       recordType: success ? "success" : isPlanOnly ? "plan_only" : executedActions ? "failure" : "non_executable",
       resolutionSource: state.resolutionSource,
       resolutionLabel,
+      gatedBySkills: Boolean(state.stageResult?.data?.gatedBySkills),
+      gatedActionCount: typeof state.stageResult?.data?.gatedActionCount === "number" ? state.stageResult.data.gatedActionCount : 0,
+      gatingReason: typeof state.stageResult?.data?.gatingReason === "string" ? state.stageResult.data.gatingReason : null,
     };
     const writeBackResults = [
       { type: "execution_summary", success, message: state.finalResponse },
@@ -670,8 +719,15 @@ async function writeBackNode(state: typeof AgentState.State): Promise<Partial<ty
       reason: "write_back_skipped",
       intent: state.intent,
       actions,
-      data: { writeBackMeta, writeBackResults, pathName, pathDescription, resolutionLabel },
-      meta: { source: "write_back" },
+      data: {
+        writeBackMeta,
+        writeBackResults,
+        pathName,
+        pathDescription,
+        resolutionLabel,
+        gatingReason: typeof state.stageResult?.data?.gatingReason === "string" ? state.stageResult.data.gatingReason : null,
+        blockedActions: Array.isArray(state.stageResult?.data?.blockedActions) ? state.stageResult.data.blockedActions : [],
+      },
     });
 
     return {

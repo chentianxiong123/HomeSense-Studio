@@ -7,6 +7,104 @@ export interface ToolAction {
   params?: Record<string, unknown>;
 }
 
+export interface CapabilityCommandV0 {
+  schemaVersion: "command_v0";
+  commandId: string;
+  capability: string;
+  target?: {
+    domain?: "tv" | "speaker" | "home" | "phone" | "agent" | "memory" | "unknown";
+    device?: string;
+    room?: string;
+    app?: string;
+    element?: string;
+  };
+  operation?: {
+    name?: string;
+    value?: string | number | boolean;
+    mode?: string;
+  };
+  input?: Record<string, unknown>;
+  execution?: {
+    preferredTool?: string;
+    fallbackTools?: string[];
+    timeoutMs?: number;
+    requiresVision?: boolean;
+    requiresConfirmation?: boolean;
+    riskLevel?: "low" | "medium" | "high";
+  };
+  context?: {
+    sourceStage?: string;
+    sourceIntent?: string;
+    sourceSkillRefs?: string[];
+    sourceTraceId?: string;
+  };
+  metadata?: Record<string, unknown>;
+}
+
+export type WorkflowNodeTypeV0 =
+  | "start"
+  | "capability"
+  | "condition"
+  | "approval"
+  | "fallback"
+  | "parallel"
+  | "merge"
+  | "observe"
+  | "reflect"
+  | "end";
+
+export interface WorkflowNodeV0 {
+  nodeId: string;
+  type: WorkflowNodeTypeV0;
+  label: string;
+  description?: string;
+  capability?: string;
+  command?: Partial<CapabilityCommandV0>;
+  config?: Record<string, unknown>;
+  policy?: {
+    riskLevel?: "low" | "medium" | "high";
+    requiresApproval?: boolean;
+    allowFallback?: boolean;
+    timeoutMs?: number;
+  };
+  debug?: {
+    showInTrace?: boolean;
+    collapseByDefault?: boolean;
+  };
+}
+
+export interface WorkflowEdgeV0 {
+  edgeId: string;
+  from: string;
+  to: string;
+  when?: {
+    result?: "success" | "failure" | "timeout" | "blocked";
+    expression?: string;
+  };
+  label?: string;
+}
+
+export interface WorkflowV0 {
+  schemaVersion: "workflow_v0";
+  workflowId: string;
+  name: string;
+  description?: string;
+  goal?: string;
+  inputs?: Array<{
+    name: string;
+    type: "string" | "number" | "boolean" | "object" | "array";
+    required?: boolean;
+    description?: string;
+  }>;
+  nodes: WorkflowNodeV0[];
+  edges: WorkflowEdgeV0[];
+  metadata?: {
+    source?: "human_authored" | "ai_drafted" | "self_orchestrated";
+    tags?: string[];
+    createdBy?: string;
+  };
+}
+
 export interface IntentSchema {
   schemaVersion: "v0";
   intent: string;
@@ -57,6 +155,7 @@ export interface StageResult {
   reason?: string;
   confidence?: number;
   intent?: IntentSchema;
+  commands?: CapabilityCommandV0[];
   actions?: ToolAction[];
   data?: Record<string, unknown>;
   meta?: {
@@ -140,6 +239,14 @@ export const AgentState = Annotation.Root({
     default: () => undefined,
     reducer: (_, next) => next,
   }),
+  registryDebug: Annotation<Record<string, unknown> | undefined>({
+    default: () => undefined,
+    reducer: (_, next) => next,
+  }),
+  commandSummary: Annotation<Record<string, unknown>[]>({
+    default: () => [],
+    reducer: (_, next) => next,
+  }),
   toolFailureAttribution: Annotation<Record<string, unknown> | undefined>({
     default: () => undefined,
     reducer: (_, next) => next,
@@ -159,6 +266,20 @@ export const AgentState = Annotation.Root({
 });
 
 export type RuleAction = ToolAction;
+
+export function createCapabilityCommand(command: Omit<CapabilityCommandV0, "schemaVersion">): CapabilityCommandV0 {
+  return {
+    schemaVersion: "command_v0",
+    ...command,
+  };
+}
+
+export function createWorkflowV0(workflow: Omit<WorkflowV0, "schemaVersion">): WorkflowV0 {
+  return {
+    schemaVersion: "workflow_v0",
+    ...workflow,
+  };
+}
 
 export function toTraceEntry(result: StageResult): StageTraceEntry {
   return {

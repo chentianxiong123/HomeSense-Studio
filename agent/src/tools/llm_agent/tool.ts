@@ -53,7 +53,82 @@ function summarizeSelectedSkills(context: Record<string, any>) {
   return selectedSkills.map((item: Record<string, any>) => ({
     tool: item.tool,
     section: item.section,
+    capabilities: Array.isArray(item.metadata?.capabilities) ? item.metadata.capabilities : [],
+    exposure_level: typeof item.metadata?.exposure_level === "string" ? item.metadata.exposure_level : null,
+    risk_level: typeof item.metadata?.risk_level === "string" ? item.metadata.risk_level : null,
+    preconditions: Array.isArray(item.metadata?.preconditions) ? item.metadata.preconditions : [],
   }));
+}
+
+function buildSkillDisclosureSummary(context: Record<string, any>) {
+  const selectedSkills = summarizeSelectedSkills(context);
+  return selectedSkills.map((item: Record<string, any>) => ({
+    tool: item.tool,
+    section: item.section,
+    capabilities: item.capabilities,
+    exposure_level: item.exposure_level,
+    risk_level: item.risk_level,
+  }));
+}
+
+function buildSkillRiskHints(context: Record<string, any>) {
+  const selectedSkills = summarizeSelectedSkills(context);
+  return selectedSkills
+    .filter((item: Record<string, any>) => item.risk_level)
+    .map((item: Record<string, any>) => `${item.tool}/${item.section}: risk=${item.risk_level}, exposure=${item.exposure_level || "unknown"}`);
+}
+
+function buildCapabilityHints(context: Record<string, any>) {
+  const selectedSkills = summarizeSelectedSkills(context);
+  return Array.from(new Set(selectedSkills.flatMap((item: Record<string, any>) => Array.isArray(item.capabilities) ? item.capabilities : [])));
+}
+
+function buildPreconditionHints(context: Record<string, any>) {
+  const selectedSkills = summarizeSelectedSkills(context);
+  return Array.from(new Set(selectedSkills.flatMap((item: Record<string, any>) => Array.isArray(item.preconditions) ? item.preconditions : [])));
+}
+
+function preferredSkillExposure(context: Record<string, any>) {
+  const selectedSkills = summarizeSelectedSkills(context);
+  const hasProgressive = selectedSkills.some((item: Record<string, any>) => item.exposure_level === "progressive");
+  return hasProgressive ? "respect_progressive_disclosure" : "default";
+}
+
+function buildSkillPromptHints(context: Record<string, any>) {
+  return {
+    capability_hints: buildCapabilityHints(context),
+    risk_hints: buildSkillRiskHints(context),
+    precondition_hints: buildPreconditionHints(context),
+    disclosure_mode: preferredSkillExposure(context),
+    selected_skill_metadata: buildSkillDisclosureSummary(context),
+  };
+}
+
+function buildSkillPromptLine(context: Record<string, any>) {
+  const capabilities = buildCapabilityHints(context);
+  return capabilities.length > 0
+    ? `优先在已披露 capability 内规划：${capabilities.join("、")}`
+    : "当前没有额外 capability 提示";
+}
+
+function buildSkillRiskLine(context: Record<string, any>) {
+  const riskHints = buildSkillRiskHints(context);
+  return riskHints.length > 0
+    ? `注意 skills 风险/披露约束：${riskHints.join("；")}`
+    : "当前没有额外 risk 提示";
+}
+
+function buildPreconditionLine(context: Record<string, any>) {
+  const preconditions = buildPreconditionHints(context);
+  return preconditions.length > 0
+    ? `关注前提条件：${preconditions.join("、")}`
+    : "当前没有额外 precondition 提示";
+}
+
+function skillDisclosureModeLine(context: Record<string, any>) {
+  return preferredSkillExposure(context) === "respect_progressive_disclosure"
+    ? "遵守渐进式披露：优先使用已披露 capability，不主动发散到底层细节"
+    : "可按默认方式参考当前 skills";
 }
 
 function buildPlan(text: string, context: Record<string, any>, suggestedActions: Array<Record<string, any>>) {
@@ -64,6 +139,10 @@ function buildPlan(text: string, context: Record<string, any>, suggestedActions:
   const plan = [
     "分析用户目标和当前上下文",
     selectedSkills.length > 0 ? `参考已按需加载的 skills：${selectedSkills.map((item) => `${item.tool}/${item.section}`).join("、")}` : "当前没有额外 skills 上下文",
+    buildSkillPromptLine(context),
+    skillDisclosureModeLine(context),
+    buildSkillRiskLine(context),
+    buildPreconditionLine(context),
     matchedPath?.name ? `参考相似历史经验：${matchedPath.name}` : candidateSummary ? `参考候选历史经验：${candidateSummary}` : "判断是否已有可直接复用的设备或意图信息",
     suggestedActions.length > 0 ? "生成可尝试的动作建议" : "等待后续接入真实大模型规划",
   ];
@@ -117,10 +196,12 @@ function buildSkillInsights(context: Record<string, any>) {
       tool: item.tool,
       section: item.section,
       headline: lines[0] || `${item.tool}/${item.section}`,
+      capabilities: Array.isArray(item.metadata?.capabilities) ? item.metadata.capabilities : [],
+      exposure_level: typeof item.metadata?.exposure_level === "string" ? item.metadata.exposure_level : null,
+      risk_level: typeof item.metadata?.risk_level === "string" ? item.metadata.risk_level : null,
     };
   });
 }
-
 function buildNextHint(suggestedActions: Array<Record<string, any>>) {
   return suggestedActions.length > 0 ? "tool_executor" : "end";
 }
@@ -172,6 +253,7 @@ function buildDeepControlHints(text: string, context: Record<string, any>) {
     preferred_retrieval_action: buildPreferredRetrievalAction(context),
     candidate_preference_summary: buildCandidatePreferenceSummary(context),
     derived_action_fallback: deriveSuggestedActions(text, context),
+    skill_hints: buildSkillPromptHints(context),
   };
 }
 
@@ -286,6 +368,8 @@ function buildDeepSystemPrompt() {
     "你是 HomeSense 的 Deep Layer 规划器。",
     "根据用户输入和上下文，只输出严格 JSON。",
     "优先复用已有 intent、设备上下文、相似历史经验、已加载 skills。",
+    "优先在已披露 capability 内规划；若 skills 标明 progressive disclosure，不要主动发散到底层未披露能力。",
+    "如果 skill metadata 包含 risk_level 或 preconditions，要把它们视为规划约束。",
     "如果 context.control_hints.preferred_retrieval_action 非空，把它视为第一优先候选动作；仅当它明显不适合当前任务时才放弃。",
     "如果 context.control_hints.candidate_preference_summary 存在，应优先参考该 top-1 历史经验，而不是自行发散到其他动作。",
     "如果用户目标与受支持动作高度吻合，请优先返回可执行 suggested_actions，而不是只给抽象计划。",
