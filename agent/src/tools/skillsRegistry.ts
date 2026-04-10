@@ -9,6 +9,7 @@ export interface SkillMetadata {
   exposure_level?: string;
   risk_level?: string;
   preconditions?: string[];
+  keywords?: string[];
 }
 
 export interface SkillRegistryEntry {

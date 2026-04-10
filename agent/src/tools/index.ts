@@ -7,7 +7,7 @@ import { hamiTool } from "./hami/wrapper.js";
 import { successPathsTool } from "./success_paths/tool.js";
 import { webSearchTool } from "./web_search/tool.js";
 import { localIntentTool } from "./local_intent/tool.js";
-import { llmAgentTool, callChatModel, loadLlmAgentConfig } from "./llm_agent/tool.js";
+import { llmAgentTool, callChatModel, loadLlmAgentConfig, deriveSuggestedActions, shouldPromoteFallbackAction } from "./llm_agent/tool.js";
 import { intentClassifierTool } from "./intent_classifier/tool.js";
 
 export const allTools = [
@@ -133,4 +133,6 @@ export {
   webSearchTool,
   localIntentTool,
   llmAgentTool,
+  deriveSuggestedActions,
+  shouldPromoteFallbackAction,
 };

@@ -8,8 +8,11 @@ perception:
   ui_tree:
     enabled: true
   ocr:
-    enabled: false
-    provider: local
+    enabled: true
+    provider: local  # local / api
+    api:
+      endpoint: ""    # 自定义 OCR API 端点
+      api_key: ""    # API Key
   multimodal:
     enabled: false
     provider: disabled

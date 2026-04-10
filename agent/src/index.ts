@@ -17,6 +17,18 @@ import { buildWorkflowDraftFromCommands, listWorkflowsV0, mergeWorkflowRegistryE
 const PORT = parseInt(process.env.PORT || "3000", 10);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TOOLS_DIR = join(__dirname, "tools");
+let shouldAbort = false;
+
+function formatThinking(text: string): string {
+  const parts = text.split(/(<think>\n[\s\S]*?\n<\/think>)/g);
+  return parts.map(part => {
+    if (part.startsWith('<think>\n') && part.endsWith('\n<\/think>')) {
+      const content = part.slice(8, -10).trim();
+      return '<details class="think-block"><summary>思考过程</summary><pre>' + content + '</pre></details>';
+    }
+    return part;
+  }).join('');
+}
 
 function getToolDir(name: string): string | null {
   const dir = join(TOOLS_DIR, name);
@@ -128,6 +140,98 @@ async function main() {
   await fastify.register(cors, { origin: "*" });
 
   fastify.get("/health", async () => ({ status: "ok", timestamp: Date.now() }));
+
+  fastify.get("/api/abort", async () => {
+    shouldAbort = true;
+    return { status: "aborted" };
+  });
+
+  fastify.get("/api/chat/stream", async (request, reply) => {
+    const query = request.query as { text?: string };
+    if (!query?.text) return reply.status(400).send({ error: "Missing text" });
+    shouldAbort = false;
+    saveMessage("user", query.text);
+    reply.raw.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" });
+
+    const allSteps: Array<{ stage: string; message: string; reason: string; confidence: number; action?: any; observation?: any }> = [];
+    let currentThinking = "";
+
+    const emitter = {
+      emitChunk: (chunk: string) => {
+        currentThinking += chunk;
+        reply.raw.write("event: chunk\ndata: " + JSON.stringify({ content: chunk }) + "\n\n");
+      },
+      emitStep: (step: any) => {
+        allSteps.push(step);
+        reply.raw.write("event: step\ndata: " + JSON.stringify(step) + "\n\n");
+      }
+    };
+
+    try {
+      reply.raw.write("event: start\ndata: {}\n\n");
+
+      const stream = await graph.stream(
+        { input: query.text, messages: [new HumanMessage(query.text)] },
+        { streamMode: ["values", "updates"] }
+      );
+
+      for await (const event of stream) {
+        if (shouldAbort) break;
+
+        if (event[0] === "values") {
+          const state = event[1];
+          const stageResult = state.stageResult;
+
+          if (stageResult) {
+            const stepData = {
+              stage: stageResult.stage || "unknown",
+              message: stageResult.message || "",
+              reason: stageResult.reason || "",
+              confidence: stageResult.confidence ?? 1,
+              action: stageResult.data?.action || null,
+              observation: stageResult.data?.observation || null,
+            };
+
+            emitter.emitStep(stepData);
+          }
+        }
+      }
+
+      const finalState = allSteps.length > 0 ? allSteps[allSteps.length - 1] : null;
+
+      let replyText = "";
+      if (allSteps.length > 1) {
+        const thinkContent = allSteps
+          .map((s, i) => `${i + 1}. 【${s.stage}】${s.message}`)
+          .join("\n");
+        replyText = `【思考过程】\n${thinkContent}`;
+      } else {
+        replyText = finalState?.message || "完成";
+      }
+
+      const isClarification = finalState?.reason === "low_confidence_ask" || 
+        (finalState?.confidence !== undefined && finalState.confidence < 0.7 && !finalState?.action);
+
+      if (!shouldAbort) {
+        saveMessage("assistant", replyText, { trace: allSteps }, { is_clarification: isClarification });
+        const doneData = {
+          reply: replyText,
+          outcomeType: finalState?.reason || "done",
+          trace: allSteps,
+          steps: allSteps.length,
+        };
+        reply.raw.write("event: done\ndata: " + JSON.stringify(doneData) + "\n\n");
+      }
+    } catch (error: any) {
+      reply.raw.write("event: error\ndata: " + JSON.stringify({ message: error.message }) + "\n\n");
+      if (allSteps.length > 0) {
+        saveMessage("assistant", `执行出错: ${error.message}`, { trace: allSteps });
+      }
+    }
+    reply.raw.write("event: close\ndata: {}\n\n");
+    reply.raw.end();
+    return reply;
+  });
 
   fastify.get("/tools", async () => allTools.map((t) => ({ name: t.name, description: t.description })));
 

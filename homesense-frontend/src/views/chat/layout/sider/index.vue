@@ -2,9 +2,9 @@
 import type { CSSProperties } from 'vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NLayoutSider, NModal } from 'naive-ui'
+import { NButton, NLayoutSider, NModal, NTag } from 'naive-ui'
 import Footer from './Footer.vue'
-import { fetchExperiencePaths, fetchRules } from '@/api'
+import { fetchClusters, fetchDevices, fetchExperiencePaths, fetchRules, fetchTools, fetchWorkflowCandidates } from '@/api'
 import { useAppStore, useRuntimePanelStore } from '@/store'
 import { useBasicLayout } from '@/hooks/useBasicLayout'
 import { PromptStore, SvgIcon } from '@/components/common'
@@ -28,6 +28,33 @@ interface SidebarExperiencePath {
   promotedRule?: boolean
 }
 
+interface SidebarDevice {
+  id: string
+  name: string
+  type: string
+  online: boolean
+}
+
+interface SidebarTool {
+  name: string
+  description: string
+}
+
+interface SidebarWorkflowCandidate {
+  workflowId: string
+  name: string
+  status?: string
+  source?: string
+  goal?: string
+}
+
+interface SidebarCluster {
+  clusterId: string
+  pathCount: number
+  avgSuccessRate: number
+  topPath?: string
+}
+
 const router = useRouter()
 const route = useRoute()
 const appStore = useAppStore()
@@ -37,9 +64,17 @@ const { isMobile } = useBasicLayout()
 const show = ref(false)
 const showRulesModal = ref(false)
 const showPathsModal = ref(false)
+const showDevicesModal = ref(false)
+const showToolsModal = ref(false)
+const showWorkflowsModal = ref(false)
+const showClustersModal = ref(false)
 const loadingPanel = ref(false)
 const rules = ref<SidebarRule[]>([])
 const experiencePaths = ref<SidebarExperiencePath[]>([])
+const devices = ref<SidebarDevice[]>([])
+const tools = ref<SidebarTool[]>([])
+const workflowCandidates = ref<SidebarWorkflowCandidate[]>([])
+const clusters = ref<SidebarCluster[]>([])
 
 const collapsed = computed(() => appStore.siderCollapsed)
 const isChatRoute = computed(() => route.path.startsWith('/chat'))
@@ -62,12 +97,20 @@ async function loadRuntimePanelData() {
 
   loadingPanel.value = true
   try {
-    const [rulesRes, pathsRes] = await Promise.all([
+    const [rulesRes, pathsRes, devicesRes, toolsRes, workflowsRes, clustersRes] = await Promise.all([
       fetchRules<any>(),
       fetchExperiencePaths<any>(),
+      fetchDevices<any>(),
+      fetchTools<any>(),
+      fetchWorkflowCandidates<any>(),
+      fetchClusters<any>(),
     ])
     rules.value = Array.isArray(rulesRes.data) ? rulesRes.data : []
     experiencePaths.value = Array.isArray(pathsRes.data) ? pathsRes.data : []
+    devices.value = Array.isArray(devicesRes.data) ? devicesRes.data : []
+    tools.value = Array.isArray(toolsRes.data) ? toolsRes.data : []
+    workflowCandidates.value = workflowsRes.data?.workflows ?? []
+    clusters.value = clustersRes.data?.clusters ?? []
   }
   catch (error) {
     console.error('Failed to load runtime sidebar data:', error)
@@ -215,6 +258,75 @@ onMounted(() => {
               </NButton>
             </div>
           </div>
+
+          <div class="rounded border border-[#e5e7eb] bg-white/80 p-3 text-xs dark:border-[#2a2a2d] dark:bg-[#151518]">
+            <div class="mb-2 flex items-center justify-between">
+              <div class="font-medium text-gray-800 dark:text-white">设备列表</div>
+              <div class="text-neutral-400">{{ devices.length }}</div>
+            </div>
+            <div class="space-y-2 text-neutral-500">
+              <div>在线设备: {{ devices.filter(d => d.online).length }}</div>
+              <div>离线设备: {{ devices.filter(d => !d.online).length }}</div>
+              <div v-if="devices[0]">设备1: {{ devices[0].name }}</div>
+              <div v-else>暂无设备</div>
+            </div>
+            <div class="mt-3">
+              <NButton block size="small" :disabled="loadingPanel || !devices.length" @click="showDevicesModal = true">
+                查看完整设备列表
+              </NButton>
+            </div>
+          </div>
+
+          <div class="rounded border border-[#e5e7eb] bg-white/80 p-3 text-xs dark:border-[#2a2a2d] dark:bg-[#151518]">
+            <div class="mb-2 flex items-center justify-between">
+              <div class="font-medium text-gray-800 dark:text-white">工具列表</div>
+              <div class="text-neutral-400">{{ tools.length }}</div>
+            </div>
+            <div class="space-y-2 text-neutral-500">
+              <div>已加载工具: {{ tools.length }}</div>
+              <div v-if="tools[0]">工具1: {{ tools[0].name }}</div>
+              <div v-else>暂无工具</div>
+            </div>
+            <div class="mt-3">
+              <NButton block size="small" :disabled="loadingPanel || !tools.length" @click="showToolsModal = true">
+                查看完整工具列表
+              </NButton>
+            </div>
+          </div>
+
+          <div class="rounded border border-[#e5e7eb] bg-white/80 p-3 text-xs dark:border-[#2a2a2d] dark:bg-[#151518]">
+            <div class="mb-2 flex items-center justify-between">
+              <div class="font-medium text-gray-800 dark:text-white">工作流候选</div>
+              <div class="text-neutral-400">{{ workflowCandidates.length }}</div>
+            </div>
+            <div class="space-y-2 text-neutral-500">
+              <div>待处理: {{ workflowCandidates.length }}</div>
+              <div v-if="workflowCandidates[0]">候选1: {{ workflowCandidates[0].name }}</div>
+              <div v-else>暂无工作流候选</div>
+            </div>
+            <div class="mt-3">
+              <NButton block size="small" :disabled="loadingPanel || !workflowCandidates.length" @click="showWorkflowsModal = true">
+                查看完整工作流候选
+              </NButton>
+            </div>
+          </div>
+
+          <div class="rounded border border-[#e5e7eb] bg-white/80 p-3 text-xs dark:border-[#2a2a2d] dark:bg-[#151518]">
+            <div class="mb-2 flex items-center justify-between">
+              <div class="font-medium text-gray-800 dark:text-white">经验聚类</div>
+              <div class="text-neutral-400">{{ clusters.length }}</div>
+            </div>
+            <div class="space-y-2 text-neutral-500">
+              <div>聚类数: {{ clusters.length }}</div>
+              <div v-if="clusters[0]">最大聚类: {{ clusters[0].pathCount }}条经验</div>
+              <div v-else>暂无聚类</div>
+            </div>
+            <div class="mt-3">
+              <NButton block size="small" :disabled="loadingPanel || !clusters.length" @click="showClustersModal = true">
+                查看完整聚类列表
+              </NButton>
+            </div>
+          </div>
         </div>
 
         <div v-else class="flex-1 min-h-0" />
@@ -298,6 +410,106 @@ onMounted(() => {
           <div>{{ path.reuseCount }}</div>
           <div>{{ formatPercent(path.successRate) }}</div>
           <div>{{ path.promotedRule ? 'rule' : 'path' }}</div>
+        </div>
+      </div>
+    </div>
+  </NModal>
+
+  <NModal v-model:show="showDevicesModal" preset="card" title="设备完整列表" class="w-[90vw] max-w-2xl">
+    <div class="space-y-3 text-sm">
+      <div class="grid grid-cols-[1fr_1fr_0.6fr_0.6fr] gap-3 border-b border-[#eef0f3] pb-2 text-xs text-neutral-400 dark:border-[#2a2a2d]">
+        <div>ID</div>
+        <div>Name</div>
+        <div>Type</div>
+        <div>Status</div>
+      </div>
+      <div v-if="!devices.length" class="text-neutral-400">暂无设备</div>
+      <div v-else class="max-h-[70vh] overflow-y-auto space-y-2">
+        <div
+          v-for="device in devices"
+          :key="device.id"
+          class="grid grid-cols-[1fr_1fr_0.6fr_0.6fr] gap-3 rounded bg-[#f6f8fa] px-3 py-2 dark:bg-[#1d1f23]"
+        >
+          <div class="break-words">{{ device.id }}</div>
+          <div>{{ device.name }}</div>
+          <div>{{ device.type }}</div>
+          <div>
+            <NTag :type="device.online ? 'success' : 'error'" size="small">
+              {{ device.online ? '在线' : '离线' }}
+            </NTag>
+          </div>
+        </div>
+      </div>
+    </div>
+  </NModal>
+
+  <NModal v-model:show="showToolsModal" preset="card" title="工具完整列表" class="w-[90vw] max-w-2xl">
+    <div class="space-y-3 text-sm">
+      <div class="grid grid-cols-[1fr_2fr] gap-3 border-b border-[#eef0f3] pb-2 text-xs text-neutral-400 dark:border-[#2a2a2d]">
+        <div>Name</div>
+        <div>Description</div>
+      </div>
+      <div v-if="!tools.length" class="text-neutral-400">暂无工具</div>
+      <div v-else class="max-h-[70vh] overflow-y-auto space-y-2">
+        <div
+          v-for="tool in tools"
+          :key="tool.name"
+          class="grid grid-cols-[1fr_2fr] gap-3 rounded bg-[#f6f8fa] px-3 py-2 dark:bg-[#1d1f23]"
+        >
+          <div class="break-words font-medium">{{ tool.name }}</div>
+          <div class="break-words text-neutral-500">{{ tool.description || '-' }}</div>
+        </div>
+      </div>
+    </div>
+  </NModal>
+
+  <NModal v-model:show="showWorkflowsModal" preset="card" title="工作流候选列表" class="w-[90vw] max-w-5xl">
+    <div class="space-y-3 text-sm">
+      <div class="grid grid-cols-[1fr_1fr_0.8fr_0.8fr] gap-3 border-b border-[#eef0f3] pb-2 text-xs text-neutral-400 dark:border-[#2a2a2d]">
+        <div>ID</div>
+        <div>Name</div>
+        <div>Status</div>
+        <div>Source</div>
+      </div>
+      <div v-if="!workflowCandidates.length" class="text-neutral-400">暂无工作流候选</div>
+      <div v-else class="max-h-[70vh] overflow-y-auto space-y-2">
+        <div
+          v-for="wf in workflowCandidates"
+          :key="wf.workflowId"
+          class="grid grid-cols-[1fr_1fr_0.8fr_0.8fr] gap-3 rounded bg-[#f6f8fa] px-3 py-2 dark:bg-[#1d1f23]"
+        >
+          <div class="break-words text-xs">{{ wf.workflowId }}</div>
+          <div class="break-words">{{ wf.name }}</div>
+          <div>
+            <NTag :type="wf.status === 'accepted' ? 'success' : 'warning'" size="small">
+              {{ wf.status || 'pending' }}
+            </NTag>
+          </div>
+          <div>{{ wf.source || '-' }}</div>
+        </div>
+      </div>
+    </div>
+  </NModal>
+
+  <NModal v-model:show="showClustersModal" preset="card" title="经验聚类列表" class="w-[90vw] max-w-3xl">
+    <div class="space-y-3 text-sm">
+      <div class="grid grid-cols-[1fr_0.8fr_0.8fr_2fr] gap-3 border-b border-[#eef0f3] pb-2 text-xs text-neutral-400 dark:border-[#2a2a2d]">
+        <div>ClusterID</div>
+        <div>PathCount</div>
+        <div>AvgSuccess</div>
+        <div>TopPath</div>
+      </div>
+      <div v-if="!clusters.length" class="text-neutral-400">暂无聚类</div>
+      <div v-else class="max-h-[70vh] overflow-y-auto space-y-2">
+        <div
+          v-for="cluster in clusters"
+          :key="cluster.clusterId"
+          class="grid grid-cols-[1fr_0.8fr_0.8fr_2fr] gap-3 rounded bg-[#f6f8fa] px-3 py-2 dark:bg-[#1d1f23]"
+        >
+          <div class="break-words">{{ cluster.clusterId }}</div>
+          <div>{{ cluster.pathCount }}</div>
+          <div>{{ formatPercent(cluster.avgSuccessRate) }}</div>
+          <div class="break-words text-neutral-500">{{ cluster.topPath || '-' }}</div>
         </div>
       </div>
     </div>

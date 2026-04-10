@@ -11,7 +11,7 @@ import { useBasicLayout } from '@/hooks/useBasicLayout'
 import { useRuntimePanelStore } from '@/store'
 import { acceptWorkflowUpgrade, fetchChatAPI, fetchMessages, fetchRegistryPreview, fetchWorkflowCandidates, fetchWorkflowExamples, saveWorkflowDraft, upgradeWorkflowDraft } from '@/api'
 import { t } from '@/locales'
-import { setCachedMessages, clearCachedMessages } from '@/utils/cache'
+import { getCachedMessages, setCachedMessages, clearCachedMessages } from '@/utils/cache'
 
 useRoute()
 
@@ -799,29 +799,37 @@ function syncPaginationState(pageInfo?: Partial<MessagePageInfo> | null) {
 }
 
 async function ensureScrollableHistory() {
-  let attempts = 0
-
-  while (hasMoreOlder.value && attempts < 10) {
+  // 加载历史消息直到页面可滚动或没有更多数据
+  while (hasMoreOlder.value) {
     await nextTick()
     const container = scrollRef.value
 
     if (!container)
       return
 
-    if (container.scrollHeight > container.clientHeight + 8)
+    // 如果内容高度超过视口高度，说明可以滚动了
+    if (container.scrollHeight > container.clientHeight + 50)
       return
 
+    // 加载更多历史消息
+    const prevCount = messages.value.length
     await loadFromBackend('older')
-    attempts += 1
+    
+    // 如果没有加载到新消息，退出循环
+    if (messages.value.length === prevCount)
+      return
   }
 }
 
 async function loadFromBackend(direction: 'latest' | 'older' = 'latest') {
   const isOlderLoad = direction === 'older'
+  console.log('[loadFromBackend] direction:', direction, 'cursorId:', oldestCursorId.value)
 
   if (isOlderLoad) {
-    if (loadingMore.value || !hasMoreOlder.value || oldestCursorId.value == null)
+    if (loadingMore.value || !hasMoreOlder.value || oldestCursorId.value == null) {
+      console.log('[loadFromBackend] skip older load:', { loading: loadingMore.value, hasMore: hasMoreOlder.value, cursor: oldestCursorId.value })
       return
+    }
     loadingMore.value = true
   }
 
@@ -835,13 +843,18 @@ async function loadFromBackend(direction: 'latest' | 'older' = 'latest') {
     })
     const backendMessages = res.data?.messages || []
     const pageInfo = res.data?.pageInfo
+    console.log('[loadFromBackend] received:', backendMessages.length, 'messages, pageInfo:', pageInfo)
+    
     const formatted = backendMessages.map(formatMessage)
 
     if (!isOlderLoad) {
       if (requestId !== loadRequestSequence)
         return
 
-      messages.value = mergeMessagesById([], formatted)
+      if (formatted.length > 0) {
+        messages.value = mergeMessagesById(messages.value, formatted)
+        console.log('[loadFromBackend] merged messages count:', messages.value.length)
+      }
       setCachedMessages(messages.value)
       hasMoreOlder.value = pageInfo?.hasOlder ?? backendMessages.length === PAGE_SIZE
       syncPaginationState(pageInfo)
@@ -852,6 +865,7 @@ async function loadFromBackend(direction: 'latest' | 'older' = 'latest') {
       const prevScrollHeight = container?.scrollHeight || 0
 
       messages.value = mergeMessagesById(formatted, messages.value)
+      console.log('[loadFromBackend] older merged messages count:', messages.value.length)
       setCachedMessages(messages.value)
       hasMoreOlder.value = pageInfo?.hasOlder ?? backendMessages.length === PAGE_SIZE
       syncPaginationState(pageInfo)
@@ -875,8 +889,7 @@ async function loadFromBackend(direction: 'latest' | 'older' = 'latest') {
 }
 
 async function initMessages() {
-  // TODO: 暂时禁用缓存，直接从后端加载
-  // loadFromCache()
+  // 优先从后端数据库加载，不使用 localStorage 缓存
   await loadFromBackend('latest')
   await ensureScrollableHistory()
   await scrollToBottom()
@@ -954,28 +967,98 @@ async function sendMessage() {
   scrollToBottom()
 
   try {
-    const res = await fetchChatAPI(message)
+    const response = await fetch("/api/chat/stream?text=" + encodeURIComponent(message))
+    const reader = response.body?.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ""
+    let finalData: any = null
+    const allSteps: Array<{ stage: string; message: string; reason: string; action?: any; observation?: any }> = []
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split("\n")
+      buffer = lines.pop() || ""
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]
+        if (!line.startsWith("event:")) continue
+        const eventType = line.slice(6).trim()
+        const dataLine = lines[i + 1]
+        if (!dataLine?.startsWith("data:")) continue
+        const data = JSON.parse(dataLine.slice(5))
+        if (eventType === "step") {
+          allSteps.push(data)
+          
+          const stageLabels: Record<string, string> = {
+            intent_router: "意图路由",
+            llm_agent: "LLM推理",
+            tool_executor: "执行工具",
+            success_writeback: "回写经验",
+            rule_engine: "规则匹配",
+            success_paths: "经验检索",
+          }
+
+          const reasonLabels: Record<string, string> = {
+            command_intent_routed: "判定为命令请求",
+            chat_intent: "判定为聊天",
+            react_thinking: "思考中",
+            react_complete: "推理完成",
+            tool_executed: "执行成功",
+            tool_failed: "执行失败",
+            no_action: "无操作",
+            success_experience_found: "找到成功经验",
+            no_success_experience: "无匹配经验",
+          }
+
+          let displayText = allSteps.map((s, idx) => {
+            const label = stageLabels[s.stage] || s.stage
+            const reason = s.reason ? reasonLabels[s.reason] || s.reason : ""
+            let line = `${idx + 1}. 【${label}】${s.message}`
+            if (reason) {
+              line += ` (${reason})`
+            }
+            if (s.action) {
+              line += `\n   → ${s.action.tool || ""}.${s.action.action || ""}`
+              if (s.action.params) {
+                const paramsStr = Object.entries(s.action.params).map(([k, v]) => `${k}=${v}`).join(", ")
+                if (paramsStr) line += `(${paramsStr})`
+              }
+            }
+            if (s.observation) {
+              const obsStr = typeof s.observation === "string" ? s.observation : JSON.stringify(s.observation).slice(0, 100)
+              line += `\n   ← 结果: ${obsStr}`
+            }
+            return line
+          }).join("\n")
+          
+          messages.value[messages.value.length - 1] = {
+            ...thinkingMsg,
+            text: displayText,
+            content: displayText,
+            trace: data.trace || [],
+            loading: true,
+          }
+          scrollToBottom()
+        } else if (eventType === "done") {
+          finalData = data
+        }
+      }
+    }
 
     messages.value[messages.value.length - 1] = {
       ...thinkingMsg,
-      id: typeof res.data?.messageId === 'number' ? res.data.messageId : thinkingMsg.id,
-      text: res.data?.reply || '好的',
-      content: res.data?.reply || '好的',
+      text: finalData?.reply || "完成",
+      content: finalData?.reply || "完成",
       error: false,
       loading: false,
-      trace: res.data?.trace || [],
-      writeBackResults: res.data?.writeBackResults || [],
-      llm: res.data?.llm,
-      skillsHint: res.data?.skillsHint || [],
-      registryDebug: res.data?.registryDebug || (res.data?.resolutionMeta ? { resolutionMeta: res.data.resolutionMeta } : undefined),
-      resolutionMeta: res.data?.resolutionMeta,
-      workflowDraft: res.data?.workflowDraft || res.data?.resolutionMeta?.workflowDraft,
+      trace: finalData?.trace || [],
     }
     syncRuntimePanelFromMessages()
     handleIncomingWorkflowDraft(previousDraftId)
     scrollToBottom()
   } catch (error: any) {
-    const errorMessage = error?.message ?? t('common.wrong')
+    const errorMessage = error?.message ?? t("common.wrong")
     messages.value[messages.value.length - 1] = {
       ...thinkingMsg,
       text: errorMessage,
@@ -996,6 +1079,12 @@ function handleClear() {
   oldestCursorId.value = null
   runtimePanelStore.clearRuntime()
   clearCachedMessages()
+}
+
+function handleStop() {
+  if (!loading.value) return
+  fetch('/api/abort')
+  loading.value = false
 }
 
 function handleDelete(index: number) {
@@ -1232,11 +1321,11 @@ onMounted(() => {
                   @delete="handleDelete(index)"
                 />
                 <div class="sticky bottom-0 left-0 flex justify-center">
-                  <NButton v-if="loading" type="warning">
+                  <NButton v-if="loading" type="error" @click="handleStop">
                     <template #icon>
-                      <SvgIcon icon="ri:loader-4-line" class="animate-spin" />
+                      <SvgIcon icon="ri:stop-line" />
                     </template>
-                    处理中...
+                    终止
                   </NButton>
                 </div>
               </div>

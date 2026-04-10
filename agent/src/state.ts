@@ -182,12 +182,25 @@ export interface Rule {
   actions: ToolAction[];
 }
 
+export interface ExperienceDoc {
+  type: "experience";
+  intent: string;
+  keywords: string[];
+  title: string;
+  content: string;
+  filePath?: string;
+}
+
 export const AgentState = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
     default: () => [],
     reducer: (curr, next) => [...curr, ...next],
   }),
   input: Annotation<string>({
+    default: () => "",
+    reducer: (_, next) => next,
+  }),
+  completedInput: Annotation<string>({
     default: () => "",
     reducer: (_, next) => next,
   }),
@@ -261,6 +274,29 @@ export const AgentState = Annotation.Root({
   }),
   error: Annotation<string | undefined>({
     default: () => undefined,
+    reducer: (_, next) => next,
+  }),
+  reactSteps: Annotation<Array<{thought: string; action: ToolAction | null; observation: string}>>({
+    default: () => [],
+    reducer: (curr, next) => {
+      const items = Array.isArray(next) ? next : [next];
+      return [...curr, ...items];
+    },
+  }),
+  isComplete: Annotation<boolean>({
+    default: () => false,
+    reducer: (_, next) => next,
+  }),
+  matchedExperience: Annotation<ExperienceDoc | undefined>({
+    default: () => undefined,
+    reducer: (_, next) => next,
+  }),
+  loadedSkills: Annotation<string[]>({
+    default: () => [],
+    reducer: (_, next) => next,
+  }),
+  autoExecutePath: Annotation<boolean>({
+    default: () => false,
     reducer: (_, next) => next,
   }),
 });

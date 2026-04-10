@@ -84,6 +84,21 @@ export function fetchDevices<T = any>() {
   })
 }
 
+export function fetchClusters<T = any>() {
+  return get<T>({
+    url: '/api/success-paths/clusters',
+  })
+}
+
+export function fetchSkillPolicyPreview<T = any>(input = '', intent?: string) {
+  const query = new URLSearchParams()
+  if (input) query.set('input', input)
+  if (intent) query.set('intent', intent)
+  return get<T>({
+    url: `/api/skill-policy-preview${query.toString() ? `?${query.toString()}` : ''}`,
+  })
+}
+
 export function fetchRegistryPreview<T = any>(input = '', intent?: string) {
   const query = new URLSearchParams()
   if (input) query.set('input', input)

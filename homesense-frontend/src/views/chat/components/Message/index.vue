@@ -1,5 +1,5 @@
 <script setup lang='ts'>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { NDropdown, useMessage } from 'naive-ui'
 import AvatarComponent from './Avatar.vue'
 import TextComponent from './Text.vue'
@@ -156,13 +156,15 @@ const message = useMessage()
 
 const asRawText = ref(props.inversion)
 const messageRef = ref<HTMLElement>()
-const showDebug = ref(!props.inversion && (
-  (props.trace?.length || 0) > 0
-  || (props.writeBackResults?.length || 0) > 0
-  || Boolean(props.llm)
-  || (props.skillsHint?.length || 0) > 0
-  || Boolean(props.registryDebug)
-))
+
+// 默认折叠，loading 时展开，loading 结束后自动折叠
+const showDebug = ref(false)
+
+// loading 时暂时显示 trace
+watch(() => props.loading, (loading) => {
+  if (loading) showDebug.value = true
+  else showDebug.value = false
+}, { immediate: true })
 // Demo Mode: showDebugDetails 已禁用
 // const showDebugDetails = ref(false)
 
@@ -386,8 +388,8 @@ async function handleCopy() {
     :class="[{ 'flex-row-reverse': inversion }]"
   >
     <div
-      class="flex items-center justify-center flex-shrink-0 h-8 overflow-hidden rounded-full basis-8"
-      :class="[inversion ? 'ml-2' : 'mr-2']"
+      v-if="inversion"
+      class="flex items-center justify-center flex-shrink-0 h-8 overflow-hidden rounded-full basis-8 ml-2"
     >
       <AvatarComponent :image="inversion" />
     </div>
@@ -430,8 +432,17 @@ async function handleCopy() {
                       <span v-if="index < trace.length - 1" class="text-[#9ca3af]">→</span>
                     </template>
                   </div>
-                  <div v-if="trace[trace.length - 1]?.message" class="mt-1 text-[#9ca3af]">
-                    结果: {{ trace[trace.length - 1].message }}
+                  <!-- ReAct 详细信息 -->
+                  <div v-for="(item, index) in trace" :key="`detail-${index}`" class="mt-2 border-t border-[#e5e7eb] dark:border-[#2a2a2d] pt-2">
+                    <div class="font-medium text-[#1d4ed8] dark:text-[#93c5fd]">[{{ item.stage }}]</div>
+                    <div v-if="item.message" class="mt-1 text-[#4b5563] dark:text-[#c7c9d1]">{{ item.message }}</div>
+                    <div v-if="item.reason" class="mt-1 text-[#9ca3af]">原因: {{ item.reason }}</div>
+                    <div v-if="item.confidence" class="mt-1">
+                      <span class="text-[#9ca3af]">置信度:</span>
+                      <span :class="item.confidence >= 0.7 ? 'text-green-600' : 'text-orange-500'">
+                        {{ (item.confidence * 100).toFixed(0) }}%
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>

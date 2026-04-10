@@ -76,7 +76,7 @@ function ruleBasedClassify(text: string): { intentType: string; confidence: numb
 
   const chatRatio = chatScore / totalScore;
   const intentType = chatRatio > 0.5 ? "chat" : "command";
-  const confidence = Math.min(Math.max(chatScore, commandScore) / 5, 1);
+  const confidence = Math.min(Math.max(chatScore, commandScore) / 2, 1);
 
   return {
     intentType,
@@ -85,28 +85,24 @@ function ruleBasedClassify(text: string): { intentType: string; confidence: numb
   };
 }
 
-async function callVectorService(text: string): Promise<{ intent: string; score: number; method: string; matched_text?: string; category?: string } | null> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
+async function callVectorService(text: string): Promise<{ intent: string; score: number; method: string; matched_text?: string; category?: string }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
 
-    const response = await fetch(`${INTENT_SERVICE_URL}/classify`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-      signal: controller.signal,
-    });
+  const response = await fetch(`${INTENT_SERVICE_URL}/classify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+    signal: controller.signal,
+  });
 
-    clearTimeout(timeout);
+  clearTimeout(timeout);
 
-    if (!response.ok) {
-      return null;
-    }
-
-    return await response.json();
-  } catch {
-    return null;
+  if (!response.ok) {
+    throw new Error(`Intent service error: ${response.status}`);
   }
+
+  return await response.json();
 }
 
 export const intentClassifierTool = tool(
@@ -115,8 +111,8 @@ export const intentClassifierTool = tool(
     const config = loadConfig();
 
     if (config.use_vector_service) {
-      const vectorResult = await callVectorService(text);
-      if (vectorResult) {
+      try {
+        const vectorResult = await callVectorService(text);
         return JSON.stringify({
           intentType: vectorResult.intent,
           confidence: vectorResult.score,
@@ -125,6 +121,9 @@ export const intentClassifierTool = tool(
           category: vectorResult.category,
           method: "vector_service",
         });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`意图分类服务不可用: ${message}`);
       }
     }
 

@@ -1,6 +1,4 @@
 import { tool } from "@langchain/core/tools";
-import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { ChatOpenAI } from "@langchain/openai";
 import { z } from "zod";
 import { readFileSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
@@ -45,6 +43,7 @@ function deriveIntentHint(text: string): string {
   if (text.includes("返回") || text.includes("退回")) return "navigate_back";
   if (text.includes("播放") || text.includes("放歌")) return "play_media";
   if (text.includes("搜索") || text.includes("查找")) return "search_content";
+  if (text.includes("b站") || text.includes("bilibili") || text.includes("哔哩")) return "open_app";
   return "complex_task";
 }
 
@@ -227,6 +226,19 @@ function deriveSuggestedActions(text: string, context: Record<string, any>) {
   if ((lower.includes("打开") || lower.includes("开启")) && (lower.includes("机顶盒") || lower.includes("盒子"))) {
     return [{ tool: "hami", action: "xiaoai_execute", params: { command: "打开机顶盒" } }];
   }
+  if ((lower.includes("列举") || lower.includes("列出") || lower.includes("查看") || lower.includes("有什么")) && (lower.includes("包") || lower.includes("应用") || lower.includes("app"))) {
+    return [{ tool: "adb", action: "list_packages" }];
+  }
+  if (lower.includes("b站") || lower.includes("bilibili") || lower.includes("哔哩")) {
+    return [
+      { tool: "hami", action: "xiaoai_execute", params: { command: "打开电视" } },
+      { tool: "hami", action: "xiaoai_execute", params: { command: "打开机顶盒" } },
+      { tool: "adb", action: "launch_app", params: { package: "com.xiaodianshi.tv.yst" } },
+    ];
+  }
+  if (lower.includes("听歌") || lower.includes("音乐") || lower.includes("播放") || lower.includes("唱歌")) {
+    return [{ tool: "hami", action: "xiaoai_execute", params: { command: "播放音乐" } }];
+  }
   return [];
 }
 
@@ -259,38 +271,45 @@ function buildDeepControlHints(text: string, context: Record<string, any>) {
 
 function buildDeepPromptContext(text: string, context: Record<string, any>) {
   return {
-    ...context,
-    recommended_examples: buildDeepExamples(),
-    control_hints: buildDeepControlHints(text, context),
+    intent: context.intent || null,
+    examples: buildDeepExamples(),
   };
 }
 
 function buildDeepUserPrompt(text: string, context: Record<string, any>) {
+  const reactSteps = context.reactSteps || [];
+  const historySection = reactSteps.length > 0
+    ? "\n历史步骤:\n" + reactSteps.map((s: any, i: number) => 
+        `${i+1}. 思考: ${s.thought}\n   执行: ${s.action ? JSON.stringify(s.action) : 'null'}\n   结果: ${s.observation}`
+      ).join("\n")
+    : "";
+
   return JSON.stringify({
-    task: text,
-    context: buildDeepPromptContext(text, context),
+    task: text + historySection,
+    tools: ["adb", "hami"],
+    intent: context.intent || null,
     expected_json_schema: {
-      success: "boolean",
-      intent_hint: "string",
-      plan: ["string"],
-      answer: "string",
-      suggested_actions: [{ tool: "string", action: "string", params: "object?" }],
-      next_hint: "string",
-      skill_insights: [{ tool: "string", section: "string", headline: "string?" }],
+      thought: "string - 当前思考",
+      action: "object {tool, action, params?} 或 null",
+      confidence: "number 0-1，置信度低于0.7表示不确定",
+      is_complete: "boolean - 是否完成任务",
     },
   }, null, 2);
 }
 
 function applyFallbackActionPromotion(text: string, parsed: Record<string, any>, context: Record<string, any>) {
-  if (!shouldPromoteFallbackAction(text, parsed, context)) return parsed;
-  const preferredRetrievalAction = buildPreferredRetrievalAction(context);
-  const fallbackActions = preferredRetrievalAction.length > 0 ? preferredRetrievalAction : deriveSuggestedActions(text, context);
+  // ReAct 格式：如果已有 action，直接返回
+  if (parsed.action) return parsed;
+
+  // 如果没有 action，用关键词生成
+  const fallbackActions = deriveSuggestedActions(text, context);
   if (fallbackActions.length === 0) return parsed;
+
   return {
     ...parsed,
-    suggested_actions: fallbackActions,
-    next_hint: "tool_executor",
-    answer: typeof parsed.answer === "string" && parsed.answer.length > 0 ? parsed.answer : "已生成可执行动作建议。",
+    thought: parsed.thought || `我将执行: ${fallbackActions[0].action}`,
+    action: fallbackActions[0],
+    is_complete: false,
   };
 }
 
@@ -298,7 +317,7 @@ function shouldPromoteFallbackAction(text: string, parsed: Record<string, any>, 
   if (Array.isArray(parsed.suggested_actions) && parsed.suggested_actions.length > 0) return false;
   if (parsed.success !== true) return false;
   const lower = text.toLowerCase();
-  return lower.includes("返回") || lower.includes("退回") || lower.includes("上一页") || lower.includes("主页") || lower.includes("首页") || lower.includes("主界面") || lower.includes("打开电视") || lower.includes("打开机顶盒") || lower.includes("开启电视") || lower.includes("开启机顶盒") || Boolean((context.matchedPath as Record<string, any> | undefined)?.actions?.length) || buildPreferredRetrievalAction(context).length > 0;
+  return lower.includes("返回") || lower.includes("退回") || lower.includes("上一页") || lower.includes("主页") || lower.includes("首页") || lower.includes("主界面") || lower.includes("打开电视") || lower.includes("打开机顶盒") || lower.includes("开启电视") || lower.includes("开启机顶盒") || lower.includes("听歌") || lower.includes("音乐") || lower.includes("播放") || lower.includes("唱歌") || Boolean((context.matchedPath as Record<string, any> | undefined)?.actions?.length) || buildPreferredRetrievalAction(context).length > 0;
 }
 
 function extractJsonBlock(content: string) {
@@ -310,106 +329,118 @@ function extractJsonBlock(content: string) {
 }
 
 function sanitizeStructuredOutput(parsed: Record<string, any>) {
+  const thought = typeof parsed.thought === "string" ? parsed.thought : "思考中...";
+  const action = parsed.action || null;
+  const confidence = typeof parsed.confidence === "number" ? parsed.confidence : 1;
+  const isComplete = Boolean(parsed.is_complete);
+  
   return {
-    success: Boolean(parsed.success),
-    intent_hint: typeof parsed.intent_hint === "string" ? parsed.intent_hint : "complex_task",
-    plan: Array.isArray(parsed.plan) ? parsed.plan.map((item) => String(item)) : [],
-    answer: typeof parsed.answer === "string" ? parsed.answer : "已进入 Deep Layer。",
-    suggested_actions: Array.isArray(parsed.suggested_actions) ? parsed.suggested_actions : [],
-    next_hint: typeof parsed.next_hint === "string" ? parsed.next_hint : (Array.isArray(parsed.suggested_actions) && parsed.suggested_actions.length > 0 ? "tool_executor" : "end"),
-    skill_insights: Array.isArray(parsed.skill_insights) ? parsed.skill_insights : [],
-    context_summary: parsed.context_summary,
+    thought,
+    action,
+    confidence,
+    is_complete: isComplete,
   };
 }
 
 function buildFallbackStructured(text: string, context: Record<string, any>, config: LlmAgentConfig) {
-  const apiKey = config.api_key || process.env[config.api_key_env];
-  const hasModelConfig = Boolean(apiKey);
   const suggestedActions = deriveSuggestedActions(text, context);
+  const action = suggestedActions.length > 0 ? suggestedActions[0] : null;
   return {
-    success: hasModelConfig,
+    thought: action ? `我将执行: ${action.action}` : "无法确定要执行的动作",
+    action,
+    confidence: action ? 0.8 : 0.3,
+    is_complete: false,
     provider: config.provider,
     model: config.model,
-    intent_hint: deriveIntentHint(text),
-    plan: buildPlan(text, context, suggestedActions),
-    answer: buildAnswer(context, hasModelConfig),
-    suggested_actions: suggestedActions,
-    context_summary: buildContextSummary(context),
-    skill_insights: buildSkillInsights(context),
-    needs_model_config: !hasModelConfig,
-    next_hint: buildNextHint(suggestedActions),
-    selected_skill_refs: Array.isArray(context.selectedSkillRefs) ? context.selectedSkillRefs : [],
   };
 }
 
 function buildDeepExamples() {
   return [
-    {
-      input: "返回上一页",
-      output: { success: true, intent_hint: "navigate_back", plan: ["识别为返回操作", "直接调用 adb.back"], answer: "好的，返回上一页。", suggested_actions: [{ tool: "adb", action: "back" }], next_hint: "tool_executor", skill_insights: [] },
-    },
-    {
-      input: "回到主界面",
-      output: { success: true, intent_hint: "go_home", plan: ["识别为回主页操作", "直接调用 adb.home"], answer: "好的，返回主页。", suggested_actions: [{ tool: "adb", action: "home" }], next_hint: "tool_executor", skill_insights: [] },
-    },
-    {
-      input: "打开电视",
-      output: { success: true, intent_hint: "open_device", plan: ["识别为打开电视", "调用 hami 打开电视"], answer: "好的，打开乐视电视。", suggested_actions: [{ tool: "hami", action: "xiaoai_execute", params: { command: "打开电视" } }], next_hint: "tool_executor", skill_insights: [] },
-    },
-    {
-      input: "帮我看看电视界面按钮",
-      output: { success: true, intent_hint: "complex_task", plan: ["用户需要界面理解", "先获取界面结构或截图", "确认元素后再执行"], answer: "我先分析电视界面，再决定下一步动作。", suggested_actions: [], next_hint: "end", skill_insights: [] },
-    },
+    { input: "返回", output: { thought: "用户想返回，我执行返回操作", action: { tool: "adb", action: "back" }, is_complete: true } },
+    { input: "回主页", output: { thought: "用户想回主页，我执行主页操作", action: { tool: "adb", action: "home" }, is_complete: true } },
+    { input: "打开B站", output: { thought: "用户想打开B站，我启动B站应用", action: { tool: "adb", action: "launch_app", params: { package: "com.xiaodianshi.tv.yst" } }, is_complete: true } },
   ];
 }
 
 function buildDeepSystemPrompt() {
   return [
-    "你是 HomeSense 的 Deep Layer 规划器。",
-    "根据用户输入和上下文，只输出严格 JSON。",
-    "优先复用已有 intent、设备上下文、相似历史经验、已加载 skills。",
-    "优先在已披露 capability 内规划；若 skills 标明 progressive disclosure，不要主动发散到底层未披露能力。",
-    "如果 skill metadata 包含 risk_level 或 preconditions，要把它们视为规划约束。",
-    "如果 context.control_hints.preferred_retrieval_action 非空，把它视为第一优先候选动作；仅当它明显不适合当前任务时才放弃。",
-    "如果 context.control_hints.candidate_preference_summary 存在，应优先参考该 top-1 历史经验，而不是自行发散到其他动作。",
-    "如果用户目标与受支持动作高度吻合，请优先返回可执行 suggested_actions，而不是只给抽象计划。",
-    "只有在动作结构正确且你有较高把握时，才返回 suggested_actions；否则返回空数组。",
-    "支持动作模式：adb.back、adb.home、hami.xiaoai_execute(command=打开电视/打开机顶盒/小爱音箱放歌)、adb.click_element、adb.get_ui_tree。",
-    "如果用户明确说返回/上一页，优先给 adb.back。",
-    "如果用户明确说回主页/首页/主界面，优先给 adb.home。",
-    "如果用户明确说打开电视/打开机顶盒，优先给 hami.xiaoai_execute。",
-    "如果用户要求看电视界面、按钮、页面元素，但没有明确可执行动作，返回空 suggested_actions。",
-    "不要输出 markdown，不要输出解释性前缀，只输出 JSON。",
+    "你是 HomeSense 智能助手，使用 ReAct 循环思考和执行任务。",
+    "",
+    "工具说明：",
+    "- adb: 操控安卓设备（手机/电视/机顶盒），可安装启动应用、点击屏幕、获取界面、返回、主页",
+    "- hami: 控制小爱音箱，发送红外/蓝牙信号开启电器（电视、机顶盒、空调等）",
+    "",
+    "ReAct 格式：",
+    "1. thought: 思考下一步做什么",
+    "2. action: 要执行的工具动作（没有动作时填 null）",
+    "3. confidence: 置信度 0-1，对行动不确定时设为 < 0.7",
+    "4. is_complete: 是否完成（true 表示任务完成或遇到无法解决的问题）",
+    "",
+    "重要规则：",
+    "- 置信度 < 0.7 时，设置 action: null，is_complete: true，thought 改为询问用户",
+    "- 如果用户回答了你的问题，根据回答继续执行任务",
+    "- 执行失败时（如 device not found），设置 is_complete: true 并说明问题",
+    "- 只输出 JSON，不要其他内容。",
   ].join("\n");
 }
 
-async function callConfiguredModel(text: string, context: Record<string, any>, config: LlmAgentConfig) {
-  const apiKey = config.api_key || process.env[config.api_key_env];
-  if (!apiKey) return null;
+function buildHistorySection(history: Array<{role: string; content: string}>): string {
+  if (!history || history.length === 0) return "";
+  
+  const lines = history.map(msg => {
+    const role = msg.role === "user" ? "用户" : "助手";
+    return `${role}: ${msg.content}`;
+  });
+  
+  return `\n对话历史:\n${lines.join("\n")}\n`;
+}
 
-  if (config.provider === "anthropic") {
-    return callAnthropicModel(text, context, config, apiKey);
-  }
+async function callOpenAICompatible(text: string, context: Record<string, any>, config: LlmAgentConfig, apiKey: string) {
+  const url = `${config.base_url}/v1/chat/completions`;
+  const systemPrompt = buildDeepSystemPrompt();
+  const history = Array.isArray(context.history) ? context.history : [];
+  const historySection = buildHistorySection(history);
+  const userPrompt = buildDeepUserPrompt(text, context) + historySection;
 
-  const model = new ChatOpenAI({
-    model: config.model,
-    apiKey,
-    configuration: { baseURL: config.base_url },
-    temperature: 0,
-    timeout: config.timeout_ms,
-    maxRetries: 1,
+  console.log("[LLM] Calling API:", url, config.model);
+  console.log("[LLM] History messages:", history.length);
+  console.log("[LLM] System prompt length:", systemPrompt.length);
+  console.log("[LLM] User prompt length:", userPrompt.length);
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: config.model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ],
+      temperature: 0,
+      max_tokens: 1024,
+    }),
   });
 
-  const response = await model.invoke([
-    new SystemMessage(buildDeepSystemPrompt()),
-    new HumanMessage(buildDeepUserPrompt(text, context)),
-  ]);
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.log("[LLM] API error:", response.status, errorText);
+    throw new Error(`API error: ${response.status} ${errorText}`);
+  }
 
-  const content = typeof response.content === "string"
-    ? response.content
-    : Array.isArray(response.content)
-      ? response.content.map((item) => typeof item === "string" ? item : ("text" in item ? String(item.text) : "")).join("\n")
-      : "";
+  const result = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+  console.log("[LLM] API response keys:", Object.keys(result));
+  
+  const content = result.choices?.[0]?.message?.content || "";
+  console.log("[LLM] Content length:", content.length);
+  console.log("[LLM] Content preview:", content.slice(0, 100));
+
+  if (!content) {
+    throw new Error("Empty content from API");
+  }
 
   const parsed = JSON.parse(extractJsonBlock(content));
   const normalized = sanitizeStructuredOutput(applyFallbackActionPromotion(text, parsed, context));
@@ -419,9 +450,22 @@ async function callConfiguredModel(text: string, context: Record<string, any>, c
     model: config.model,
     needs_model_config: false,
     selected_skill_refs: Array.isArray(context.selectedSkillRefs) ? context.selectedSkillRefs : [],
-    context_summary: normalized.context_summary || buildContextSummary(context),
-    skill_insights: Array.isArray(normalized.skill_insights) ? normalized.skill_insights : buildSkillInsights(context),
+    context_summary: buildContextSummary(context),
+    skill_insights: buildSkillInsights(context),
   };
+}
+
+async function callConfiguredModel(text: string, context: Record<string, any>, config: LlmAgentConfig) {
+  const apiKey = config.api_key || process.env[config.api_key_env];
+  if (!apiKey) {
+    throw new Error("未配置 LLM API Key，请在 config.yaml 中配置");
+  }
+
+  if (config.provider === "anthropic") {
+    return callAnthropicModel(text, context, config, apiKey);
+  }
+
+  return callOpenAICompatible(text, context, config, apiKey);
 }
 
 async function callAnthropicModel(text: string, context: Record<string, any>, config: LlmAgentConfig, apiKey: string) {
@@ -462,8 +506,8 @@ async function callAnthropicModel(text: string, context: Record<string, any>, co
     model: config.model,
     needs_model_config: false,
     selected_skill_refs: Array.isArray(context.selectedSkillRefs) ? context.selectedSkillRefs : [],
-    context_summary: normalized.context_summary || buildContextSummary(context),
-    skill_insights: Array.isArray(normalized.skill_insights) ? normalized.skill_insights : buildSkillInsights(context),
+    context_summary: buildContextSummary(context),
+    skill_insights: buildSkillInsights(context),
   };
 }
 
@@ -484,14 +528,177 @@ function simpleChatReply(text: string): string {
   return "嗯，说说看？";
 }
 
-async function callChatModel(text: string, config: LlmAgentConfig): Promise<string> {
-  return simpleChatReply(text);
+async function callChatModel(text: string, systemPrompt: string, config: LlmAgentConfig): Promise<string> {
+  const apiKey = config.api_key || process.env[config.api_key_env];
+  if (!apiKey) return simpleChatReply(text);
+
+  try {
+    const url = `${config.base_url}/v1/chat/completions`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: text }
+        ],
+        temperature: 0.7,
+        max_tokens: 256,
+      }),
+    });
+
+    if (!response.ok) return simpleChatReply(text);
+    
+    const result = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const content = result.choices?.[0]?.message?.content || "";
+    return content.trim() || simpleChatReply(text);
+  } catch {
+    return simpleChatReply(text);
+  }
+}
+
+async function callChatModelStreaming(
+  text: string,
+  systemPrompt: string,
+  config: LlmAgentConfig,
+  onChunk?: (chunk: string) => void
+): Promise<string> {
+  const apiKey = config.api_key || process.env[config.api_key_env];
+  if (!apiKey) return simpleChatReply(text);
+
+  try {
+    const url = `${config.base_url}/v1/chat/completions`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: text }
+        ],
+        temperature: 0.7,
+        max_tokens: 256,
+        stream: true,
+      }),
+    });
+
+    if (!response.ok) return simpleChatReply(text);
+    
+    const reader = response.body?.getReader();
+    if (!reader) return simpleChatReply(text);
+    
+    let fullContent = "";
+    const decoder = new TextDecoder();
+    
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split("\n").filter(line => line.startsWith("data: "));
+      
+      for (const line of lines) {
+        const data = line.slice(6);
+        if (data === "[DONE]") continue;
+        try {
+          const parsed = JSON.parse(data);
+          const content = parsed.choices?.[0]?.delta?.content || "";
+          if (content) {
+            fullContent += content;
+            if (onChunk) onChunk(content);
+          }
+        } catch {}
+      }
+    }
+    
+    return fullContent.trim() || simpleChatReply(text);
+  } catch {
+    return simpleChatReply(text);
+  }
+}
+
+async function callConfiguredModelStreaming(
+  text: string,
+  context: Record<string, any>,
+  config: LlmAgentConfig,
+  onChunk?: (chunk: string) => void
+): Promise<Record<string, any> | null> {
+  const apiKey = config.api_key || process.env[config.api_key_env];
+  if (!apiKey) return null;
+
+  try {
+    const url = `${config.base_url}/v1/chat/completions`;
+    const systemPrompt = buildDeepSystemPrompt();
+    const userPrompt = buildDeepUserPrompt(text, context);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
+        ],
+        temperature: 0,
+        max_tokens: 1024,
+        stream: true,
+      }),
+    });
+
+    if (!response.ok) return null;
+    
+    const reader = response.body?.getReader();
+    if (!reader) return null;
+    
+    let fullContent = "";
+    const decoder = new TextDecoder();
+    
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split("\n").filter(line => line.startsWith("data: "));
+      
+      for (const line of lines) {
+        const data = line.slice(6);
+        if (data === "[DONE]") continue;
+        try {
+          const parsed = JSON.parse(data);
+          const content = parsed.choices?.[0]?.delta?.content || "";
+          if (content) {
+            fullContent += content;
+            if (onChunk) onChunk(content);
+          }
+        } catch {}
+      }
+    }
+
+    const parsed = JSON.parse(extractJsonBlock(fullContent));
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 async function buildStructured(text: string, context: Record<string, any>, config: LlmAgentConfig) {
-  const configured = await callConfiguredModel(text, context, config).catch(() => null);
-  if (configured) return configured;
-  return buildFallbackStructured(text, context, config);
+  const configured = await callConfiguredModel(text, context, config);
+  if (!configured) {
+    throw new Error("LLM API 调用失败，请检查 API 配置");
+  }
+  return configured;
 }
 
 export const llmAgentTool = tool(
@@ -499,6 +706,15 @@ export const llmAgentTool = tool(
     const config = loadConfig();
     const text = input.text as string;
     const context = input.context ? JSON.parse(String(input.context)) : {};
+
+    // 闲聊模式：简单回复
+    if (context.mode === "chat") {
+      const systemPrompt = context.systemPrompt || "你是闲聊助手，简短回复。";
+      const chatResult = await callChatModel(text, systemPrompt, config);
+      return JSON.stringify({ answer: chatResult });
+    }
+
+    // ReAct 模式：结构化输出
     const structured = await buildStructured(text, context, config);
     return JSON.stringify(structured);
   },
@@ -512,4 +728,4 @@ export const llmAgentTool = tool(
   },
 );
 
-export { callChatModel, loadConfig as loadLlmAgentConfig };
+export { callChatModel, loadConfig as loadLlmAgentConfig, deriveSuggestedActions, shouldPromoteFallbackAction };
