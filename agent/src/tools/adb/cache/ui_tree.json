@@ -1,0 +1,89 @@
+{
+  "elements": [
+    {
+      "index": 0,
+      "text": "",
+      "bounds": [
+        0,
+        0,
+        1080,
+        2262
+      ],
+      "center": [
+        540,
+        1131
+      ],
+      "clickable": false,
+      "resource_id": "",
+      "class_name": "android.widget.FrameLayout"
+    },
+    {
+      "index": 1,
+      "text": "",
+      "bounds": [
+        0,
+        0,
+        1080,
+        2262
+      ],
+      "center": [
+        540,
+        1131
+      ],
+      "clickable": false,
+      "resource_id": "com.android.systemui:id/scrim_behind",
+      "class_name": "android.view.View"
+    },
+    {
+      "index": 2,
+      "text": "",
+      "bounds": [
+        0,
+        0,
+        1080,
+        2262
+      ],
+      "center": [
+        540,
+        1131
+      ],
+      "clickable": false,
+      "resource_id": "com.android.systemui:id/scrim_notifications",
+      "class_name": "android.view.View"
+    },
+    {
+      "index": 3,
+      "text": "",
+      "bounds": [
+        0,
+        0,
+        1080,
+        2262
+      ],
+      "center": [
+        540,
+        1131
+      ],
+      "clickable": false,
+      "resource_id": "com.android.systemui:id/scrim_in_front",
+      "class_name": "android.view.View"
+    },
+    {
+      "index": 4,
+      "text": "",
+      "bounds": [
+        0,
+        0,
+        1080,
+        2262
+      ],
+      "center": [
+        540,
+        1131
+      ],
+      "clickable": false,
+      "resource_id": "com.android.systemui:id/keyguard_message_area_container",
+      "class_name": "android.widget.LinearLayout"
+    }
+  ]
+}

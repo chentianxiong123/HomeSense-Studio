@@ -1,6 +1,6 @@
 provider: "openai-compatible"
-model: "minimax/minimax-m2.5-highspeed"
-base_url: "https://api.qnaigc.com/v1"
-api_key: "sk-7ab7abb58465a9e7032ed942f77468477424896392dd3af06b39ab9c49503a09"
+model: "gpt-4o-mini"
+base_url: "https://daidai.rxwysystem.com"
+api_key: "sk-d468157c3ae2fa0b2ecc59e1f0c37048e69af3766c85e467585bfca04cb75918"
 max_iterations: 5
 timeout_ms: 30000

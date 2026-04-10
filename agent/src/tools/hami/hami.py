@@ -9,6 +9,17 @@ import json
 HA_URL = os.getenv("HAMi_URL", "ws://192.168.31.204:8123/api/websocket")
 HA_TOKEN = os.getenv("HAMi_TOKEN", "")
 
+MOCK_MODE = (
+    HA_TOKEN == ""
+    or HA_TOKEN == "YOUR_HOME_ASSISTANT_TOKEN"
+    or "mock" in HA_URL.lower()
+)
+
+
+def is_mock_mode() -> bool:
+    return MOCK_MODE
+
+
 ENTITIES = {
     "tvs_toshiba": "select.remote_ir_2038224602945437696",
     "stb": "select.remote_ir_2038476279661080578",

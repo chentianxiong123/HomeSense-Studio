@@ -4,13 +4,16 @@ import { dirname, join } from "path";
 import Database from "better-sqlite3";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DB_PATH = join(__dirname, "chat.db");
+// 使用项目根目录下的 data 文件夹，确保 src 和 dist 使用同一个数据库
+const DB_PATH = join(dirname(dirname(dirname(__dirname))), "data", "chat.db");
 
 export interface ChatMessage {
   id: number;
   role: string;
   content: string;
   created_at: string;
+  session_id?: string;
+  is_clarification?: boolean;
   trace?: unknown[];
   writeBackResults?: unknown[];
   llm?: Record<string, unknown> | null;
@@ -41,6 +44,8 @@ interface ChatMessageRow {
   role: string;
   content: string;
   created_at: string;
+  session_id?: string;
+  is_clarification?: number;
   payload_json?: string | null;
 }
 
@@ -59,12 +64,23 @@ function ensureDb(): Database.Database {
       role TEXT NOT NULL,
       content TEXT NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      session_id TEXT,
+      is_clarification INTEGER DEFAULT 0,
       payload_json TEXT
     );
   `);
 
   const columns = db.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>;
+  const hasSessionId = columns.some((column) => column.name === "session_id");
+  const hasClarification = columns.some((column) => column.name === "is_clarification");
   const hasPayloadJson = columns.some((column) => column.name === "payload_json");
+  
+  if (!hasSessionId) {
+    db.exec("ALTER TABLE messages ADD COLUMN session_id TEXT");
+  }
+  if (!hasClarification) {
+    db.exec("ALTER TABLE messages ADD COLUMN is_clarification INTEGER DEFAULT 0");
+  }
   if (!hasPayloadJson) {
     db.exec("ALTER TABLE messages ADD COLUMN payload_json TEXT");
   }
@@ -100,6 +116,8 @@ function parseMessageRow(row: ChatMessageRow): ChatMessage {
     role: row.role,
     content: row.content,
     created_at: row.created_at,
+    session_id: row.session_id,
+    is_clarification: row.is_clarification === 1,
     trace: Array.isArray(payload.trace) ? payload.trace : [],
     writeBackResults: Array.isArray(payload.writeBackResults) ? payload.writeBackResults : [],
     llm: payload.llm ?? null,
@@ -109,12 +127,25 @@ function parseMessageRow(row: ChatMessageRow): ChatMessage {
   };
 }
 
-export function saveMessage(role: string, content: string, payload?: PersistedMessagePayload): ChatMessage {
+export function saveMessage(
+  role: string, 
+  content: string, 
+  payload?: PersistedMessagePayload,
+  options?: { session_id?: string; is_clarification?: boolean }
+): ChatMessage {
   const db = ensureDb();
-  const stmt = db.prepare("INSERT INTO messages (role, content, payload_json) VALUES (?, ?, ?)");
-  const result = stmt.run(role, content, buildPersistedPayload(payload));
+  const stmt = db.prepare(
+    "INSERT INTO messages (role, content, payload_json, session_id, is_clarification) VALUES (?, ?, ?, ?, ?)"
+  );
+  const result = stmt.run(
+    role, 
+    content, 
+    buildPersistedPayload(payload),
+    options?.session_id || null,
+    options?.is_clarification ? 1 : 0
+  );
 
-  const query = db.prepare("SELECT id, role, content, created_at, payload_json FROM messages WHERE id = ?");
+  const query = db.prepare("SELECT id, role, content, created_at, session_id, is_clarification, payload_json FROM messages WHERE id = ?");
   const row = query.get(result.lastInsertRowid) as ChatMessageRow;
 
   db.close();
@@ -183,7 +214,7 @@ export function getMessagesPage(
 export function getRecentMessages(limit: number): ChatMessage[] {
   const db = ensureDb();
   const stmt = db.prepare(
-    "SELECT id, role, content, created_at, payload_json FROM messages ORDER BY id DESC LIMIT ?"
+    "SELECT id, role, content, created_at, session_id, is_clarification, payload_json FROM messages ORDER BY id DESC LIMIT ?"
   );
   const rows = stmt.all(limit) as ChatMessageRow[];
   db.close();
@@ -193,11 +224,39 @@ export function getRecentMessages(limit: number): ChatMessage[] {
 export function getRecentUserMessages(limit: number): ChatMessage[] {
   const db = ensureDb();
   const stmt = db.prepare(
-    "SELECT id, role, content, created_at, payload_json FROM messages WHERE role = ? ORDER BY id DESC LIMIT ?"
+    "SELECT id, role, content, created_at, session_id, is_clarification, payload_json FROM messages WHERE role = ? ORDER BY id DESC LIMIT ?"
   );
   const rows = stmt.all("user", limit) as ChatMessageRow[];
   db.close();
   return rows.map(parseMessageRow).reverse();
+}
+
+export function getSmartContext(maxRounds: number = 2): Array<{role: string; content: string}> {
+  const db = ensureDb();
+  
+  const lastAssistantStmt = db.prepare(
+    "SELECT id, role, content, is_clarification FROM messages WHERE role = 'assistant' ORDER BY id DESC LIMIT 1"
+  );
+  const lastAssistant = lastAssistantStmt.get() as { id: number; role: string; content: string; is_clarification: number } | undefined;
+  
+  if (!lastAssistant || lastAssistant.is_clarification !== 1) {
+    db.close();
+    return [];
+  }
+  
+  const contextStmt = db.prepare(
+    `SELECT role, content FROM messages 
+     WHERE id >= ? - ? * 2 
+     ORDER BY id DESC 
+     LIMIT ?`,
+  );
+  const rows = contextStmt.all(lastAssistant.id, maxRounds, maxRounds * 2) as Array<{ role: string; content: string }>;
+  db.close();
+  
+  return rows.reverse().map(row => ({
+    role: row.role,
+    content: row.content.slice(0, 200),
+  }));
 }
 
 export function getMessageCount(): number {

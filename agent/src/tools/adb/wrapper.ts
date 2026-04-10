@@ -1,6 +1,6 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { readFileSync, existsSync, mkdirSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { spawn } from "child_process";
@@ -13,8 +13,6 @@ interface AdbConfig {
   devicePort: number;
   adbPath: string;
   timeoutMs: number;
-  strategy?: Record<string, unknown>;
-  perception?: Record<string, unknown>;
 }
 
 function loadConfig(): AdbConfig {
@@ -28,16 +26,14 @@ function loadConfig(): AdbConfig {
       deviceIp: parsed.deviceIp || parsed.device?.ip || "127.0.0.1",
       devicePort: parsed.devicePort || parsed.device?.port || 5555,
       adbPath: parsed.adbPath || parsed.device?.adb_path || "adb",
-      timeoutMs: parsed.timeoutMs || parsed.timeout_ms || parsed.device?.timeout_ms || 10000,
-      strategy: parsed.strategy,
-      perception: parsed.perception,
+      timeoutMs: parsed.timeoutMs || parsed.timeout_ms || parsed.device?.timeout_ms || 30000,
     };
   } catch {
     return {
       deviceIp: "127.0.0.1",
       devicePort: 5555,
       adbPath: "adb",
-      timeoutMs: 10000,
+      timeoutMs: 30000,
     };
   }
 }
@@ -50,12 +46,9 @@ export const adbTool = tool(
     const scriptPath = existsSync(join(__dirname, "adb.py"))
       ? join(__dirname, "adb.py")
       : join(__dirname, "../../../src/tools/adb/adb.py");
-    const args = [scriptPath, action];
-    for (const [key, value] of Object.entries(params)) {
-      if (value !== undefined) {
-        args.push(`${key}=${value}`);
-      }
-    }
+
+    const command = { action, ...params };
+    const jsonArg = JSON.stringify(command);
 
     return new Promise((resolve) => {
       const env = {
@@ -65,7 +58,10 @@ export const adbTool = tool(
         ADB_PATH: config.adbPath,
       };
 
-      const proc = spawn("python", args, { env, cwd: dirname(scriptPath) });
+      const proc = spawn("python", [scriptPath, "run", jsonArg], {
+        env,
+        cwd: dirname(scriptPath),
+      });
 
       let stdout = "";
       let stderr = "";
@@ -80,78 +76,106 @@ export const adbTool = tool(
 
       const timeout = setTimeout(() => {
         proc.kill();
-        resolve(JSON.stringify({ success: false, error: `Timeout after ${config.timeoutMs}ms` }));
+        resolve(JSON.stringify({ status: "error", error: `Timeout after ${config.timeoutMs}ms` }));
       }, config.timeoutMs);
 
       proc.on("close", (code) => {
         clearTimeout(timeout);
 
-        if (code === 0 && stdout) {
+        if (stdout) {
           try {
             const result = JSON.parse(stdout.trim());
             resolve(JSON.stringify(result));
           } catch {
-            resolve(JSON.stringify({ success: false, error: `Invalid JSON output: ${stdout}` }));
+            resolve(JSON.stringify({ status: "error", error: `Invalid JSON output: ${stdout}` }));
           }
         } else {
-          resolve(JSON.stringify({ success: false, error: stderr || `Process exited with code ${code}` }));
+          resolve(JSON.stringify({ status: "error", error: stderr || `Process exited with code ${code}` }));
         }
       });
 
       proc.on("error", (err) => {
         clearTimeout(timeout);
-        resolve(JSON.stringify({ success: false, error: `Failed to start process: ${err.message}` }));
+        resolve(JSON.stringify({ status: "error", error: `Failed to start process: ${err.message}` }));
       });
     });
   },
   {
     name: "adb",
-    description: "安卓设备控制，支持 tap、swipe、input_text、press_key、open_app、screenshot 等操作",
+    description: `ADB CLI - 安卓设备控制工具。使用 JSON 格式命令。
+
+核心工作流：
+1. 观察: get_ui_elements 查看屏幕内容
+2. 行动: tap_element, input_text, press_key 等
+3. 再观察: 屏幕变化后重新获取 UI 元素
+
+可用操作：
+- list_devices, connect, disconnect, ensure_connected
+- screenshot, get_ui_elements, get_display_size
+- tap, tap_ratio, swipe, tap_element
+- input_text, press_key, back, home, enter
+- launch_app, get_current_app, list_packages, check_package
+- find_element, wait
+- ocr_recognize (需配置 perception.ocr.enabled: true)
+- vision_understand (需配置 perception.multimodal.enabled: true)`,
     schema: z.object({
       action: z.enum([
+        "list_devices",
+        "devices",
+        "connect",
+        "disconnect",
+        "ensure_connected",
+        "screenshot",
+        "get_screenshot",
+        "get_display_size",
+        "get_ui_elements",
+        "ui_elements",
+        "get_ui_tree",
         "tap",
+        "tap_ratio",
         "swipe",
+        "tap_element",
         "input_text",
+        "type",
         "press_key",
-        "key_event",
-        "open_app",
+        "key",
         "back",
         "home",
         "enter",
-        "screenshot",
-        "get_ui_tree",
+        "launch_app",
+        "launch",
         "get_current_app",
-        "find_text",
-        "click_element",
-        "ocr_local",
-        "ocr_api",
-        "multimodal_understand",
+        "current_app",
+        "list_packages",
         "list_apps",
-        "list_devices",
-        "connect",
-        "disconnect",
-        "turn_on_tv",
-        "turn_on_stb",
-        "check_bilibili_installed",
-        "open_dangbei",
-        "search_bilibili",
-        "install_bilibili",
-        "open_bilibili",
+        "check_package",
+        "find_element",
+        "find_text",
+        "wait",
+        "ocr_recognize",
+        "ocr",
+        "vision_understand",
+        "vision",
       ]).describe("操作类型"),
-      x: z.number().optional().describe("tap/swipe 的 x 坐标"),
-      y: z.number().optional().describe("tap/swipe 的 y 坐标"),
-      x1: z.number().optional().describe("swipe 起始 x"),
-      y1: z.number().optional().describe("swipe 起始 y"),
-      x2: z.number().optional().describe("swipe 结束 x"),
-      y2: z.number().optional().describe("swipe 结束 y"),
-      duration: z.number().optional().describe("swipe 持续时间"),
-      text: z.string().optional().describe("input_text 的文本"),
+      x: z.number().optional().describe("tap 的 x 坐标"),
+      y: z.number().optional().describe("tap 的 y 坐标"),
+      x_ratio: z.number().optional().describe("tap_ratio 的 x 比例 (0-1)"),
+      y_ratio: z.number().optional().describe("tap_ratio 的 y 比例 (0-1)"),
+      start_x: z.number().optional().describe("swipe 起始 x"),
+      start_y: z.number().optional().describe("swipe 起始 y"),
+      end_x: z.number().optional().describe("swipe 结束 x"),
+      end_y: z.number().optional().describe("swipe 结束 y"),
+      duration: z.number().optional().describe("swipe 持续时间(ms)"),
+      text: z.string().optional().describe("input_text 的文本 或 tap_element/find_element 的元素文本"),
+      index: z.number().optional().describe("tap_element 的元素索引"),
       key: z.string().optional().describe("press_key 的按键名"),
-      keycode: z.number().optional().describe("key_event 的键码"),
-      package: z.string().optional().describe("open_app 的包名"),
-      keyword: z.string().optional().describe("list_apps 的关键词"),
-      ip: z.string().optional().describe("connect/disconnect 的 IP"),
-      port: z.number().optional().describe("connect/disconnect 的端口"),
+      package: z.string().optional().describe("launch_app/check_package 的包名"),
+      package_name: z.string().optional().describe("launch_app 的包名 (别名)"),
+      keyword: z.string().optional().describe("list_packages 的关键词"),
+      seconds: z.number().optional().describe("wait 的秒数"),
+      path: z.string().optional().describe("screenshot 的保存路径"),
+      refresh: z.boolean().optional().describe("tap_element 是否刷新 UI 缓存"),
+      question: z.string().optional().describe("vision_understand 提出的问题"),
     }),
   }
 );

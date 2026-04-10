@@ -1,3 +1,3 @@
-ha_url: "ws://127.0.0.1:8123/api/websocket"
-ha_token: "YOUR_HOME_ASSISTANT_TOKEN"
+ha_url: "ws://192.168.31.204:8123/api/websocket"
+ha_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJkOTU3ODJlNGIwYWE0ZDg0ODdmMzliOGMyYmJmYjhjMyIsImlhdCI6MTc3NDg3Njc3OSwiZXhwIjoyMDkwMjM2Nzc5fQ.apavY5JDgJTOgDp0sQq5LjIhsdPwnKft89t2l0iEsSE"
 timeout_ms: 10000

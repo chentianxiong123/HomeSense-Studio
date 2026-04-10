@@ -1,3 +1,5 @@
 model: "local-intent"
-confidence_threshold: 0.8
-enabled: false
+confidence_threshold: 0.5
+enabled: true
+use_vector_db: true
+vector_db_path: "./data/intents.db"

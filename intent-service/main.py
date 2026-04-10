@@ -4,11 +4,19 @@ from sentence_transformers import SentenceTransformer
 import numpy as np
 import json
 import os
+import sys
+
+if sys.platform == "win32":
+    import codecs
+    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+    sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+
+os.environ["PYTHONIOENCODING"] = "utf-8"
 from typing import Optional, List
 
 app = FastAPI(title="Intent Model Service", description="轻量级意图分类模型服务")
 
-MODEL_NAME = "all-MiniLM-L6-v2"
+MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 INTENTS_FILE = os.path.join(DATA_DIR, "intents.json")
 
@@ -31,6 +39,10 @@ class SimilarityRequest(BaseModel):
     query: str
     candidates: List[str]
     top_k: int = 5
+
+
+class EmbedRequest(BaseModel):
+    text: str
 
 
 def load_intents():
@@ -94,7 +106,7 @@ def classify(req: ClassifyRequest):
     best_intent = intent_data[best_idx]["intent"]
 
     method = "semantic_vector"
-    if best_score < 0.5:
+    if best_score < 0.3:
         method = "low_confidence"
         best_intent = "command"
 
@@ -130,6 +142,23 @@ def similarity(req: SimilarityRequest):
 
     scored.sort(key=lambda item: item["score"], reverse=True)
     return {"matches": scored[: max(req.top_k, 1)]}
+
+
+@app.post("/embed")
+def embed(req: EmbedRequest):
+    if not model:
+        return {"error": "Model not loaded"}
+
+    text = req.text.strip()
+    if not text:
+        return {"embedding": [], "dimension": 0}
+
+    vector = model.encode([text], convert_to_numpy=True)[0].tolist()
+    return {
+        "embedding": vector,
+        "dimension": len(vector),
+        "model": MODEL_NAME,
+    }
 
 
 @app.post("/reload")
