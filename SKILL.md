@@ -7,6 +7,10 @@ description: "Source project for HomeSense HAMI CLI. Use when working on the HAM
 
 This directory is the source project, not the installed skill package.
 
+## Config
+
+Fill [config.json](/D:/files/HomeSense/homesense-hami-cli-source/config.json) with your websocket URL, token, and entity IDs from Developer Tools.
+
 ## Commands
 
 ```powershell
