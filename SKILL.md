@@ -11,6 +11,7 @@ This directory is the source project, not the installed skill package.
 
 - run the JSON CLI wrapper
 - test local OCR or external image APIs
+- fill the ADB device IP table
 - adjust packaging scripts
 - extend the exposed CLI actions
 
@@ -18,6 +19,7 @@ This directory is the source project, not the installed skill package.
 
 ```powershell
 python main.py run "{\"action\":\"list_devices\"}"
+python main.py run "{\"action\":\"ensure_connected\"}"
 python main.py run "{\"action\":\"launch_app\",\"package\":\"com.xiaodianshi.tv.yst\"}"
 python main.py run "{\"action\":\"ocr_local\"}"
 python main.py run "{\"action\":\"ocr_api\",\"url\":\"https://example.com/ocr\"}"

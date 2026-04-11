@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +12,7 @@ from urllib.error import URLError, HTTPError
 ROOT = Path(__file__).resolve().parents[2]
 ADB_SCRIPT = ROOT / "agent" / "src" / "tools" / "adb" / "adb.py"
 CONFIG_PATH = ROOT / "homesense-adb-cli-source" / "config.json"
+DEVICES_PATH = ROOT / "homesense-adb-cli-source" / "adb_devices.json"
 
 
 def _load_config() -> dict[str, Any]:
@@ -22,12 +24,41 @@ def _load_config() -> dict[str, Any]:
         return {}
 
 
+def _load_device_config() -> dict[str, Any]:
+    if not DEVICES_PATH.exists():
+        return {}
+    try:
+        return json.loads(DEVICES_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _resolve_device_env(command: dict[str, Any]) -> dict[str, str]:
+    device_config = _load_device_config()
+    devices = device_config.get("devices", {})
+    selected_name = command.get("device_name") or device_config.get("default_device")
+    selected = devices.get(selected_name, {}) if selected_name else {}
+
+    ip = command.get("device_ip") or selected.get("ip")
+    port = command.get("device_port") or selected.get("port")
+
+    env_updates: dict[str, str] = {}
+    if ip:
+        env_updates["TV_IP"] = str(ip)
+    if port:
+        env_updates["TV_PORT"] = str(port)
+    return env_updates
+
+
 def _run_adb_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    env = os.environ.copy()
+    env.update(_resolve_device_env(payload))
     result = subprocess.run(
         [sys.executable, str(ADB_SCRIPT), "run", json.dumps(payload, ensure_ascii=False)],
         capture_output=True,
         text=True,
         cwd=str(ADB_SCRIPT.parent),
+        env=env,
     )
 
     if result.stdout:
