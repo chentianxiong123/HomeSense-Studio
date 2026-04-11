@@ -33,6 +33,9 @@ pnpm-debug.log*
 agent/src/tools/success_paths/data/
 agent/src/tools/memory/data/
 agent/src/tools/**/config.local.yaml
+intent-service/.venv/
+**/*.db
+agent/src/tools/adb/cache/
 
 # Python cache
 **/__pycache__/

@@ -4,7 +4,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NLayoutSider, NModal, NTag } from 'naive-ui'
 import Footer from './Footer.vue'
-import { fetchClusters, fetchDevices, fetchExperiencePaths, fetchRules, fetchTools, fetchWorkflowCandidates } from '@/api'
+import { fetchDevices, fetchExperiencePaths, fetchRules, fetchTools } from '@/api'
 import { useAppStore, useRuntimePanelStore } from '@/store'
 import { useBasicLayout } from '@/hooks/useBasicLayout'
 import { PromptStore, SvgIcon } from '@/components/common'
@@ -40,21 +40,6 @@ interface SidebarTool {
   description: string
 }
 
-interface SidebarWorkflowCandidate {
-  workflowId: string
-  name: string
-  status?: string
-  source?: string
-  goal?: string
-}
-
-interface SidebarCluster {
-  clusterId: string
-  pathCount: number
-  avgSuccessRate: number
-  topPath?: string
-}
-
 const router = useRouter()
 const route = useRoute()
 const appStore = useAppStore()
@@ -73,12 +58,11 @@ const rules = ref<SidebarRule[]>([])
 const experiencePaths = ref<SidebarExperiencePath[]>([])
 const devices = ref<SidebarDevice[]>([])
 const tools = ref<SidebarTool[]>([])
-const workflowCandidates = ref<SidebarWorkflowCandidate[]>([])
-const clusters = ref<SidebarCluster[]>([])
+const workflowCandidates = ref<Array<{ workflowId: string, name: string, status?: string, source?: string }>>([])
+const clusters = ref<Array<{ clusterId: string, pathCount: number, avgSuccessRate?: number, topPath?: string }>>([])
 
 const collapsed = computed(() => appStore.siderCollapsed)
 const isChatRoute = computed(() => route.path.startsWith('/chat'))
-const runtimeTrace = computed(() => runtimePanelStore.trace || [])
 const runtimeMeta = computed(() => runtimePanelStore.resolutionMeta)
 const topRules = computed(() => [...rules.value]
   .sort((left, right) => (right.hit_count || 0) - (left.hit_count || 0))
@@ -97,20 +81,33 @@ async function loadRuntimePanelData() {
 
   loadingPanel.value = true
   try {
-    const [rulesRes, pathsRes, devicesRes, toolsRes, workflowsRes, clustersRes] = await Promise.all([
+    const results = await Promise.allSettled([
       fetchRules<any>(),
       fetchExperiencePaths<any>(),
       fetchDevices<any>(),
       fetchTools<any>(),
-      fetchWorkflowCandidates<any>(),
-      fetchClusters<any>(),
     ])
-    rules.value = Array.isArray(rulesRes.data) ? rulesRes.data : []
-    experiencePaths.value = Array.isArray(pathsRes.data) ? pathsRes.data : []
-    devices.value = Array.isArray(devicesRes.data) ? devicesRes.data : []
-    tools.value = Array.isArray(toolsRes.data) ? toolsRes.data : []
-    workflowCandidates.value = workflowsRes.data?.workflows ?? []
-    clusters.value = clustersRes.data?.clusters ?? []
+    const [rulesRes, pathsRes, devicesRes, toolsRes] = results
+
+    if (rulesRes.status === 'fulfilled')
+      rules.value = Array.isArray(rulesRes.value.data) ? rulesRes.value.data : []
+    else
+      console.error('Failed to load rules:', rulesRes.reason)
+
+    if (pathsRes.status === 'fulfilled')
+      experiencePaths.value = Array.isArray(pathsRes.value.data) ? pathsRes.value.data : []
+    else
+      console.error('Failed to load success paths:', pathsRes.reason)
+
+    if (devicesRes.status === 'fulfilled')
+      devices.value = Array.isArray(devicesRes.value.data) ? devicesRes.value.data : []
+    else
+      console.error('Failed to load devices:', devicesRes.reason)
+
+    if (toolsRes.status === 'fulfilled')
+      tools.value = Array.isArray(toolsRes.value.data) ? toolsRes.value.data : []
+    else
+      console.error('Failed to load tools:', toolsRes.reason)
   }
   catch (error) {
     console.error('Failed to load runtime sidebar data:', error)
@@ -199,28 +196,13 @@ onMounted(() => {
           </div>
 
           <div class="rounded border border-[#e5e7eb] bg-white/80 p-3 text-xs dark:border-[#2a2a2d] dark:bg-[#151518]">
-            <div class="font-medium text-gray-800 dark:text-white">当前链路</div>
-            <div v-if="runtimePanelStore.latestAt" class="mt-1 text-neutral-500">{{ runtimePanelStore.latestAt }}</div>
-            <div v-if="runtimeMeta" class="mt-2 space-y-1 text-neutral-600 dark:text-neutral-300">
-              <div>来源: {{ runtimeMeta.resolutionSource || 'unknown' }}</div>
-              <div>结果: {{ runtimeMeta.outcomeType || 'unknown' }}</div>
-              <div>命中: {{ runtimeMeta.matched ? 'yes' : 'no' }}</div>
-              <div v-if="runtimeMeta.matchedTrigger">规则: {{ runtimeMeta.matchedTrigger }}</div>
-              <div v-if="runtimeMeta.matchedPathName">经验: {{ runtimeMeta.matchedPathName }}</div>
-              <div v-if="runtimeMeta.deepMatchedPathName">Deep: {{ runtimeMeta.deepMatchedPathName }}</div>
-              <div v-if="runtimeMeta.gatingReason">约束: {{ runtimeMeta.gatingReason }}</div>
+            <div class="mb-2 flex items-center justify-between">
+              <div class="font-medium text-gray-800 dark:text-white">当前上下文</div>
             </div>
-            <div v-if="runtimeTrace.length" class="mt-2 flex flex-wrap gap-1">
-              <span
-                v-for="item in runtimeTrace"
-                :key="`${item.stage}-${item.next}`"
-                class="rounded px-2 py-0.5"
-                :class="item.ok ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'"
-              >
-                {{ item.stage }}
-              </span>
+            <div class="space-y-2 text-neutral-500">
+              <div>补全设备: {{ runtimeMeta?.currentCompletionDevice || '暂无' }}</div>
+              <div>补全输入: {{ runtimeMeta?.completedInput || '暂无' }}</div>
             </div>
-            <div v-if="!runtimeMeta && !runtimeTrace.length" class="mt-2 text-neutral-400">暂无最新链路</div>
           </div>
 
           <div class="rounded border border-[#e5e7eb] bg-white/80 p-3 text-xs dark:border-[#2a2a2d] dark:bg-[#151518]">

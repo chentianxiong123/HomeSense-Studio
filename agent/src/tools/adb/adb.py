@@ -155,9 +155,51 @@ def _handle_list_devices(params: dict) -> dict:
 def _handle_connect(params: dict) -> dict:
     ip = params.get("ip", TV_IP)
     port = params.get("port", int(TV_PORT))
-    out, _, code = run_global_cmd(["connect", f"{ip}:{port}"])
-    success = code == 0 and "connected" in out.lower()
-    return {"status": "success" if success else "error", "message": out.strip(), "address": f"{ip}:{port}"}
+    max_attempts = params.get("max_attempts", 5)
+    backoff_seconds = params.get("backoff_seconds", 2)
+
+    try:
+        max_attempts = int(max_attempts)
+    except Exception:
+        max_attempts = 5
+
+    try:
+        backoff_seconds = int(backoff_seconds)
+    except Exception:
+        backoff_seconds = 2
+
+    address = f"{ip}:{port}"
+    logs = []
+
+    for attempt in range(max_attempts):
+        out, err, code = run_global_cmd(["connect", address])
+        combined = (out or err or "").strip()
+        success = code == 0 and ("connected" in out.lower() or "already connected" in out.lower())
+        logs.append({
+            "attempt": attempt + 1,
+            "message": combined,
+            "code": code,
+            "success": success,
+        })
+        if success:
+            return {
+                "status": "success",
+                "message": combined or "connected",
+                "address": address,
+                "attempts": attempt + 1,
+                "logs": logs,
+            }
+
+        if attempt < max_attempts - 1:
+            time.sleep(backoff_seconds * (2 ** attempt))
+
+    return {
+        "status": "error",
+        "message": logs[-1]["message"] if logs else "failed_to_connect",
+        "address": address,
+        "attempts": max_attempts,
+        "logs": logs,
+    }
 
 
 def _handle_disconnect(params: dict) -> dict:
@@ -479,7 +521,7 @@ def _handle_launch_app(params: dict) -> dict:
     component = None
     lines = [line.strip() for line in out.splitlines() if line.strip()]
     for line in reversed(lines):
-        if "/" in line:
+        if "/" in line and package in line and not line.startswith("/system/"):
             component = line
             break
 
@@ -554,18 +596,79 @@ def _handle_wait(params: dict) -> dict:
 
 
 def _handle_ensure_connected(params: dict) -> dict:
-    listed = _handle_list_devices({})
-    if listed.get("status") == "success":
-        target_id = f"{TV_IP}:{TV_PORT}"
-        for device in listed.get("devices", []):
-            if device.get("device_id") == target_id and device.get("status") == "device":
-                return {"status": "success", "message": "already_connected", "device": target_id}
+    target_id = f"{TV_IP}:{TV_PORT}"
+    initial_wait_seconds = params.get("initial_wait_seconds", 10)
+    max_attempts = params.get("max_attempts", 5)
+    backoff_seconds = params.get("backoff_seconds", 2)
 
-    connected = _handle_connect({})
-    if connected.get("status") == "success":
-        return {"status": "success", "message": connected.get("message", "connected"), "device": f"{TV_IP}:{TV_PORT}"}
+    try:
+        initial_wait_seconds = int(initial_wait_seconds)
+    except Exception:
+        initial_wait_seconds = 10
 
-    return {"status": "error", "error": connected.get("message", "failed_to_connect"), "device": f"{TV_IP}:{TV_PORT}"}
+    try:
+        max_attempts = int(max_attempts)
+    except Exception:
+        max_attempts = 5
+
+    try:
+        backoff_seconds = int(backoff_seconds)
+    except Exception:
+        backoff_seconds = 2
+
+    if initial_wait_seconds > 0:
+        time.sleep(initial_wait_seconds)
+
+    attempt_logs = []
+
+    for attempt in range(max_attempts):
+        listed = _handle_list_devices({})
+        if listed.get("status") == "success":
+            for device in listed.get("devices", []):
+                if device.get("device_id") == target_id and device.get("status") == "device":
+                    return {
+                        "status": "success",
+                        "message": "already_connected" if attempt == 0 else "reconnected",
+                        "device": target_id,
+                        "attempts": attempt + 1,
+                        "logs": attempt_logs,
+                    }
+
+        _handle_disconnect({})
+        connected = _handle_connect({
+            "ip": TV_IP,
+            "port": int(TV_PORT),
+            "max_attempts": max_attempts,
+            "backoff_seconds": backoff_seconds,
+        })
+        attempt_logs.append({
+            "attempt": attempt + 1,
+            "message": connected.get("message", ""),
+            "status": connected.get("status", "error"),
+        })
+
+        listed_after = _handle_list_devices({})
+        if listed_after.get("status") == "success":
+            for device in listed_after.get("devices", []):
+                if device.get("device_id") == target_id and device.get("status") == "device":
+                    return {
+                        "status": "success",
+                        "message": connected.get("message", "connected"),
+                        "device": target_id,
+                        "attempts": attempt + 1,
+                        "logs": attempt_logs,
+                    }
+
+        if attempt < max_attempts - 1:
+            time.sleep(backoff_seconds * (2 ** attempt))
+
+    return {
+        "status": "error",
+        "error": "failed_to_connect_after_retries",
+        "device": target_id,
+        "attempts": max_attempts,
+        "logs": attempt_logs,
+    }
 
 
 def _handle_find_element(params: dict) -> dict:

@@ -7,6 +7,43 @@ const DB_PATH = join(__dirname, 'rule_engine.db')
 
 let db: Database.Database | null = null
 
+const SEEDED_RULES = [
+  {
+    trigger: '返回',
+    response: '好的，返回上一页',
+    actions: [{ tool: 'adb', action: 'back' }],
+  },
+  {
+    trigger: '主页',
+    response: '好的，返回主页',
+    actions: [{ tool: 'adb', action: 'home' }],
+  },
+  {
+    trigger: '打开东芝电视',
+    response: '好的，打开东芝电视',
+    actions: [{ tool: 'hami', action: 'xiaoai_execute', params: { command: '打开东芝电视' } }],
+  },
+  {
+    trigger: '打开机顶盒',
+    response: '好的，打开机顶盒',
+    actions: [{ tool: 'hami', action: 'xiaoai_execute', params: { command: '打开机顶盒' } }],
+  },
+] as const
+
+const SEEDED_SYNONYMS = [
+  ['打开', '开启'],
+  ['打开', '启动'],
+  ['打开', '开一下'],
+  ['关闭', '关掉'],
+  ['关闭', '关一下'],
+  ['返回', '后退'],
+  ['主页', '首页'],
+  ['东芝电视', '东芝'],
+  ['乐视电视', '乐视'],
+  ['机顶盒', '盒子'],
+  ['小爱音箱', '小爱音响'],
+] as const
+
 export function initDatabase(): Database.Database {
   if (db) return db
 
@@ -24,7 +61,6 @@ export function initDatabase(): Database.Database {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `)
-  ensureRuleSchema(db)
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS synonyms (
@@ -36,67 +72,46 @@ export function initDatabase(): Database.Database {
     )
   `)
 
+  ensureRuleSchema(db)
   db.exec(`CREATE INDEX IF NOT EXISTS idx_synonyms_word ON synonyms(word)`)
   db.exec(`CREATE INDEX IF NOT EXISTS idx_rules_trigger ON rules(trigger)`)
-
-  insertDefaultData(db)
+  reseedDatabase(db)
 
   return db
 }
 
-function ensureRuleSchema(db: Database.Database) {
-  const columns = db.prepare('PRAGMA table_info(rules)').all() as Array<{ name: string }>
+function ensureRuleSchema(database: Database.Database) {
+  const columns = database.prepare('PRAGMA table_info(rules)').all() as Array<{ name: string }>
   const names = new Set(columns.map(column => column.name))
-  if (!names.has('actions')) db.exec('ALTER TABLE rules ADD COLUMN actions TEXT')
-  if (!names.has('enabled')) db.exec('ALTER TABLE rules ADD COLUMN enabled INTEGER DEFAULT 1')
-  if (!names.has('hit_count')) db.exec('ALTER TABLE rules ADD COLUMN hit_count INTEGER DEFAULT 0')
-  if (!names.has('last_matched_at')) db.exec('ALTER TABLE rules ADD COLUMN last_matched_at DATETIME')
+  if (!names.has('actions')) database.exec('ALTER TABLE rules ADD COLUMN actions TEXT')
+  if (!names.has('enabled')) database.exec('ALTER TABLE rules ADD COLUMN enabled INTEGER DEFAULT 1')
+  if (!names.has('hit_count')) database.exec('ALTER TABLE rules ADD COLUMN hit_count INTEGER DEFAULT 0')
+  if (!names.has('last_matched_at')) database.exec('ALTER TABLE rules ADD COLUMN last_matched_at DATETIME')
 }
 
-function insertDefaultData(db: Database.Database) {
-  const rules = [
-    ['打开乐视电视', '好的，打开乐视电视'],
-    ['打开乐视电视机', '好的，打开乐视电视'],
-    ['打开电视', '好的，打开乐视电视'],
-    ['打开机顶盒', '好的，打开机顶盒'],
-    ['小爱音箱放歌', '好的，小爱音箱开始播放'],
-    ['小爱音响放歌', '好的，小爱音箱开始播放'],
-    ['返回', '好的，返回上一页'],
-    ['主页', '好的，返回主页'],
-  ]
+function reseedDatabase(database: Database.Database) {
+  database.prepare('DELETE FROM rules').run()
+  database.prepare('DELETE FROM synonyms').run()
 
-  const insertRule = db.prepare('INSERT OR IGNORE INTO rules (trigger, response, actions) VALUES (?, ?, ?)')
-  for (const [trigger, response] of rules) {
-    insertRule.run(trigger, response, null)
+  const insertRule = database.prepare('INSERT INTO rules (trigger, response, actions, enabled, hit_count, last_matched_at) VALUES (?, ?, ?, 1, 0, NULL)')
+  for (const rule of SEEDED_RULES) {
+    insertRule.run(rule.trigger, rule.response, JSON.stringify(rule.actions))
   }
 
-  const synonyms = [
-    ['打开', '开启'],
-    ['打开', '启动'],
-    ['打开', '开一下'],
-    ['关闭', '关掉'],
-    ['关闭', '关一下'],
-    ['乐视电视', '乐视电视机'],
-    ['乐视电视', '电视'],
-    ['小爱音箱', '小爱音响'],
-  ]
-
-  const insertSyn = db.prepare('INSERT OR IGNORE INTO synonyms (word, synonym) VALUES (?, ?)')
-  for (const [word, synonym] of synonyms) {
-    insertSyn.run(word, synonym)
+  const insertSynonym = database.prepare('INSERT INTO synonyms (word, synonym) VALUES (?, ?)')
+  for (const [word, synonym] of SEEDED_SYNONYMS) {
+    insertSynonym.run(word, synonym)
   }
 }
 
 export function getDatabase(): Database.Database {
-  if (!db) {
-    return initDatabase()
-  }
+  if (!db) return initDatabase()
   return db
 }
 
 export function upsertRule(trigger: string, response: string, actions?: unknown): { inserted: boolean } {
   const database = getDatabase()
-  const existing = database.prepare('SELECT id, enabled, hit_count, last_matched_at FROM rules WHERE trigger = ?').get(trigger) as { id: number; enabled?: number; hit_count?: number; last_matched_at?: string | null } | undefined
+  const existing = database.prepare('SELECT id, enabled, hit_count, last_matched_at FROM rules WHERE trigger = ?').get(trigger) as { id: number, enabled?: number, hit_count?: number, last_matched_at?: string | null } | undefined
   const actionsJson = actions ? JSON.stringify(actions) : null
   database.prepare('INSERT OR REPLACE INTO rules (trigger, response, actions, enabled, hit_count, last_matched_at) VALUES (?, ?, ?, ?, ?, ?)').run(
     trigger,
@@ -126,5 +141,10 @@ export function recordRuleHit(trigger: string) {
 
 export function listRules() {
   const database = getDatabase()
-  return database.prepare('SELECT id, trigger, response, actions, enabled, hit_count, last_matched_at, created_at FROM rules ORDER BY hit_count DESC, id DESC').all() as Array<Record<string, unknown>>
+  return database.prepare('SELECT id, trigger, response, actions, enabled, hit_count, last_matched_at, created_at FROM rules ORDER BY id ASC').all() as Array<Record<string, unknown>>
+}
+
+export function listSynonyms() {
+  const database = getDatabase()
+  return database.prepare('SELECT id, word, synonym, created_at FROM synonyms ORDER BY word ASC, synonym ASC').all() as Array<Record<string, unknown>>
 }

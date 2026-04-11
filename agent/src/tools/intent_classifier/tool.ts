@@ -51,8 +51,16 @@ function loadConfig(): IntentClassifierConfig {
 function ruleBasedClassify(text: string): { intentType: string; confidence: number; reason: string } {
   const config = loadConfig();
   const lower = text.toLowerCase();
+  const errorFeedbackKeywords = [
+    "不行", "不对", "错了", "不是这个", "没反应", "失败了", "还是不行",
+    "不可以", "不对劲", "不成功", "有问题",
+  ];
   const chatKeywords = config.chat_keywords;
   const commandIndicators = config.command_indicators;
+
+  if (errorFeedbackKeywords.some((keyword) => lower.includes(keyword))) {
+    return { intentType: "error_feedback", confidence: 0.95, reason: "rule_error_feedback" };
+  }
 
   let chatScore = 0;
   let commandScore = 0;
@@ -109,6 +117,20 @@ export const intentClassifierTool = tool(
   async (input) => {
     const text = (input.text as string || "").trim();
     const config = loadConfig();
+    const lower = text.toLowerCase();
+    const errorFeedbackKeywords = [
+      "不行", "不对", "错了", "不是这个", "没反应", "失败了", "还是不行",
+      "不可以", "不对劲", "不成功", "有问题",
+    ];
+
+    if (errorFeedbackKeywords.some((keyword) => lower.includes(keyword))) {
+      return JSON.stringify({
+        intentType: "error_feedback",
+        confidence: 0.95,
+        reason: "rule_error_feedback",
+        method: "rule_feedback",
+      });
+    }
 
     if (config.use_vector_service) {
       try {

@@ -71,6 +71,9 @@ export function searchExperiences(keywords: string[]): ExperienceDoc | null {
 
     let score = 0;
     for (const keyword of keywords) {
+      if (file.includes(keyword) || doc.title.includes(keyword)) {
+        score += 2;
+      }
       if (doc.keywords.some((k) => k.includes(keyword) || keyword.includes(k))) {
         score += 2;
       }

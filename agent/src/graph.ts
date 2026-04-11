@@ -1,22 +1,18 @@
 import { StateGraph, START, END } from "@langchain/langgraph";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { buildRegistryPreviewV0, buildRuntimeRegistryPreview, enforceToolActionsByPolicy, readSkillSection, selectSkillSectionsByCapability, summarizeCapabilityCommands } from "./tools/skillsRegistry.js";
+import { buildRuntimeRegistryPreview, readSkillSection } from "./tools/skillsRegistry.js";
 import {
   AgentState,
-  createFallbackReply,
   createIntent,
   createStageResult,
   toTraceEntry,
   type ToolAction,
-  type ExperienceDoc,
 } from "./state.js";
-import { executeToolAction, isValidToolAction, llmAgentTool, localIntentTool, ruleEngineTool, successPathsTool, toolActionToCapabilityCommand, intentClassifierTool, deriveSuggestedActions, shouldPromoteFallbackAction } from "./tools/index.js";
-import { getRecentUserMessages, getRecentMessages, getSmartContext } from "./tools/memory/chatDb.js";
+import { executeToolAction, llmAgentTool, localIntentTool, ruleEngineTool, successPathsTool, toolActionToCapabilityCommand, intentClassifierTool, deriveSuggestedActions, shouldPromoteFallbackAction } from "./tools/index.js";
+import { getRecentUserMessages, getSmartContext } from "./tools/memory/chatDb.js";
 import { createPendingLlmCase, updateLlmCase } from "./tools/memory/llmCaseDb.js";
 import { completeContext } from "./tools/context_completer/tool.js";
-import { loadSkillsByKeywords } from "./tools/skill_loader/tool.js";
-import { searchExperiences } from "./tools/experience_retrieval/tool.js";
 import { writeExperience } from "./tools/experience_writer/tool.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -167,7 +163,7 @@ function actionsToCommands(actions: ToolAction[] | undefined, prefix: string) {
 }
 
 function extractDeviceWeights(input: string) {
-  const recentMessages = getRecentUserMessages(20);
+  const recentMessages = getRecentUserMessages(10);
   const devicePatterns = [
     { device: "tv_letv", keywords: ["乐视", "电视"] },
     { device: "toshiba_tv", keywords: ["东芝", "东芝电视", "toshiba"] },
@@ -205,6 +201,24 @@ function extractDeviceWeights(input: string) {
       type: device.includes("tv") || device.includes("speaker") ? device.split("_").slice(-1)[0] : "unknown"
     }))
     .sort((a, b) => b.score - a.score);
+}
+
+function inputMentionsAnyKnownDevice(input: string) {
+  const text = input.toLowerCase();
+  return [
+    "东芝", "东芝电视", "toshiba",
+    "乐视", "乐视电视",
+    "机顶盒", "盒子",
+    "小爱", "音箱", "音响",
+  ].some((keyword) => text.includes(keyword));
+}
+
+function inputLooksLikeCommand(input: string) {
+  return [
+    "打开", "关闭", "开启", "返回", "主页", "首页",
+    "播放", "放歌", "听歌", "暂停", "继续",
+    "安装", "卸载", "搜索", "截图",
+  ].some((keyword) => input.includes(keyword));
 }
 
 function normalizeRetrievalText(text: string) {
@@ -284,11 +298,33 @@ async function contextCompleterNode(state: typeof AgentState.State): Promise<Par
   try {
     const { completedInput, deviceWeights } = completeContext(state.input);
     const changed = completedInput !== state.input;
+    const hasDeviceHint = Array.isArray(deviceWeights) && deviceWeights.length > 0;
+
+    if (inputLooksLikeCommand(state.input) && !inputMentionsAnyKnownDevice(state.input) && !hasDeviceHint) {
+      const stageResult = createStageResult({
+        ok: false,
+        stage: "context_completer",
+        next: "end",
+        message: "请明确要控制的设备：东芝电视、乐视电视、机顶盒，还是小爱音箱？",
+        reason: "need_device_clarification",
+        confidence: 0,
+        data: { completedInput: state.input, deviceWeights: [], changed: false },
+        meta: { source: "context_completer" },
+      });
+
+      return {
+        currentStage: "end",
+        completedInput: state.input,
+        stageResult,
+        stageTrace: [toTraceEntry(stageResult)],
+        finalResponse: stageResult.message ?? "",
+      };
+    }
 
     const stageResult = createStageResult({
       ok: true,
       stage: "context_completer",
-      next: "intent_normalizer",
+      next: "rule_engine",
       message: changed ? `补全输入: ${completedInput}` : "无需补全",
       reason: changed ? "context_completed" : "no_completion_needed",
       data: { completedInput, deviceWeights, changed },
@@ -296,11 +332,15 @@ async function contextCompleterNode(state: typeof AgentState.State): Promise<Par
     });
 
     return {
-      currentStage: "intent_normalizer",
+      currentStage: "rule_engine",
       completedInput,
       stageResult,
       stageTrace: [toTraceEntry(stageResult)],
-      context: { ...state.context, deviceWeights },
+      context: {
+        ...state.context,
+        deviceWeights,
+        recentMentionedDevices: deviceWeights.map((item) => ({ device: item.device, score: item.score })),
+      },
     };
   } catch (error) {
     const stageResult = createStageResult({
@@ -364,7 +404,7 @@ async function experienceWriterNode(state: typeof AgentState.State): Promise<Par
       currentStage: "end",
       stageResult,
       stageTrace: [toTraceEntry(stageResult)],
-      finalResponse: state.finalResponse,
+      finalResponse: stageResult.message ?? "经验已写入",
     };
   } catch (error) {
     const stageResult = createStageResult({
@@ -381,7 +421,7 @@ async function experienceWriterNode(state: typeof AgentState.State): Promise<Par
       currentStage: "end",
       stageResult,
       stageTrace: [toTraceEntry(stageResult)],
-      finalResponse: state.finalResponse,
+      finalResponse: stageResult.message ?? "经验写入异常",
     };
   }
 }
@@ -412,6 +452,26 @@ async function intentRouterNode(state: typeof AgentState.State): Promise<Partial
     const parsed = typeof result === "string" ? JSON.parse(result) : result;
     const intentType = parsed.intentType || parsed.intent || "command";
     const confidence = typeof parsed.confidence === "number" ? parsed.confidence : 0;
+
+    if (intentType === "error_feedback") {
+      const stageResult = createStageResult({
+        ok: true,
+        stage: "intent_router",
+        next: "llm_agent",
+        message: "收到错误反馈，进入 LLM 重新规划",
+        reason: "error_feedback_routed",
+        confidence,
+        data: { intentType, method: parsed.method },
+        meta: { source: "intent_router" },
+      });
+
+      return {
+        currentStage: "llm_agent",
+        stageResult,
+        stageTrace: [toTraceEntry(stageResult)],
+        context: { ...state.context, intentType: "error_feedback" },
+      };
+    }
 
     if (intentType === "chat" && confidence >= 0.3) {
       // 调用 LLM 获取简短闲聊回复
@@ -473,8 +533,8 @@ async function intentRouterNode(state: typeof AgentState.State): Promise<Partial
     const stageResult = createStageResult({
       ok: false,
       stage: "intent_router",
-      next: "llm_agent",
-      message: "意图路由失败，进入LLM决策",
+      next: "end",
+      message: "意图路由服务未启动或不可用，请先启动 intent-service。",
       reason: "intent_router_error",
       confidence: 0,
       data: { error: String(error) },
@@ -482,9 +542,10 @@ async function intentRouterNode(state: typeof AgentState.State): Promise<Partial
     });
 
     return {
-      currentStage: "intent_normalizer",
+      currentStage: "end",
       stageResult,
       stageTrace: [toTraceEntry(stageResult)],
+      finalResponse: stageResult.message ?? "",
       context: { ...state.context, intentType: "command" },
     };
   }
@@ -492,7 +553,8 @@ async function intentRouterNode(state: typeof AgentState.State): Promise<Partial
 
 async function ruleEngineNode(state: typeof AgentState.State): Promise<Partial<typeof AgentState.State>> {
   try {
-    const result = await ruleEngineTool.invoke({ text: state.input });
+    const text = state.completedInput || state.input;
+    const result = await ruleEngineTool.invoke({ text });
     const parsed = typeof result === "string" ? JSON.parse(result) : result;
     const matched = Boolean(parsed.matched);
     const actions = Array.isArray(parsed.actions) ? parsed.actions : [];
@@ -539,11 +601,11 @@ async function ruleEngineNode(state: typeof AgentState.State): Promise<Partial<t
         message: "规则命中，直接执行",
         reason: "rule_matched",
         confidence: 1,
-        intent: createIntent(state.input, parsed.intent || "matched_rule"),
+        intent: createIntent(text, parsed.intent || "matched_rule"),
         data: {
           matched,
           ruleCandidate: {
-            trigger: parsed.matchedTrigger ?? state.input,
+            trigger: parsed.matchedTrigger ?? text,
             intent: parsed.intent || "matched_rule",
             actions,
             confidence: 1,
@@ -564,7 +626,7 @@ async function ruleEngineNode(state: typeof AgentState.State): Promise<Partial<t
         context: {
           ...state.context,
           ruleCandidate: {
-            trigger: parsed.matchedTrigger ?? state.input,
+            trigger: parsed.matchedTrigger ?? text,
             intent: parsed.intent || "matched_rule",
             actions,
             confidence: 1,
@@ -577,8 +639,8 @@ async function ruleEngineNode(state: typeof AgentState.State): Promise<Partial<t
     const stageResult = createStageResult({
       ok: false,
       stage: "rule_engine",
-      next: "context_completer",
-      message: "规则未命中，进入上下文补全",
+      next: "end",
+      message: "规则未命中，进入意图归一化",
       reason: "no_rule_match",
       confidence: 0,
       data: { matched: false },
@@ -586,7 +648,7 @@ async function ruleEngineNode(state: typeof AgentState.State): Promise<Partial<t
     });
 
     return {
-      currentStage: "context_completer",
+      currentStage: "end",
       stageResult,
       stageTrace: [toTraceEntry(stageResult)],
       ruleMatched: false,
@@ -595,7 +657,7 @@ async function ruleEngineNode(state: typeof AgentState.State): Promise<Partial<t
     const stageResult = createStageResult({
       ok: false,
       stage: "rule_engine",
-      next: "context_completer",
+      next: "end",
       message: "规则引擎异常",
       reason: "error",
       confidence: 0,
@@ -604,7 +666,7 @@ async function ruleEngineNode(state: typeof AgentState.State): Promise<Partial<t
     });
 
     return {
-      currentStage: "context_completer",
+      currentStage: "end",
       stageResult,
       stageTrace: [toTraceEntry(stageResult)],
       error: String(error),
@@ -622,6 +684,35 @@ async function intentNormalizerNode(state: typeof AgentState.State): Promise<Par
     const parsed = typeof result === "string" ? JSON.parse(result) : result;
     const matched = Boolean(parsed.matched);
     const confidence = typeof parsed.confidence === "number" ? parsed.confidence : 0;
+    const candidates = Array.isArray(parsed.candidates) ? parsed.candidates : [];
+    const ambiguous = candidates.length >= 2
+      && typeof candidates[0]?.confidence === "number"
+      && typeof candidates[1]?.confidence === "number"
+      && Math.abs(candidates[0].confidence - candidates[1].confidence) <= 0.05;
+
+    if (ambiguous) {
+      const topLabels = candidates
+        .slice(0, 2)
+        .map((item: Record<string, unknown>) => String(item.intent || "unknown"))
+        .join(" / ");
+      const stageResult = createStageResult({
+        ok: false,
+        stage: "intent_normalizer",
+        next: "end",
+        message: `我现在无法稳定判断你的意图，请确认更具体一点。当前接近的候选是：${topLabels}`,
+        reason: "intent_ambiguous",
+        confidence,
+        data: { candidates },
+        meta: { source: "intent_normalizer" },
+      });
+
+      return {
+        currentStage: "end",
+        stageResult,
+        stageTrace: [toTraceEntry(stageResult)],
+        finalResponse: stageResult.message ?? "",
+      };
+    }
 
     const normalizedIntent = matched
       ? createIntent(state.input, parsed.intent || "normalized_intent", parsed.action, {
@@ -632,8 +723,8 @@ async function intentNormalizerNode(state: typeof AgentState.State): Promise<Par
     const stageResult = createStageResult({
       ok: matched,
       stage: "intent_normalizer",
-      next: "success_experience_retrieval",
-      message: matched ? `意图标准化：${parsed.intent || "normalized_intent"}` : "意图未标准化，进入经验检索",
+      next: matched ? "success_experience_retrieval" : "llm_agent",
+      message: matched ? `意图标准化：${parsed.intent || "normalized_intent"}` : "意图未标准化，进入 LLM",
       reason: matched ? "intent_normalized" : "no_intent_match",
       confidence,
       intent: normalizedIntent,
@@ -649,7 +740,7 @@ async function intentNormalizerNode(state: typeof AgentState.State): Promise<Par
     });
 
     return {
-      currentStage: "success_experience_retrieval",
+      currentStage: matched ? "success_experience_retrieval" : "llm_agent",
       stageResult,
       stageTrace: [toTraceEntry(stageResult)],
       intent: normalizedIntent,
@@ -663,7 +754,7 @@ async function intentNormalizerNode(state: typeof AgentState.State): Promise<Par
     const stageResult = createStageResult({
       ok: false,
       stage: "intent_normalizer",
-      next: "success_experience_retrieval",
+      next: "end",
       message: "意图标准化异常",
       reason: "intent_normalizer_error",
       data: { error: String(error) },
@@ -671,10 +762,11 @@ async function intentNormalizerNode(state: typeof AgentState.State): Promise<Par
     });
 
     return {
-      currentStage: "success_experience_retrieval",
+      currentStage: "end",
       stageResult,
       stageTrace: [toTraceEntry(stageResult)],
       error: `Intent normalizer error: ${error}`,
+      finalResponse: stageResult.message ?? "",
     };
   }
 }
@@ -683,7 +775,7 @@ async function successExperienceRetrievalNode(state: typeof AgentState.State): P
   try {
     const result = await successPathsTool.invoke({
       action: "search",
-      input: state.input,
+      input: state.completedInput || state.input,
       intent: state.intent?.intent,
     });
     const parsed = typeof result === "string" ? JSON.parse(result) : result;
@@ -693,7 +785,7 @@ async function successExperienceRetrievalNode(state: typeof AgentState.State): P
     const matched = Boolean(best);
 
     if (matched && hasReusableActions) {
-      const resolvedIntent = state.intent ?? createIntent(state.input, best.intent || "success_path_match", undefined, {
+      const resolvedIntent = state.intent ?? createIntent(state.completedInput || state.input, best.intent || "success_path_match", undefined, {
         recentMentionedDevices: (state.context.recentMentionedDevices as Array<{ device: string; score: number }> | undefined) ?? [],
       });
 
@@ -731,36 +823,16 @@ async function successExperienceRetrievalNode(state: typeof AgentState.State): P
       };
     }
 
-    const historicalSkillRefs = Array.isArray(best?.llmSummary?.selectedSkills)
-      ? best.llmSummary.selectedSkills
-      : Array.isArray(best?.contextSnapshot?.selectedSkills)
-        ? best.contextSnapshot.selectedSkills
-        : Array.isArray(best?.contextSnapshot?.skillsHint)
-          ? best.contextSnapshot.skillsHint
-          : [];
-
     const resolvedIntent = state.intent ?? (matched
       ? createIntent(state.input, best.intent || "success_path_match", undefined, {
           recentMentionedDevices: (state.context.recentMentionedDevices as Array<{ device: string; score: number }> | undefined) ?? [],
         })
       : state.intent);
 
-    const matchedPathCandidates = await buildDeepMatchedPathCandidates(state.input, state.intent?.intent, matches, best);
-
-    const pendingLlmCaseId = createPendingLlmCase({
-      rawInput: state.input,
-      normalizedIntent: resolvedIntent?.intent ?? null,
-      context: {
-        recentMentionedDevices: state.context.recentMentionedDevices ?? [],
-        historicalSkillRefs,
-      },
-      matchedCandidates: matchedPathCandidates as Array<Record<string, unknown>>,
-    });
-
     const stageResult = createStageResult({
       ok: matched,
       stage: "success_experience_retrieval",
-      next: "experience_retrieval",
+      next: "end",
       message: matched
         ? `找到成功经验：${best.name}`
         : "未找到 Success Path，进入 Experience 检索",
@@ -772,23 +844,19 @@ async function successExperienceRetrievalNode(state: typeof AgentState.State): P
       data: {
         matches,
         matchedPath: best ?? null,
-        matchedPathCandidates,
         hasReusableActions,
-        historicalSkillRefs,
         ruleCandidate: state.context.ruleCandidate ?? null,
       },
-      meta: { source: "success_experience_retrieval", skillsHint: historicalSkillRefs },
+      meta: { source: "success_experience_retrieval" },
     });
 
     return {
-      currentStage: "experience_retrieval",
+      currentStage: "llm_agent",
       stageResult,
       stageTrace: [toTraceEntry(stageResult)],
       intent: resolvedIntent,
       context: {
         ...state.context,
-        historicalSkillRefs,
-        pendingLlmCaseId,
         ruleCandidate: state.context.ruleCandidate,
       },
     };
@@ -796,15 +864,15 @@ async function successExperienceRetrievalNode(state: typeof AgentState.State): P
     const stageResult = createStageResult({
       ok: false,
       stage: "success_experience_retrieval",
-      next: "experience_retrieval",
-      message: "成功经验检索异常，进入 Experience 检索",
+      next: "end",
+      message: "Success Path 检索异常",
       reason: "success_experience_retrieval_error",
       data: { error: String(error) },
       meta: { source: "success_experience_retrieval" },
     });
 
     return {
-      currentStage: "experience_retrieval",
+      currentStage: "end",
       stageResult,
       stageTrace: [toTraceEntry(stageResult)],
     };
@@ -816,8 +884,6 @@ async function llmAgentNode(state: typeof AgentState.State): Promise<Partial<typ
     const selectedSkills = collectSelectedSkills(state);
     const skillRefs = extractSkillRefs(selectedSkills);
     
-    const history = getSmartContext(2);
-    console.log("[LLM] Smart context rounds:", history.length / 2);
 
     const experienceContext = state.matchedExperience
       ? `\n\n## 相关经验文档\n${state.matchedExperience.content}`
@@ -835,9 +901,9 @@ async function llmAgentNode(state: typeof AgentState.State): Promise<Partial<typ
         trace: state.stageTrace,
         selectedSkills: extractSkillPayload(selectedSkills),
         selectedSkillRefs: skillRefs,
-        history,
         experienceDoc: state.matchedExperience?.content || null,
         loadedSkills: state.loadedSkills || [],
+        previousFailure: state.toolResults.find((item) => !item.success) ?? null,
       }),
     });
 
@@ -878,7 +944,7 @@ async function llmAgentNode(state: typeof AgentState.State): Promise<Partial<typ
       stage: "llm_agent",
       next: shouldEnd ? "end" : (shouldExecute ? "tool_executor" : "end"),
       message: needsConfirmation ? `我不确定我的判断，请确认：${thought}` : thought,
-      reason: needsConfirmation ? "low_confidence_ask" : (isComplete ? "react_complete" : "react_thinking"),
+      reason: needsConfirmation ? "low_confidence_ask" : (shouldExecute ? "llm_action_selected" : "react_complete"),
       intent: state.intent ?? createIntent(state.input, "react_task"),
       commands: [],
       actions: finalAction ? [finalAction] : [],
@@ -898,6 +964,11 @@ async function llmAgentNode(state: typeof AgentState.State): Promise<Partial<typ
       stageResult,
       stageTrace: [toTraceEntry(stageResult)],
       isComplete: needsConfirmation || shouldEnd || Boolean(finalAction),
+      resolutionSource: shouldExecute ? "llm_agent_actionable" : state.resolutionSource,
+      llmData: {
+        ...(state.llmData || {}),
+        selected_skills: skillRefs,
+      },
       finalResponse: needsConfirmation ? `我不确定我的判断，请确认：${thought}` : (shouldEnd ? thought : state.finalResponse),
     };
   } catch (error: any) {
@@ -907,7 +978,7 @@ async function llmAgentNode(state: typeof AgentState.State): Promise<Partial<typ
       ok: false,
       stage: "llm_agent",
       next: "end",
-      message: `LLM 调用失败: ${errorMsg}`,
+      message: `LLM 调用失败：${errorMsg}`,
       reason: "llm_agent_error",
       data: { error: errorMsg },
       meta: { source: "llm_agent" },
@@ -918,37 +989,44 @@ async function llmAgentNode(state: typeof AgentState.State): Promise<Partial<typ
       stageResult,
       stageTrace: [toTraceEntry(stageResult)],
       isComplete: true,
-      finalResponse: `LLM 调用失败: ${errorMsg}`,
+      finalResponse: `LLM 调用失败：${errorMsg}`,
     };
   }
 }
 
 async function toolExecutorNode(state: typeof AgentState.State): Promise<Partial<typeof AgentState.State>> {
-  let action = state.stageResult?.data?.action as ToolAction | ToolAction[] | null;
+  let action = (
+    state.stageResult?.data?.action as ToolAction | ToolAction[] | null
+  ) ?? (
+    Array.isArray(state.stageResult?.actions) && state.stageResult.actions.length > 0
+      ? state.stageResult.actions
+      : (Array.isArray(state.ruleActions) && state.ruleActions.length > 0 ? state.ruleActions : null)
+  );
   const thought = state.stageResult?.data?.thought as string || "执行中...";
 
   if (!action) {
     const stageResult = createStageResult({
       ok: false,
       stage: "tool_executor",
-      next: "llm_agent",
+      next: "end",
       message: "没有可执行的 action",
       reason: "no_action",
       data: { observation: "没有可执行的 action" },
       meta: { source: "tool_executor" },
     });
     return {
-      currentStage: "llm_agent",
+      currentStage: "end",
       stageResult,
       stageTrace: [toTraceEntry(stageResult)],
       reactSteps: [...(state.reactSteps || []), { thought, action: null, observation: "没有可执行的 action" }],
-      finalResponse: state.finalResponse,
+      finalResponse: stageResult.message ?? "没有可执行的动作",
     };
   }
 
   const actions = Array.isArray(action) ? action : [action];
   const allObservations: string[] = [];
   let allSuccess = true;
+  const executionResults: RuntimeToolResult[] = [];
 
   for (const singleAction of actions) {
     let observation = "";
@@ -957,9 +1035,28 @@ async function toolExecutorNode(state: typeof AgentState.State): Promise<Partial
     try {
       const result = await executeToolAction(singleAction);
       success = result.success;
+      executionResults.push({
+        tool: singleAction.tool,
+        action: singleAction.action,
+        success: result.success,
+        data: {
+          result: result.data,
+          params: singleAction.params ?? null,
+        },
+        error: result.error,
+      });
       observation = result.error || JSON.stringify(result.data) || "执行完成";
     } catch (e) {
       observation = String(e);
+      executionResults.push({
+        tool: singleAction.tool,
+        action: singleAction.action,
+        success: false,
+        data: {
+          params: singleAction.params ?? null,
+        },
+        error: observation,
+      });
     }
 
     allObservations.push(`${singleAction.tool}.${singleAction.action}: ${observation}`);
@@ -969,25 +1066,22 @@ async function toolExecutorNode(state: typeof AgentState.State): Promise<Partial
   const combinedObservation = allObservations.join(" → ");
   const reactStep = { thought, action: Array.isArray(action) ? action[0] || null : action, observation: combinedObservation };
 
-  const isDeviceError = combinedObservation.includes("device not found") || combinedObservation.includes("device '");
-  const isConnectionError = combinedObservation.includes("connection refused") || combinedObservation.includes("WinError 10061") || combinedObservation.includes("Upstream error");
-  const shouldEnd = !allSuccess && (isDeviceError || isConnectionError);
-
   const stageResult = createStageResult({
     ok: allSuccess,
     stage: "tool_executor",
-    next: shouldEnd ? "end" : "llm_agent",
+    next: "end",
     message: combinedObservation,
     reason: allSuccess ? "tool_executed" : "tool_failed",
-    data: { observation: combinedObservation, success: allSuccess, shouldEnd },
+    data: { observation: combinedObservation, success: allSuccess, shouldEnd: true, executionResults },
     meta: { source: "tool_executor" },
   });
 
   return {
-    currentStage: shouldEnd ? "end" : "llm_agent",
+    currentStage: "end",
     stageResult,
     stageTrace: [toTraceEntry(stageResult)],
     reactSteps: [...(state.reactSteps || []), reactStep],
+    toolResults: executionResults,
     isComplete: allSuccess,
     finalResponse: allSuccess ? `执行成功: ${combinedObservation}` : `执行失败: ${combinedObservation}。请确认如何继续。`,
   };
@@ -1064,7 +1158,7 @@ async function successWritebackNode(state: typeof AgentState.State): Promise<Par
       resolutionSource: state.resolutionSource,
       writeBackResults,
       llmData: state.llmData,
-      finalResponse: state.finalResponse,
+      finalResponse: stageResult.message ?? "没有可执行的动作",
     };
   }
 
@@ -1227,7 +1321,10 @@ async function successWritebackNode(state: typeof AgentState.State): Promise<Par
 }
 
 function routeFromIntentRouter(state: typeof AgentState.State) {
-  return state.context?.intentType === "chat" ? "end" : "context_completer";
+  if (state.stageResult?.next === "end" || state.stageResult?.reason === "intent_router_error") return "end";
+  if (state.context?.intentType === "chat") return "end";
+  if (state.context?.intentType === "error_feedback") return "llm_agent";
+  return "context_completer";
 }
 
 function routeFromContextCompleter(state: typeof AgentState.State) {
@@ -1245,7 +1342,7 @@ function routeFromIntentNormalizer(state: typeof AgentState.State) {
 
 function routeFromSuccessExperienceRetrieval(state: typeof AgentState.State) {
   if (state.autoExecutePath) return "tool_executor";
-  return "experience_retrieval";
+  return "llm_agent";
 }
 
 // routeFromLlmAgent 已内联到 createGraph 中
@@ -1317,11 +1414,11 @@ export function createGraph() {
     .addEdge(START, "intent_router")
     .addConditionalEdges("intent_router", routeFromIntentRouter, {
       context_completer: "context_completer",
+      llm_agent: "llm_agent",
       end: END,
     })
     .addConditionalEdges("context_completer", routeFromContextCompleter, {
       rule_engine: "rule_engine",
-      llm_agent: "llm_agent",
     })
     .addConditionalEdges("rule_engine", routeFromRuleEngine, {
       tool_executor: "tool_executor",
@@ -1330,6 +1427,7 @@ export function createGraph() {
     .addEdge("intent_normalizer", "success_experience_retrieval")
     .addConditionalEdges("intent_normalizer", routeFromIntentNormalizer, {
       success_experience_retrieval: "success_experience_retrieval",
+      llm_agent: "llm_agent",
     })
     .addConditionalEdges("success_experience_retrieval", routeFromSuccessExperienceRetrieval, {
       tool_executor: "tool_executor",
@@ -1337,28 +1435,16 @@ export function createGraph() {
     })
     .addConditionalEdges("llm_agent", (state) => {
       if (state.stageResult?.data?.action) return "tool_executor";
-      if (state.isComplete) {
-        const reactSteps = state.reactSteps || [];
-        const hasSuccessfulAction = reactSteps.some((step) => step.action);
-        if (hasSuccessfulAction) return "experience_writer";
-        return "end";
-      }
+      if (state.isComplete) return "end";
       return "end";
     }, {
       tool_executor: "tool_executor",
-      experience_writer: "experience_writer",
       end: END,
     })
     .addConditionalEdges("tool_executor", (state) => {
-      if (state.isComplete) {
-        const reactSteps = state.reactSteps || [];
-        const hasSuccessfulAction = reactSteps.some((step) => step.action);
-        if (hasSuccessfulAction) return "experience_writer";
-        return "end";
-      }
-      return "llm_agent";
+      if (state.isComplete && state.resolutionSource === "llm_agent_actionable") return "experience_writer";
+      return "end";
     }, {
-      llm_agent: "llm_agent",
       experience_writer: "experience_writer",
       end: END,
     })

@@ -20,6 +20,8 @@ export interface RuntimeCommandSummaryItem {
 export interface RuntimeResolutionMeta {
   resolutionSource?: string | null
   outcomeType?: string | null
+  completedInput?: string | null
+  currentCompletionDevice?: string | null
   matched?: boolean | null
   matchedTrigger?: string | null
   matchedPathName?: string | null

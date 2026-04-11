@@ -73,6 +73,8 @@ interface SelectedSkillMetadataItem {
 interface ResolutionMeta {
   resolutionSource?: string | null
   outcomeType?: string | null
+  completedInput?: string | null
+  currentCompletionDevice?: string | null
   matched?: boolean | null
   matchedTrigger?: string | null
   matchedPathName?: string | null
@@ -972,7 +974,7 @@ async function sendMessage() {
     const decoder = new TextDecoder()
     let buffer = ""
     let finalData: any = null
-    const allSteps: Array<{ stage: string; message: string; reason: string; action?: any; observation?: any }> = []
+    const allSteps: Array<{ stage: string; message: string; reason: string; action?: any; observation?: any; executionResults?: any[] }> = []
 
     while (true) {
       const { done, value } = await reader.read()
@@ -1053,6 +1055,7 @@ async function sendMessage() {
       error: false,
       loading: false,
       trace: finalData?.trace || [],
+      resolutionMeta: finalData?.resolutionMeta || undefined,
     }
     syncRuntimePanelFromMessages()
     handleIncomingWorkflowDraft(previousDraftId)

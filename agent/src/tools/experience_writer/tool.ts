@@ -1,6 +1,6 @@
-import { existsSync, writeFileSync, readdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
-import { EXPERIENCES_DIR, ensureExperiencesDir } from "../experience_retrieval/tool.js";
+import { ensureExperiencesDir } from "../experience_retrieval/tool.js";
 import { callChatModel, loadLlmAgentConfig } from "../llm_agent/tool.js";
 import type { ToolAction } from "../../state.js";
 
@@ -16,89 +16,116 @@ function intentToFilename(intent: string): string {
   return intent.replace(/[^a-zA-Z0-9_]/g, "_").toLowerCase() + ".md";
 }
 
-function checkExperienceExists(intent: string): boolean {
-  const dir = ensureExperiencesDir();
-  const filename = intentToFilename(intent);
-  return existsSync(join(dir, filename));
+function getExperiencePath(intent: string) {
+  return join(ensureExperiencesDir(), intentToFilename(intent));
 }
 
-async function generateExperienceDoc(input: ExperienceWriteInput): Promise<string> {
-  const prompt = `你是一个经验总结助手。请根据以下成功执行记录，生成一份结构化的经验文档。
+function checkExperienceExists(intent: string): boolean {
+  return existsSync(getExperiencePath(intent));
+}
 
-用户原始输入: ${input.input}
-补全后输入: ${input.completedInput}
-标准化意图: ${input.intent}
+function buildExecutionSummary(input: ExperienceWriteInput) {
+  return [
+    `用户原始输入: ${input.input}`,
+    `补全后输入: ${input.completedInput}`,
+    `归一化意图: ${input.intent}`,
+    "",
+    "执行步骤:",
+    ...input.reactSteps.map((step, index) => `${index + 1}. thought=${step.thought} action=${JSON.stringify(step.action)} observation=${step.observation}`),
+    "",
+    "工具结果:",
+    ...input.toolResults.map((item, index) => `${index + 1}. ${JSON.stringify(item)}`),
+  ].join("\n");
+}
 
-执行步骤:
-${input.reactSteps.map((step, i) => `${i + 1}. 思考: ${step.thought}\n   动作: ${JSON.stringify(step.action)}\n   观察: ${step.observation}`).join("\n")}
-
-工具执行结果:
-${input.toolResults.map((r, i) => `${i + 1}. ${JSON.stringify(r)}`).join("\n")}
-
-请生成以下格式的经验文档（YAML frontmatter + Markdown）:
-
----
-type: experience
-intent: ${input.intent}
-keywords:
-  - 关键词1
-  - 关键词2
-  - 关键词3
----
-
-# 经验：简短标题
-
-## 背景
-描述用户的需求背景
-
-## 执行步骤
-1. 步骤1描述
-2. 步骤2描述
-...
-
-## 关键参数
-- 参数1: 值1
-- 参数2: 值2
-
-## 注意事项
-- 注意点1
-- 注意点2
-
-请直接输出文档内容，不要添加额外说明。`;
+async function generateNewExperienceDoc(input: ExperienceWriteInput): Promise<string> {
+  const prompt = [
+    "你是经验文档整理助手。",
+    "请生成一个 Markdown 文档，重点总结失败教训、避坑、适用条件，同时保留必要操作步骤。",
+    "输出格式必须包含 YAML frontmatter。",
+    "",
+    buildExecutionSummary(input),
+    "",
+    "输出模板要求：",
+    "---",
+    `type: experience`,
+    `intent: ${input.intent}`,
+    "keywords:",
+    "  - 关键词1",
+    "  - 关键词2",
+    "---",
+    "# 标题",
+    "## 背景",
+    "## 关键步骤",
+    "## 失败教训与避坑",
+    "## 适用条件",
+  ].join("\n");
 
   const config = loadLlmAgentConfig();
-  const response = await callChatModel(prompt, "你是经验总结助手。", config);
-  return response;
+  return callChatModel(prompt, "你负责生成结构化经验文档。", config);
+}
+
+async function updateExistingExperienceDoc(existingDoc: string, input: ExperienceWriteInput): Promise<string> {
+  const prompt = [
+    "你是经验文档更新助手。",
+    "请在尽量保留原文结构的前提下更新这份经验文档。",
+    "优先补充失败教训、避坑、适用条件；如果原文已有相关章节，请直接修改细节，不要重复堆叠。",
+    "只有在无法自然融入时，才追加新的小节。",
+    "",
+    "现有文档：",
+    existingDoc,
+    "",
+    "新的执行信息：",
+    buildExecutionSummary(input),
+  ].join("\n");
+
+  const config = loadLlmAgentConfig();
+  return callChatModel(prompt, "你负责更新经验文档，输出完整的新文档内容。", config);
+}
+
+function fallbackAppend(existingDoc: string, input: ExperienceWriteInput): string {
+  return [
+    existingDoc.trim(),
+    "",
+    "## 补充记录",
+    buildExecutionSummary(input),
+  ].join("\n");
 }
 
 export async function writeExperience(input: ExperienceWriteInput): Promise<{ experiencePath: string; successPathData: { intent: string; actions: ToolAction[] } }> {
-  const dir = ensureExperiencesDir();
+  const filePath = getExperiencePath(input.intent);
 
   if (checkExperienceExists(input.intent)) {
-    return {
-      experiencePath: join(dir, intentToFilename(input.intent)),
-      successPathData: {
-        intent: input.intent,
-        actions: input.reactSteps
-          .filter((step) => step.action)
-          .map((step) => step.action as ToolAction),
-      },
-    };
+    const existingDoc = readFileSync(filePath, "utf-8");
+    try {
+      const updated = await updateExistingExperienceDoc(existingDoc, input);
+      writeFileSync(filePath, updated, "utf-8");
+    } catch {
+      writeFileSync(filePath, fallbackAppend(existingDoc, input), "utf-8");
+    }
+  } else {
+    const generated = await generateNewExperienceDoc(input);
+    writeFileSync(filePath, generated, "utf-8");
   }
 
-  const docContent = await generateExperienceDoc(input);
-  const filename = intentToFilename(input.intent);
-  const filePath = join(dir, filename);
-  writeFileSync(filePath, docContent, "utf-8");
-
-  const successPathData = {
-    intent: input.intent,
-    actions: input.reactSteps
-      .filter((step) => step.action)
-      .map((step) => step.action as ToolAction),
+  return {
+    experiencePath: filePath,
+    successPathData: {
+      intent: input.intent,
+      actions: input.toolResults
+        .filter((item) => item.success)
+        .map((item) => {
+          const tool = typeof item.tool === "string" ? item.tool : "";
+          const action = typeof item.action === "string" ? item.action : "";
+          if (!tool || !action) return null;
+          const params = typeof item.data === "object" && item.data !== null && "params" in item.data
+            ? (item.data as { params?: Record<string, unknown> | null }).params ?? undefined
+            : undefined;
+          return { tool, action, params } as ToolAction;
+        })
+        .filter((item): item is ToolAction => Boolean(item)),
+    },
   };
-
-  return { experiencePath: filePath, successPathData };
 }
 
 export { checkExperienceExists, intentToFilename };
