@@ -12,7 +12,7 @@ import { allTools, executeToolAction } from "./tools/index.js";
 import { createWorkflowV0, type RuleAction, type WorkflowV0 } from "./state.js";
 import { saveMessage, getMessages, getMessageCount, getMessagesPage, type MessagePageDirection } from "./tools/memory/chatDb.js";
 import { listWorkflowCandidates, upsertWorkflowCandidate } from "./tools/memory/workflowCandidateDb.js";
-import { deleteRule, listRules, setRuleEnabled, upsertRule } from "./tools/rule_engine/database.js";
+import { deleteRule, listRules, listSynonyms, setRuleEnabled, upsertRule } from "./tools/rule_engine/database.js";
 import { buildWorkflowDraftFromCommands, listWorkflowsV0, mergeWorkflowRegistryEntry, previewWorkflowMerge, upsertWorkflowRegistryEntry } from "./workflowRegistry.js";
 const PORT = parseInt(process.env.PORT || "3000", 10);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -102,7 +102,7 @@ function buildRuleCandidatesFromPaths(paths: Array<Record<string, unknown>>) {
     .map((path) => {
       const reuseCount = typeof path.reuseCount === "number" ? path.reuseCount : 0;
       const successRate = typeof path.successRate === "number" ? path.successRate : 0;
-      const recommended = reuseCount >= 3 && successRate >= 0.6;
+      const recommended = reuseCount >= 5 && successRate >= 0.6;
       const recommendationReason = recommended
         ? `复用 ${reuseCount} 次，成功率 ${(successRate * 100).toFixed(0)}%`
         : undefined;
@@ -155,6 +155,7 @@ async function main() {
 
     const allSteps: Array<{ stage: string; message: string; reason: string; confidence: number; action?: any; observation?: any }> = [];
     let currentThinking = "";
+    let latestState: any = null;
 
     const emitter = {
       emitChunk: (chunk: string) => {
@@ -180,6 +181,7 @@ async function main() {
 
         if (event[0] === "values") {
           const state = event[1];
+          latestState = state;
           const stageResult = state.stageResult;
 
           if (stageResult) {
@@ -190,6 +192,7 @@ async function main() {
               confidence: stageResult.confidence ?? 1,
               action: stageResult.data?.action || null,
               observation: stageResult.data?.observation || null,
+              executionResults: stageResult.data?.executionResults || [],
             };
 
             emitter.emitStep(stepData);
@@ -212,16 +215,24 @@ async function main() {
       const isClarification = finalState?.reason === "low_confidence_ask" || 
         (finalState?.confidence !== undefined && finalState.confidence < 0.7 && !finalState?.action);
 
-      if (!shouldAbort) {
-        saveMessage("assistant", replyText, { trace: allSteps }, { is_clarification: isClarification });
-        const doneData = {
-          reply: replyText,
-          outcomeType: finalState?.reason || "done",
-          trace: allSteps,
-          steps: allSteps.length,
-        };
-        reply.raw.write("event: done\ndata: " + JSON.stringify(doneData) + "\n\n");
-      }
+      const finalReply = shouldAbort
+        ? (replyText || "本次对话已手动终止")
+        : replyText;
+
+      saveMessage("assistant", finalReply, { trace: allSteps }, { is_clarification: isClarification });
+      const doneData = {
+        reply: finalReply,
+        outcomeType: shouldAbort ? "aborted" : (finalState?.reason || "done"),
+        trace: allSteps,
+        steps: allSteps.length,
+        resolutionMeta: {
+          completedInput: latestState?.completedInput ?? null,
+          currentCompletionDevice: Array.isArray(latestState?.context?.recentMentionedDevices) && latestState.context.recentMentionedDevices.length > 0
+            ? latestState.context.recentMentionedDevices[0]?.device ?? null
+            : null,
+        },
+      };
+      reply.raw.write("event: done\ndata: " + JSON.stringify(doneData) + "\n\n");
     } catch (error: any) {
       reply.raw.write("event: error\ndata: " + JSON.stringify({ message: error.message }) + "\n\n");
       if (allSteps.length > 0) {
@@ -233,7 +244,12 @@ async function main() {
     return reply;
   });
 
-  fastify.get("/tools", async () => allTools.map((t) => ({ name: t.name, description: t.description })));
+  const listTools = () => allTools.map((t) => ({ name: t.name, description: t.description }));
+  fastify.get("/tools", async () => listTools());
+  fastify.get("/api/tools", async () => ({
+    status: "Success",
+    data: listTools(),
+  }));
 
   fastify.get("/api/registry", async (request) => {
     const query = request.query as { input?: string; intent?: string };
@@ -550,6 +566,10 @@ async function main() {
             consistency,
             executionSummary,
             executionSourceSummary,
+            completedInput: result.completedInput ?? null,
+            currentCompletionDevice: Array.isArray((result.context as { recentMentionedDevices?: Array<{ device?: string }> } | undefined)?.recentMentionedDevices)
+              ? ((result.context as { recentMentionedDevices: Array<{ device?: string }> }).recentMentionedDevices[0]?.device ?? null)
+              : null,
             stageConfidence: stageResult?.confidence ?? null,
             inputScore: typeof stageResult?.data?.inputScore === "number" ? stageResult.data.inputScore : null,
             intentScore: typeof stageResult?.data?.intentScore === "number" ? stageResult.data.intentScore : null,
@@ -793,6 +813,11 @@ async function main() {
     return { status: "Success", data: rules };
   });
 
+  fastify.get("/api/rules/synonyms", async () => {
+    const synonyms = listSynonyms();
+    return { status: "Success", data: synonyms };
+  });
+
   registerSuccessPathsGet("/api/success-paths", { action: "list" }, { data: parsed => parsed?.paths ?? [] });
 
   registerSuccessPathsGet("/api/experience-paths", { action: "list" }, { data: parsed => parsed?.paths ?? [] });
@@ -894,6 +919,7 @@ async function main() {
     return {
       status: "Success",
       data: [
+        { id: "toshiba_tv", name: "东芝电视", type: "tv", online: true },
         { id: "tv_letv", name: "乐视电视", type: "tv", online: true },
         { id: "stb", name: "机顶盒", type: "stb", online: true },
         { id: "xiaoai_speaker", name: "小爱音箱", type: "speaker", online: true },

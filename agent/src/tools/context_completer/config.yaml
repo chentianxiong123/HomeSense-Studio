@@ -38,5 +38,5 @@ devices:
 
 pronouns: ["它", "那个", "这个", "他", "她"]
 
-history_limit: 20
+history_limit: 10
 decay_factor: 0.9

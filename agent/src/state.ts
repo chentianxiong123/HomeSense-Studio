@@ -205,7 +205,7 @@ export const AgentState = Annotation.Root({
     reducer: (_, next) => next,
   }),
   currentStage: Annotation<string>({
-    default: () => "context_builder",
+    default: () => "intent_router",
     reducer: (_, next) => next,
   }),
   context: Annotation<Record<string, unknown>>({

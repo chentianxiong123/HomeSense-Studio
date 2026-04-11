@@ -1,10 +1,8 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { readFileSync, existsSync, mkdirSync, writeFileSync } from "fs";
+import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import Database from "better-sqlite3";
-import { load } from "sqlite-vec";
 import YAML from "yaml";
 import type { ToolAction } from "../../state.js";
 
@@ -19,24 +17,26 @@ interface LocalIntentConfig {
   vector_db_path: string;
 }
 
-interface NormalizedIntent {
-  id: number;
-  text: string;
-  normalized_text: string;
-  intent: string;
-  action: string;
-  params?: Record<string, any>;
-  device?: string;
-  vector?: number[];
-}
-
 interface RecentMentionedDevice {
   device: string;
   score: number;
 }
 
-let db: Database.Database | null = null;
-let normalizedIntents: NormalizedIntent[] = [];
+interface IntentExample {
+  text: string;
+  intent: string;
+  actions: ToolAction[];
+  device?: string;
+}
+
+interface Candidate {
+  intent: string;
+  confidence: number;
+  actions: ToolAction[];
+  source: "rule" | "vector";
+  device?: string;
+  sampleText?: string;
+}
 
 function loadConfig(): LocalIntentConfig {
   const configPath = join(__dirname, "config.yaml");
@@ -54,6 +54,122 @@ function loadConfig(): LocalIntentConfig {
   }
 }
 
+function getTopDevice(recentMentionedDevices: RecentMentionedDevice[] = []): string | undefined {
+  return [...recentMentionedDevices].sort((a, b) => b.score - a.score)[0]?.device;
+}
+
+function resolveTelevisionDevice(recentMentionedDevices: RecentMentionedDevice[] = []): string | undefined {
+  const topDevice = getTopDevice(recentMentionedDevices);
+  if (topDevice === "toshiba_tv" || topDevice === "tv_letv") return topDevice;
+  return undefined;
+}
+
+function buildDemoActionSequence(): ToolAction[] {
+  return [
+    { tool: "hami", action: "tv_remote", params: { device: "tvs_toshiba", command: "\u7535\u6e90" } },
+    { tool: "adb", action: "wait", params: { seconds: 15 } },
+    { tool: "hami", action: "tv_remote", params: { device: "stb", command: "\u7535\u6e90" } },
+    { tool: "adb", action: "wait", params: { seconds: 15 } },
+    { tool: "adb", action: "ensure_connected", params: { initial_wait_seconds: 10, max_attempts: 5, backoff_seconds: 2 } },
+    { tool: "adb", action: "wait", params: { seconds: 15 } },
+    { tool: "adb", action: "list_packages", params: { keyword: "bili" } },
+    { tool: "adb", action: "wait", params: { seconds: 3 } },
+    { tool: "adb", action: "launch_app", params: { package: "com.xiaodianshi.tv.yst" } },
+  ];
+}
+
+function createIntentCatalog(recentMentionedDevices: RecentMentionedDevice[] = []): IntentExample[] {
+  const preferredTv = resolveTelevisionDevice(recentMentionedDevices);
+  const genericTvAction = preferredTv === "tv_letv"
+    ? [{ tool: "hami", action: "xiaoai_execute", params: { command: "打开电视" } }]
+    : [{ tool: "adb", action: "launch_app", params: { package: "com.xiaodianshi.tv.yst" } }];
+
+  return [
+    {
+      text: "打开东芝电视",
+      intent: "open_device_toshiba_tv",
+      device: "toshiba_tv",
+      actions: [{ tool: "hami", action: "xiaoai_execute", params: { command: "打开东芝电视" } }],
+    },
+    {
+      text: "打开乐视电视",
+      intent: "open_device_tv_letv",
+      device: "tv_letv",
+      actions: [{ tool: "hami", action: "xiaoai_execute", params: { command: "打开电视" } }],
+    },
+    {
+      text: "打开机顶盒",
+      intent: "open_device_stb",
+      device: "stb",
+      actions: [{ tool: "hami", action: "xiaoai_execute", params: { command: "打开机顶盒" } }],
+    },
+    {
+      text: "小爱音箱放歌",
+      intent: "play_media_xiaoai_speaker",
+      device: "xiaoai_speaker",
+      actions: [{ tool: "hami", action: "xiaoai_execute", params: { command: "小爱音箱放歌" } }],
+    },
+    {
+      text: "在东芝电视看B站",
+      intent: "open_bilibili_toshiba_tv",
+      device: "toshiba_tv",
+      actions: [{ tool: "adb", action: "launch_app", params: { package: "com.xiaodianshi.tv.yst" } }],
+    },
+    {
+      text: "用机顶盒看B站",
+      intent: "open_bilibili_stb",
+      device: "stb",
+      actions: buildDemoActionSequence(),
+    },
+    {
+      text: "用乐视电视看B站",
+      intent: "open_bilibili_tv_letv",
+      device: "tv_letv",
+      actions: genericTvAction,
+    },
+    {
+      text: "我想看B站",
+      intent: "watch_bilibili_demo",
+      actions: buildDemoActionSequence(),
+    },
+    {
+      text: "看B站",
+      intent: "watch_bilibili_demo",
+      actions: buildDemoActionSequence(),
+    },
+    {
+      text: "返回",
+      intent: "navigate_back",
+      actions: [{ tool: "adb", action: "back" }],
+    },
+    {
+      text: "主页",
+      intent: "go_home",
+      actions: [{ tool: "adb", action: "home" }],
+    },
+  ];
+}
+
+function keywordScore(text: string, candidate: IntentExample): number {
+  const normalized = text.toLowerCase();
+  const sample = candidate.text.toLowerCase();
+  if (normalized === sample) return 1;
+
+  let score = 0;
+  if ((normalized.includes("返回") || normalized.includes("后退")) && candidate.intent === "navigate_back") score = 0.95;
+  if ((normalized.includes("主页") || normalized.includes("首页") || normalized.includes("home")) && candidate.intent === "go_home") score = 0.95;
+  if ((normalized.includes("机顶盒") || normalized.includes("盒子")) && candidate.device === "stb") score += 0.45;
+  if ((normalized.includes("东芝") || normalized.includes("东芝电视") || normalized.includes("toshiba")) && candidate.device === "toshiba_tv") score += 0.45;
+  if ((normalized.includes("乐视") || normalized.includes("乐视电视")) && candidate.device === "tv_letv") score += 0.45;
+  if ((normalized.includes("小爱") || normalized.includes("音箱") || normalized.includes("音响")) && candidate.device === "xiaoai_speaker") score += 0.45;
+  if ((normalized.includes("b站") || normalized.includes("bilibili") || normalized.includes("哔哩")) && candidate.intent.includes("bilibili")) score += 0.45;
+  if ((normalized.includes("打开") || normalized.includes("开启")) && candidate.intent.startsWith("open_device")) score += 0.25;
+  if ((normalized.includes("放歌") || normalized.includes("听歌") || normalized.includes("播放")) && candidate.intent.startsWith("play_media")) score += 0.25;
+  if ((normalized.includes("我想看b站") || normalized.includes("看b站")) && candidate.intent === "watch_bilibili_demo") score = Math.max(score, 0.95);
+
+  return Math.min(score, 0.98);
+}
+
 async function getEmbedding(text: string): Promise<number[]> {
   try {
     const response = await fetch(`${VECTOR_SERVICE_URL}/embed`, {
@@ -62,289 +178,93 @@ async function getEmbedding(text: string): Promise<number[]> {
       body: JSON.stringify({ text }),
     });
     if (!response.ok) throw new Error("Embedding failed");
-    const data = await response.json();
-    return data.embedding;
-  } catch (error) {
-    console.error("[local_intent] Embedding error:", error);
+    const data = await response.json() as { embedding?: number[] };
+    return Array.isArray(data.embedding) ? data.embedding : [];
+  } catch {
     return [];
   }
 }
 
-function initVectorDb(dbPath: string): Database.Database {
-  const dir = join(dbPath, "..");
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
+function cosineSimilarity(a: number[], b: number[]): number {
+  if (a.length === 0 || b.length === 0 || a.length !== b.length) return 0;
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
   }
-
-  const database = new Database(dbPath);
-  database.exec("CREATE TABLE IF NOT EXISTS normalized_intents (id INTEGER PRIMARY KEY, text TEXT, normalized_text TEXT, intent TEXT, action TEXT, params TEXT, device TEXT)");
-
-  try {
-    load(database);
-  } catch (e) {
-    console.log("[local_intent] Vec0 extension loaded via alternative method");
-  }
-
-  try {
-    database.exec("CREATE VIRTUAL TABLE IF NOT EXISTS intent_vectors USING vec0(embedding float[384])");
-  } catch (e) {
-    console.log("[local_intent] Vec0 table may already exist:", e);
-  }
-
-  return database;
+  if (normA === 0 || normB === 0) return 0;
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-function loadNormalizedIntents(): NormalizedIntent[] {
-  const intents: NormalizedIntent[] = [
-    { id: 1, text: "打开电视", normalized_text: "open_tv", intent: "open_device", action: "xiaoai_execute", params: { command: "打开电视" }, device: "tv" },
-    { id: 2, text: "打开乐视电视", normalized_text: "open_tv", intent: "open_device", action: "xiaoai_execute", params: { command: "打开电视" }, device: "tv_letv" },
-    { id: 3, text: "开启电视", normalized_text: "open_tv", intent: "open_device", action: "xiaoai_execute", params: { command: "打开电视" }, device: "tv" },
-    { id: 4, text: "打开机顶盒", normalized_text: "open_stb", intent: "open_device", action: "xiaoai_execute", params: { command: "打开机顶盒" }, device: "stb" },
-    { id: 5, text: "打开盒子", normalized_text: "open_stb", intent: "open_device", action: "xiaoai_execute", params: { command: "打开机顶盒" }, device: "stb" },
-    { id: 6, text: "打开东芝电视", normalized_text: "open_toshiba_tv", intent: "open_device", action: "xiaoai_execute", params: { command: "打开东芝电视" }, device: "toshiba_tv" },
-    { id: 7, text: "在东芝电视打开B站", normalized_text: "open_bilibili_tv", intent: "open_app", action: "open_bilibili", device: "toshiba_tv" },
-    { id: 8, text: "在东芝电视看B站", normalized_text: "open_bilibili_tv", intent: "open_app", action: "open_bilibili", device: "toshiba_tv" },
-    { id: 9, text: "用东芝电视看B站", normalized_text: "open_bilibili_tv", intent: "open_app", action: "open_bilibili", device: "toshiba_tv" },
-    { id: 10, text: "在机顶盒看B站", normalized_text: "open_bilibili_stb", intent: "open_app", action: "open_bilibili", device: "stb" },
-    { id: 11, text: "用机顶盒看B站", normalized_text: "open_bilibili_stb", intent: "open_app", action: "open_bilibili", device: "stb" },
-    { id: 12, text: "打开B站", normalized_text: "open_bilibili", intent: "open_app", action: "open_bilibili", device: "tv" },
-    { id: 13, text: "打开哔哩哔哩", normalized_text: "open_bilibili", intent: "open_app", action: "open_bilibili", device: "tv" },
-    { id: 14, text: "看B站", normalized_text: "open_bilibili", intent: "open_app", action: "open_bilibili", device: "tv" },
-    { id: 15, text: "我想看B站", normalized_text: "open_bilibili", intent: "open_app", action: "open_bilibili", device: "tv" },
-    { id: 16, text: "返回", normalized_text: "navigate_back", intent: "navigate_back", action: "back" },
-    { id: 17, text: "后退", normalized_text: "navigate_back", intent: "navigate_back", action: "back" },
-    { id: 18, text: "上一页", normalized_text: "navigate_back", intent: "navigate_back", action: "back" },
-    { id: 19, text: "主页", normalized_text: "go_home", intent: "go_home", action: "home" },
-    { id: 20, text: "首页", normalized_text: "go_home", intent: "go_home", action: "home" },
-    { id: 21, text: "home", normalized_text: "go_home", intent: "go_home", action: "home" },
-    { id: 22, text: "播放音乐", normalized_text: "play_music", intent: "play_media", action: "xiaoai_execute", params: { command: "小爱音箱放歌" }, device: "xiaoai_speaker" },
-    { id: 23, text: "放首歌", normalized_text: "play_music", intent: "play_media", action: "xiaoai_execute", params: { command: "小爱音箱放歌" }, device: "xiaoai_speaker" },
-    { id: 24, text: "小爱音箱放歌", normalized_text: "play_music", intent: "play_media", action: "xiaoai_execute", params: { command: "小爱音箱放歌" }, device: "xiaoai_speaker" },
-    { id: 25, text: "打开空调", normalized_text: "open_ac", intent: "open_device", action: "xiaoai_execute", params: { command: "打开空调" }, device: "ac" },
-    { id: 26, text: "开灯", normalized_text: "turn_on_light", intent: "control_light", action: "turn_on", device: "light" },
-    { id: 27, text: "关灯", normalized_text: "turn_off_light", intent: "control_light", action: "turn_off", device: "light" },
-  ];
-  return intents;
-}
+async function buildVectorCandidates(text: string, catalog: IntentExample[]): Promise<Candidate[]> {
+  const queryEmbedding = await getEmbedding(text);
+  if (queryEmbedding.length === 0) return [];
 
-async function syncIntentsToVectorDb(db: Database.Database, intents: NormalizedIntent[]): Promise<void> {
-  try {
-    const count = db.prepare("SELECT COUNT(*) as count FROM normalized_intents").get() as { count: number };
-    if (count.count > 0) {
-      console.log(`[local_intent] ${count.count} intents already in DB`);
-      return;
-    }
-
-    const insertStmt = db.prepare("INSERT INTO normalized_intents (id, text, normalized_text, intent, action, params, device) VALUES (?, ?, ?, ?, ?, ?, ?)");
-
-    for (const intent of intents) {
-      insertStmt.run(intent.id, intent.text, intent.normalized_text, intent.intent, intent.action, JSON.stringify(intent.params || {}), intent.device || "");
-    }
-
-    console.log(`[local_intent] Inserted ${intents.length} intents into DB`);
-
-    for (const intent of intents) {
-      const embedding = await getEmbedding(intent.text);
-      if (embedding.length > 0) {
-        const vectorJson = JSON.stringify(embedding).replace(/'/g, "''");
-        db.exec(`INSERT INTO intent_vectors(rowid, embedding) VALUES (${intent.id}, '${vectorJson}')`);
-      }
-    }
-
-    console.log(`[local_intent] Inserted ${intents.length} vectors into intent_vectors`);
-  } catch (e) {
-    console.error("[local_intent] Error syncing intents:", e);
-  }
-}
-
-function getTopDevice(recentMentionedDevices: RecentMentionedDevice[] = []): string | undefined {
-  return [...recentMentionedDevices].sort((a, b) => b.score - a.score)[0]?.device;
-}
-
-function createDeviceAction(device: string): ToolAction[] {
-  switch (device) {
-    case "tv_letv":
-      return [{ tool: "hami", action: "xiaoai_execute", params: { command: "打开电视" } }];
-    case "stb":
-      return [{ tool: "hami", action: "xiaoai_execute", params: { command: "打开机顶盒" } }];
-    case "xiaoai_speaker":
-      return [{ tool: "hami", action: "xiaoai_execute", params: { command: "小爱音箱放歌" } }];
-    case "toshiba_tv":
-      return [{ tool: "adb", action: "open_bilibili" }];
-    default:
-      return [];
-  }
-}
-
-function createDeviceMessage(device: string, actionType: "open" | "play"): string {
-  if (device === "tv_letv") return actionType === "open" ? "好的，打开乐视电视" : "好的，在电视上继续播放";
-  if (device === "stb") return "好的，打开机顶盒";
-  if (device === "xiaoai_speaker") return "好的，让小爱音箱开始播放";
-  if (device === "toshiba_tv") return actionType === "open" ? "好的，打开东芝电视" : "好的，在东芝电视上播放";
-  return "好的，开始执行";
-}
-
-function createContextualCandidates(text: string, recentMentionedDevices: RecentMentionedDevice[] = []): MatchCandidate[] {
-  const lower = text.toLowerCase();
-  const topDevice = getTopDevice(recentMentionedDevices);
-  if (!topDevice) return [];
-
-  const candidates: MatchCandidate[] = [];
-  const refersToPreviousDevice =
-    lower.includes("它") || lower.includes("那个") || lower.includes("这个") || lower.includes("刚刚");
-
-  if ((lower.includes("打开") || lower.includes("开启")) && refersToPreviousDevice) {
-    candidates.push({
-      keywords: ["打开", "它"],
-      intent: "open_device",
-      message: createDeviceMessage(topDevice, "open"),
-      actions: createDeviceAction(topDevice),
-      confidence: 0.84,
-    });
-  }
-
-  if ((lower.includes("放歌") || lower.includes("播放") || lower.includes("继续")) && refersToPreviousDevice) {
-    const targetDevice = topDevice === "xiaoai_speaker" ? topDevice : "xiaoai_speaker";
-    candidates.push({
-      keywords: ["播放", "它"],
-      intent: "play_media",
-      message: createDeviceMessage(targetDevice, "play"),
-      actions: createDeviceAction(targetDevice),
-      confidence: 0.82,
-    });
-  }
-
-  return candidates.filter((candidate) => candidate.actions.length > 0);
-}
-
-interface MatchCandidate {
-  keywords: string[];
-  intent: string;
-  message: string;
-  actions: ToolAction[];
-  confidence: number;
-}
-
-function createCandidates(text: string, recentMentionedDevices: RecentMentionedDevice[] = []): MatchCandidate[] {
-  const lower = text.toLowerCase();
-  const candidates: MatchCandidate[] = [];
-
-  if (lower.includes("返回") || lower.includes("退回") || lower.includes("回到上一步")) {
-    candidates.push({
-      keywords: ["返回"],
-      intent: "navigate_back",
-      message: "好的，返回上一页",
-      actions: [{ tool: "adb", action: "back" }],
-      confidence: 0.92,
-    });
-  }
-
-  if (lower.includes("主页") || lower.includes("首页") || lower.includes("home")) {
-    candidates.push({
-      keywords: ["主页"],
-      intent: "go_home",
-      message: "好的，返回主页",
-      actions: [{ tool: "adb", action: "home" }],
-      confidence: 0.92,
-    });
-  }
-
-  if ((lower.includes("打开") || lower.includes("开启")) && (lower.includes("电视") || lower.includes("乐视"))) {
-    candidates.push({
-      keywords: ["打开", "电视"],
-      intent: "open_device",
-      message: "好的，打开乐视电视",
-      actions: [{ tool: "hami", action: "xiaoai_execute", params: { command: "打开电视" } }],
-      confidence: 0.88,
-    });
-  }
-
-  if ((lower.includes("打开") || lower.includes("开启")) && (lower.includes("机顶盒") || lower.includes("盒子"))) {
-    candidates.push({
-      keywords: ["打开", "机顶盒"],
-      intent: "open_device",
-      message: "好的，打开机顶盒",
-      actions: [{ tool: "hami", action: "xiaoai_execute", params: { command: "打开机顶盒" } }],
-      confidence: 0.88,
-    });
-  }
-
-  if ((lower.includes("放歌") || lower.includes("播放音乐") || lower.includes("来点歌")) && (lower.includes("小爱") || lower.includes("音箱"))) {
-    candidates.push({
-      keywords: ["小爱", "放歌"],
-      intent: "play_media",
-      message: "好的，让小爱音箱开始播放",
-      actions: [{ tool: "hami", action: "xiaoai_execute", params: { command: "小爱音箱放歌" } }],
-      confidence: 0.86,
-    });
-  }
-
-  if (lower.includes("b站") || lower.includes("bilibili") || lower.includes("哔哩哔哩") || lower.includes("看b站") || lower.includes("看哔哩")) {
-    candidates.push({
-      keywords: ["B站", "bilibili"],
-      intent: "open_app",
-      message: "好的，打开B站",
-      actions: [{ tool: "adb", action: "open_bilibili" }],
-      confidence: 0.90,
-    });
-  }
-
-  if (lower.includes("当贝") && (lower.includes("市场") || lower.includes("商店") || lower.includes("应用商店"))) {
-    candidates.push({
-      keywords: ["当贝", "市场"],
-      intent: "open_app",
-      message: "好的，打开当贝市场",
-      actions: [{ tool: "adb", action: "open_dangbei" }],
-      confidence: 0.88,
-    });
-  }
-
-  return [...candidates, ...createContextualCandidates(text, recentMentionedDevices)];
-}
-
-async function vectorSearch(text: string, db: Database.Database): Promise<{ intent: NormalizedIntent; score: number } | null> {
-  try {
-    const embedding = await getEmbedding(text);
-    if (embedding.length === 0) return null;
-
-    const vectorJson = JSON.stringify(embedding);
-    const results = db.prepare(
-      "SELECT rowid, distance FROM intent_vectors WHERE embedding MATCH ? LIMIT 1"
-    ).all(vectorJson) as { rowid: number; distance: number }[];
-
-    if (results.length === 0) return null;
-
-    const matchedIntent = db.prepare("SELECT * FROM normalized_intents WHERE id = ?").get(results[0].rowid) as any;
-    if (!matchedIntent) return null;
-
-    const score = Math.max(0, 1 - results[0].distance / 2);
+  const scored = await Promise.all(catalog.map(async (item) => {
+    const itemEmbedding = await getEmbedding(item.text);
     return {
-      intent: {
-        id: matchedIntent.id,
-        text: matchedIntent.text,
-        normalized_text: matchedIntent.normalized_text,
-        intent: matchedIntent.intent,
-        action: matchedIntent.action,
-        params: JSON.parse(matchedIntent.params || "{}"),
-        device: matchedIntent.device,
-      },
-      score,
+      item,
+      score: cosineSimilarity(queryEmbedding, itemEmbedding),
     };
-  } catch (error) {
-    console.error("[local_intent] Vector search error:", error);
-    return null;
+  }));
+
+  return scored
+    .filter((entry) => entry.score >= 0.45)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map((entry) => ({
+      intent: entry.item.intent,
+      confidence: entry.score,
+      actions: entry.item.actions,
+      source: "vector" as const,
+      device: entry.item.device,
+      sampleText: entry.item.text,
+    }));
+}
+
+function buildRuleCandidates(text: string, catalog: IntentExample[]): Candidate[] {
+  return catalog
+    .map((item) => ({
+      intent: item.intent,
+      confidence: keywordScore(text, item),
+      actions: item.actions,
+      source: "rule" as const,
+      device: item.device,
+      sampleText: item.text,
+    }))
+    .filter((item) => item.confidence > 0)
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, 3);
+}
+
+function dedupeCandidates(candidates: Candidate[]): Candidate[] {
+  const seen = new Set<string>();
+  const deduped: Candidate[] = [];
+  for (const candidate of candidates) {
+    if (seen.has(candidate.intent)) continue;
+    seen.add(candidate.intent);
+    deduped.push(candidate);
   }
+  return deduped;
 }
 
 export const localIntentTool = tool(
   async (input) => {
     const config = loadConfig();
-    const text = input.text as string;
+    const text = String(input.text || "").trim();
     const recentMentionedDevices = (input.recentMentionedDevices as RecentMentionedDevice[] | undefined) ?? [];
+    const catalog = createIntentCatalog(recentMentionedDevices);
 
-    const candidates = createCandidates(text, recentMentionedDevices);
-    const best = [...candidates].sort((a, b) => b.confidence - a.confidence)[0];
+    const ruleCandidates = buildRuleCandidates(text, catalog);
+    const vectorCandidates = config.use_vector_db ? await buildVectorCandidates(text, catalog) : [];
+    const candidates = dedupeCandidates([...ruleCandidates, ...vectorCandidates])
+      .sort((a, b) => b.confidence - a.confidence)
+      .slice(0, 3);
 
+    const best = candidates[0];
     if (best && best.confidence >= (config.confidence_threshold || 0.6)) {
       return JSON.stringify({
         matched: true,
@@ -352,39 +272,15 @@ export const localIntentTool = tool(
         intent: best.intent,
         actions: best.actions,
         action: best.actions[0]?.action,
-        message: best.message,
-        candidates: candidates.map(({ intent, confidence, keywords }) => ({ intent, confidence, keywords })),
-        source: "rule",
+        source: best.source,
+        candidates: candidates.map((item) => ({
+          intent: item.intent,
+          confidence: item.confidence,
+          device: item.device ?? null,
+          source: item.source,
+          sampleText: item.sampleText ?? null,
+        })),
       });
-    }
-
-    if (config.use_vector_db) {
-      if (!db) {
-        const dbPath = config.vector_db_path || join(__dirname, "..", "..", "data", "intents.db");
-        db = initVectorDb(dbPath);
-        const intents = loadNormalizedIntents();
-        await syncIntentsToVectorDb(db, intents);
-        normalizedIntents = intents;
-      }
-
-      const vectorResult = await vectorSearch(text, db);
-      if (vectorResult && vectorResult.score >= 0.3) {
-        const actions: ToolAction[] = vectorResult.intent.params
-          ? [{ tool: "hami", action: vectorResult.intent.action, params: vectorResult.intent.params }]
-          : [{ tool: "adb", action: vectorResult.intent.action }];
-
-        return JSON.stringify({
-          matched: true,
-          confidence: vectorResult.score,
-          intent: vectorResult.intent.intent,
-          actions,
-          action: vectorResult.intent.action,
-          message: `好的，执行${vectorResult.intent.text}`,
-          normalized_text: vectorResult.intent.normalized_text,
-          candidates: [],
-          source: "vector",
-        });
-      }
     }
 
     return JSON.stringify({
@@ -392,19 +288,25 @@ export const localIntentTool = tool(
       confidence: best?.confidence || 0,
       intent: null,
       actions: [],
-      candidates: candidates.map(({ intent, confidence, keywords }) => ({ intent, confidence, keywords })),
       source: "none",
+      candidates: candidates.map((item) => ({
+        intent: item.intent,
+        confidence: item.confidence,
+        device: item.device ?? null,
+        source: item.source,
+        sampleText: item.sampleText ?? null,
+      })),
     });
   },
   {
     name: "local_intent",
-    description: "本地意图识别 - 规则匹配 + sqlite-vec 向量归一化",
+    description: "本地意图归一化，输出带设备的完整 intent，并为 Demo 提供稳定归一化入口",
     schema: z.object({
       text: z.string().describe("用户输入文本"),
       recentMentionedDevices: z.array(z.object({
         device: z.string(),
         score: z.number(),
-      })).optional().describe("最近提及的设备及权重"),
+      })).optional().describe("最近提到的设备及权重"),
     }),
   },
 );

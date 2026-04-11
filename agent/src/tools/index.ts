@@ -91,7 +91,11 @@ export async function executeToolAction(action: ToolAction): Promise<ToolResult>
     const input = { action: action.action, ...action.params };
     const result = await (tool as { invoke: (input: Record<string, unknown>) => Promise<unknown> }).invoke(input);
     const parsed = typeof result === "string" ? JSON.parse(result) : result;
-    const success = typeof parsed?.success === "boolean" ? parsed.success : true;
+    const success = typeof parsed?.success === "boolean"
+      ? parsed.success
+      : parsed?.status === "error"
+        ? false
+        : true;
     return {
       tool: action.tool,
       action: action.action,

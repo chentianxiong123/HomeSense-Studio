@@ -1,4 +1,15 @@
 import { getRecentUserMessages } from "../memory/chatDb.js";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+import YAML from "yaml";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+interface ContextCompleterConfig {
+  history_limit?: number;
+  decay_factor?: number;
+}
 
 interface DevicePattern {
   device: string;
@@ -38,7 +49,20 @@ const TRIGGER_RULES: Array<{
   },
 ];
 
-function extractDeviceWeights(input: string, limit: number = 20, decayFactor: number = 0.9) {
+function loadConfig(): ContextCompleterConfig {
+  const configPath = join(__dirname, "config.yaml");
+  try {
+    const content = readFileSync(configPath, "utf-8");
+    return YAML.parse(content) as ContextCompleterConfig;
+  } catch {
+    return {
+      history_limit: 10,
+      decay_factor: 0.9,
+    };
+  }
+}
+
+function extractDeviceWeights(input: string, limit: number = 10, decayFactor: number = 0.9) {
   const recentMessages = getRecentUserMessages(limit);
   const scores = new Map<string, { device: DevicePattern; score: number }>();
 
@@ -106,7 +130,12 @@ function applyTriggerRules(input: string, weights: Array<{ device: DevicePattern
 }
 
 export function completeContext(input: string): { completedInput: string; deviceWeights: Array<{ device: string; label: string; score: number; type: string }> } {
-  const weights = extractDeviceWeights(input);
+  const config = loadConfig();
+  const weights = extractDeviceWeights(
+    input,
+    typeof config.history_limit === "number" ? config.history_limit : 10,
+    typeof config.decay_factor === "number" ? config.decay_factor : 0.9,
+  );
   let completedInput = input;
 
   if (hasPronoun(input)) {
