@@ -59,3 +59,9 @@ agent/src/tools/adb/cache/
 
 # Excluded reference repos
 References/
+
+# CLI binaries (do not upload)
+homesense-adb-cli-source/
+homesense-hami-cli-source/
+homesense-adb-cli-skill-windows-amd64/
+homesense-hami-cli-skill-windows-amd64/
