@@ -1,4 +1,4 @@
-﻿# HomeSense Agent 架构文档
+﻿﻿# HomeSense Agent 架构文档
 
 > 生成时间: 2026-04-10
 > 版本: v2.0 (渐进式披露架构)
