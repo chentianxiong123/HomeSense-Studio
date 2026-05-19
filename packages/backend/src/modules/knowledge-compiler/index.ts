@@ -1,9 +1,7 @@
 import fs from 'fs'
-import { getDb as defaultGetDb } from '../../db/index.js'
-import { memoryKernel } from '../memory-kernel/index.js'
-import { planLibrary } from '../plan-library/index.js'
-
-type GetDbFn = () => ReturnType<typeof defaultGetDb>
+import { memoryKernel as defaultMemoryKernel } from '../memory-kernel/index.js'
+import { planLibrary as defaultPlanLibrary } from '../plan-library/index.js'
+import { SqlKnowledgeCompilerRepository, type KnowledgeCompilerRepository } from './repository.js'
 
 interface MemoryKernelInstance {
   upsertCompiledKnowledge(params: {
@@ -30,19 +28,26 @@ interface PlanLibraryInstance {
   }>
 }
 
-interface ExperienceRow {
-  id: number
-  category: string
-  title: string
-  file_path: string
-  importance: number
+export interface FileReader {
+  readFile(filePath: string): string
 }
 
-class KnowledgeCompilerService {
+export class FsFileReader implements FileReader {
+  readFile(filePath: string): string {
+    try {
+      return fs.readFileSync(filePath, 'utf-8')
+    } catch {
+      return ''
+    }
+  }
+}
+
+export class KnowledgeCompilerService {
   constructor(
-    private readonly getDb: GetDbFn = defaultGetDb,
-    private readonly memoryKernel: MemoryKernelInstance = memoryKernel,
-    private readonly planLibrary: PlanLibraryInstance = planLibrary,
+    private readonly repo: KnowledgeCompilerRepository = new SqlKnowledgeCompilerRepository(),
+    private readonly memoryKernel: MemoryKernelInstance = defaultMemoryKernel,
+    private readonly planLibrary: PlanLibraryInstance = defaultPlanLibrary,
+    private readonly files: FileReader = new FsFileReader(),
   ) {}
 
   refreshKnowledge(): {
@@ -65,33 +70,19 @@ class KnowledgeCompilerService {
   }
 
   private compileEntityPages(): number {
-    const db = this.getDb()
-    const entities = db.prepare(
-      'SELECT * FROM memory_entities ORDER BY updated_at DESC',
-    ).all() as Array<Record<string, unknown>>
+    const entities = this.repo.listAllEntities()
 
     for (const entity of entities) {
-      const entityId = String(entity.id)
-      const attributes = db.prepare(
-        'SELECT key, value FROM memory_attributes WHERE entity_id = ? AND valid_to IS NULL ORDER BY key ASC',
-      ).all(entityId) as Array<{ key: string; value: string }>
-      const triples = db.prepare(
-        `SELECT t.predicate, s.name AS subject_name, o.name AS object_name
-         FROM memory_triples t
-         JOIN memory_entities s ON s.id = t.subject
-         JOIN memory_entities o ON o.id = t.object
-         WHERE (t.subject = ? OR t.object = ?) AND t.valid_to IS NULL
-         ORDER BY t.confidence DESC
-         LIMIT 8`,
-      ).all(entityId, entityId) as Array<{ predicate: string; subject_name: string; object_name: string }>
+      const attributes = this.repo.listAttributesForEntity(entity.id)
+      const triples = this.repo.listTriplesForEntity(entity.id, 8)
 
-      const properties = safeParse<Record<string, unknown>>(String(entity.properties_json ?? '{}'), {})
-      const title = `${String(entity.name)} (${String(entity.type)})`
+      const properties = safeParse<Record<string, unknown>>(entity.properties_json ?? '{}', {})
+      const title = `${entity.name} (${entity.type})`
       const bodyLines = [
-        `Entity: ${String(entity.name)}`,
-        `Type: ${String(entity.type)}`,
-        `Wing: ${String(entity.wing ?? '') || 'n/a'}`,
-        `Room: ${String(entity.room ?? '') || 'n/a'}`,
+        `Entity: ${entity.name}`,
+        `Type: ${entity.type}`,
+        `Wing: ${entity.wing || 'n/a'}`,
+        `Room: ${entity.room || 'n/a'}`,
       ]
 
       if (typeof properties.content === 'string' && properties.content) {
@@ -116,14 +107,14 @@ class KnowledgeCompilerService {
         kind: 'wiki_page',
         title,
         body: bodyLines.join('\n').trim(),
-        wing: String(entity.wing ?? ''),
-        room: String(entity.room ?? ''),
+        wing: entity.wing,
+        room: entity.room,
         source_type: 'memory_entity',
-        source_ref: entityId,
-        tags: [String(entity.type), String(entity.wing ?? '')].filter(Boolean),
+        source_ref: entity.id,
+        tags: [entity.type, entity.wing].filter(Boolean),
         metadata: {
-          entity_id: entityId,
-          type: String(entity.type),
+          entity_id: entity.id,
+          type: entity.type,
         },
         rank_score: 0.72,
       })
@@ -133,10 +124,7 @@ class KnowledgeCompilerService {
   }
 
   private compileExperienceNotes(): number {
-    const db = this.getDb()
-    const experiences = db.prepare(
-      'SELECT * FROM experiences ORDER BY importance DESC, created_at DESC',
-    ).all() as ExperienceRow[]
+    const experiences = this.repo.listAllExperiencesByImportance()
 
     for (const experience of experiences) {
       const content = this.readExperienceBody(experience.file_path)
@@ -161,10 +149,7 @@ class KnowledgeCompilerService {
   }
 
   private compileExperiencePlans(): number {
-    const db = this.getDb()
-    const experiences = db.prepare(
-      'SELECT * FROM experiences WHERE importance >= 0.7 ORDER BY importance DESC, created_at DESC',
-    ).all() as ExperienceRow[]
+    const experiences = this.repo.listExperiencesAboveImportance(0.7)
 
     for (const experience of experiences) {
       const content = this.readExperienceBody(experience.file_path)
@@ -191,34 +176,31 @@ class KnowledgeCompilerService {
   }
 
   private compileWorkflowCandidates(): number {
-    const db = this.getDb()
-    const workflows = db.prepare(
-      'SELECT * FROM workflows ORDER BY published DESC, updated_at DESC',
-    ).all() as Array<Record<string, unknown>>
+    const workflows = this.repo.listAllWorkflows()
 
     for (const workflow of workflows) {
       const graph = safeParse<{ nodes?: Array<{ type?: string; label?: string }> }>(
-        String(workflow.graph_json ?? '{}'),
+        workflow.graph_json ?? '{}',
         {},
       )
       const nodeSummary = (graph.nodes ?? []).map((node) => `${node.label ?? node.type ?? 'node'}`).join(' -> ')
 
       this.memoryKernel.upsertCompiledKnowledge({
         kind: 'workflow_candidate',
-        title: `Workflow: ${String(workflow.name)}`,
+        title: `Workflow: ${workflow.name}`,
         body: [
-          `Description: ${String(workflow.description ?? '') || 'n/a'}`,
-          `Trigger: ${String(workflow.trigger_type ?? 'manual')}`,
+          `Description: ${workflow.description || 'n/a'}`,
+          `Trigger: ${workflow.trigger_type ?? 'manual'}`,
           nodeSummary ? `Nodes: ${nodeSummary}` : '',
         ].filter(Boolean).join('\n'),
         source_type: 'workflow',
         source_ref: String(workflow.id),
-        tags: ['workflow', String(workflow.trigger_type ?? 'manual')],
+        tags: ['workflow', workflow.trigger_type ?? 'manual'],
         metadata: {
-          workflow_id: Number(workflow.id),
-          published: Number(workflow.published ?? 0) === 1,
+          workflow_id: workflow.id,
+          published: workflow.published === 1,
         },
-        rank_score: Number(workflow.published ?? 0) === 1 ? 0.8 : 0.6,
+        rank_score: workflow.published === 1 ? 0.8 : 0.6,
       })
     }
 
@@ -274,13 +256,10 @@ class KnowledgeCompilerService {
   }
 
   private readExperienceBody(filePath: string): string {
-    try {
-      const raw = fs.readFileSync(filePath, 'utf-8')
-      const bodyStart = raw.indexOf('---', raw.indexOf('---') + 3)
-      return bodyStart === -1 ? raw.trim() : raw.slice(bodyStart + 3).trim()
-    } catch {
-      return ''
-    }
+    const raw = this.files.readFile(filePath)
+    if (!raw) return ''
+    const bodyStart = raw.indexOf('---', raw.indexOf('---') + 3)
+    return bodyStart === -1 ? raw.trim() : raw.slice(bodyStart + 3).trim()
   }
 }
 
