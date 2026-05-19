@@ -1,6 +1,30 @@
 import { ruleEngine } from '../rule-engine/index.js'
 import { skillsService } from '../skills-system/index.js'
 
+interface RuleEngineInstance {
+  addRule(rule: {
+    id: number
+    trigger_pattern: string
+    priority: number
+    enabled: boolean
+    actions: Array<{ tool: string; action: string; params: Record<string, unknown>; order: number }>
+  }): void
+}
+
+interface SkillsServiceInstance {
+  register(skill: {
+    name: string
+    description: string
+    prompt_template: string
+    allowed_tools_json: string
+    action_schema_json: string
+    context_mode: string
+    source: string
+    skill_root: string
+    enabled: boolean
+  }): void
+}
+
 export interface TaskFailure {
   task_type: string
   input: string
@@ -79,7 +103,13 @@ const ERROR_PATTERNS: Array<{
   },
 ]
 
-export function reflect(failure: TaskFailure): ReflectionResult {
+export class SelfEnhancementService {
+  constructor(
+    private readonly ruleEngine: RuleEngineInstance = ruleEngine,
+    private readonly skillsService: SkillsServiceInstance = skillsService,
+  ) {}
+
+  reflect(failure: TaskFailure): ReflectionResult {
   const errorStr = `${failure.error} ${failure.actual} ${failure.input}`.toLowerCase()
 
   for (const pattern of ERROR_PATTERNS) {
@@ -116,61 +146,64 @@ export function reflect(failure: TaskFailure): ReflectionResult {
   }
 }
 
-export function generateRule(reflection: ReflectionResult): void {
-  if (!reflection.can_generate_rule || reflection.confidence < 0.5) return
+generateRule(reflection: ReflectionResult): void {
+    if (!reflection.can_generate_rule || reflection.confidence < 0.5) return
 
-  const triggerPattern = reflection.failure_pattern === 'rule_miss'
-    ? reflection.suggestions[0]?.replace(/.*为[""]/, '').replace(/[""].*/, '') || 'unknown'
-    : reflection.failure_pattern
+    const triggerPattern = reflection.failure_pattern === 'rule_miss'
+      ? reflection.suggestions[0]?.replace(/.*为[""]/, '').replace(/[""].*/, '') || 'unknown'
+      : reflection.failure_pattern
 
-  let tool = 'device_control'
-  let action = 'turn_on'
+    let tool = 'device_control'
+    let action = 'turn_on'
 
-  for (const suggestion of reflection.suggestions) {
-    const match = suggestion.match(/调用\s+(\w+)\.(\w+)/)
-    if (match) {
-      tool = match[1]
-      action = match[2]
-      break
+    for (const suggestion of reflection.suggestions) {
+      const match = suggestion.match(/调用\s+(\w+)\.(\w+)/)
+      if (match) {
+        tool = match[1]
+        action = match[2]
+        break
+      }
+    }
+
+    this.ruleEngine.addRule({
+      id: 0,
+      trigger_pattern: triggerPattern,
+      priority: Math.round(reflection.confidence * 10),
+      enabled: true,
+      actions: [{ tool, action, params: {}, order: 1 }],
+    })
+  }
+
+  generateSkill(reflection: ReflectionResult): void {
+    if (!reflection.can_generate_skill || reflection.confidence < 0.5) return
+
+    const name = `auto_${reflection.failure_pattern}_${Date.now()}`
+    const promptTemplate = reflection.suggestions.join('\n')
+
+    this.skillsService.register({
+      name,
+      description: `自动生成: ${reflection.root_cause}`,
+      prompt_template: promptTemplate,
+      allowed_tools_json: '["mi-cli"]',
+      action_schema_json: '[]',
+      context_mode: 'inline',
+      source: 'converted',
+      skill_root: '',
+      enabled: true,
+    })
+  }
+
+  processFailureAndEnhance(failure: TaskFailure): void {
+    const reflection = this.reflect(failure)
+
+    if (reflection.can_generate_rule && reflection.confidence >= 0.5) {
+      this.generateRule(reflection)
+    }
+
+    if (reflection.can_generate_skill && reflection.confidence >= 0.5) {
+      this.generateSkill(reflection)
     }
   }
-
-  ruleEngine.addRule({
-    id: 0,
-    trigger_pattern: triggerPattern,
-    priority: Math.round(reflection.confidence * 10),
-    enabled: true,
-    actions: [{ tool, action, params: {}, order: 1 }],
-  })
 }
 
-export function generateSkill(reflection: ReflectionResult): void {
-  if (!reflection.can_generate_skill || reflection.confidence < 0.5) return
-
-  const name = `auto_${reflection.failure_pattern}_${Date.now()}`
-  const promptTemplate = reflection.suggestions.join('\n')
-
-  skillsService.register({
-    name,
-    description: `自动生成: ${reflection.root_cause}`,
-    prompt_template: promptTemplate,
-    allowed_tools_json: '["mi-cli"]',
-    action_schema_json: '[]',
-    context_mode: 'inline',
-    source: 'converted',
-    skill_root: '',
-    enabled: true,
-  })
-}
-
-export function processFailureAndEnhance(failure: TaskFailure): void {
-  const reflection = reflect(failure)
-
-  if (reflection.can_generate_rule && reflection.confidence >= 0.5) {
-    generateRule(reflection)
-  }
-
-  if (reflection.can_generate_skill && reflection.confidence >= 0.5) {
-    generateSkill(reflection)
-  }
-}
+export const selfEnhancementService = new SelfEnhancementService()

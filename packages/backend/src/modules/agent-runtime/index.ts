@@ -25,8 +25,22 @@ interface MemoryKernelInstance {
 }
 
 interface ExecutorGatewayInstance {
-  runPlan(id: string): Promise<unknown>
-  invoke(name: string, params: Record<string, unknown>): Promise<unknown>
+  runPlan(id: string): Promise<{
+    plan_id: string
+    executable: boolean
+    results: Array<{
+      order: number
+      tool: string
+      action: string
+      executor: string | null
+      status: 'success' | 'error' | 'skipped'
+      result?: unknown
+      error?: string
+    }>
+  }>
+  invoke(name: string, params: Record<string, unknown>): Promise<{
+    status: 'success' | 'error'; executor: string; data?: unknown; error?: string; message?: string
+  }>
 }
 
 export type { AgentEvent, AgentStreamContext, MemoryHit } from './events.js'

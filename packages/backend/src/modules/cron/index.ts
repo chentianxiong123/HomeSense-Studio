@@ -1,6 +1,13 @@
 import { getDb } from '../../db/index.js'
 import { eventBus } from '../event-bus/index.js'
 
+type GetDbFn = () => ReturnType<typeof getDb>
+
+interface EventBusInstance {
+  fire(event: string, data?: unknown): void
+  on(event: string, handler: (...args: unknown[]) => void): void
+}
+
 interface ScheduleEntry {
   id: string
   cron: string
@@ -12,6 +19,11 @@ class CronService {
   private timer: ReturnType<typeof setInterval> | null = null
   private counter = 0
 
+  constructor(
+    private readonly getDb: GetDbFn = getDb,
+    private readonly eventBus: EventBusInstance = eventBus,
+  ) {}
+
   addSchedule(cron: string, callback: () => Promise<void>): string {
     if (!this.isValidCron(cron)) {
       throw new Error(`Invalid cron expression: ${cron}`)
@@ -20,7 +32,7 @@ class CronService {
     const id = `cron_${++this.counter}_${Date.now()}`
     this.schedules.set(id, { id, cron, callback })
 
-    eventBus.fire('cron_schedule_added', { schedule_id: id, cron })
+    this.eventBus.fire('cron_schedule_added', { schedule_id: id, cron })
     return id
   }
 
@@ -32,9 +44,9 @@ class CronService {
     const now = new Date()
     for (const [id, schedule] of this.schedules) {
       if (this.matchesCron(schedule.cron, now)) {
-        eventBus.fire('cron_fired', { schedule_id: id, cron: schedule.cron, fired_at: now.toISOString() })
+        this.eventBus.fire('cron_fired', { schedule_id: id, cron: schedule.cron, fired_at: now.toISOString() })
         schedule.callback().catch((err) => {
-          eventBus.fire('cron_failed', { schedule_id: id, error: (err as Error).message })
+          this.eventBus.fire('cron_failed', { schedule_id: id, error: (err as Error).message })
         })
       }
     }
@@ -59,7 +71,7 @@ class CronService {
 
   private loadFromDb(): void {
     try {
-      const db = getDb()
+      const db = this.getDb()
       const workflows = db.prepare(
         "SELECT * FROM workflows WHERE trigger_type = 'cron' AND published = 1 AND cron_expression IS NOT NULL",
       ).all() as Array<Record<string, unknown>>
@@ -69,7 +81,7 @@ class CronService {
         const wfId = wf.id as number
         if (cronExpr && this.isValidCron(cronExpr)) {
           this.addSchedule(cronExpr, async () => {
-            eventBus.fire('cron_workflow_triggered', { workflow_id: wfId })
+            this.eventBus.fire('cron_workflow_triggered', { workflow_id: wfId })
           })
         }
       }
