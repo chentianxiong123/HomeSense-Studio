@@ -1,6 +1,8 @@
 import OpenAI from 'openai'
 import { getDb } from '../../db/index.js'
 
+type GetDbFn = () => ReturnType<typeof getDb>
+
 export type LLMProviderType = 'openai' | 'deepseek' | 'ollama' | 'mimo' | 'custom'
 export type ModelSlotName = 'planner' | 'fast' | 'vision' | 'embedding' | 'rerank' | 'local'
 type StoredProviderType = LLMProviderType | 'disabled'
@@ -120,14 +122,16 @@ function normalizeProviderType(value: string | undefined): StoredProviderType {
 class LLMService {
   private clients = new Map<string, OpenAI>()
 
+  constructor(private readonly getDb: GetDbFn = getDb) {}
+
   listProviders(): LLMProviderConfig[] {
-    const db = getDb()
+    const db = this.getDb()
     const rows = db.prepare('SELECT * FROM llm_providers ORDER BY is_default DESC, id ASC').all() as ProviderRow[]
     return rows.map((row) => this.normalizeProviderRow(row))
   }
 
   addProvider(config: Omit<LLMProviderConfig, 'id'>): number {
-    const db = getDb()
+    const db = this.getDb()
     const result = db.prepare(
       `INSERT INTO llm_providers (name, provider_type, api_base, api_key, model_name, enabled, is_default, extra_config)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -149,7 +153,7 @@ class LLMService {
   }
 
   updateProvider(id: number, config: Partial<LLMProviderConfig>): void {
-    const db = getDb()
+    const db = this.getDb()
     const existingRow = db.prepare('SELECT * FROM llm_providers WHERE id = ?').get(id) as ProviderRow | undefined
     if (!existingRow) throw new Error(`Provider not found: ${id}`)
 
@@ -177,31 +181,31 @@ class LLMService {
   }
 
   removeProvider(id: number): void {
-    const db = getDb()
+    const db = this.getDb()
     db.prepare('DELETE FROM llm_providers WHERE id = ?').run(id)
     this.clients.delete(`provider:${id}`)
   }
 
   setDefault(id: number): void {
-    const db = getDb()
+    const db = this.getDb()
     db.prepare('UPDATE llm_providers SET is_default = 0').run()
     db.prepare('UPDATE llm_providers SET is_default = 1 WHERE id = ?').run(id)
   }
 
   listModelSlots(): LLMModelSlotConfig[] {
-    const db = getDb()
+    const db = this.getDb()
     const rows = db.prepare('SELECT * FROM llm_model_slots ORDER BY slot_name ASC').all() as SlotRow[]
     return rows.map((row) => this.normalizeSlotRow(row))
   }
 
   getModelSlot(slot: ModelSlotName): LLMModelSlotConfig | undefined {
-    const db = getDb()
+    const db = this.getDb()
     const row = db.prepare('SELECT * FROM llm_model_slots WHERE slot_name = ?').get(slot) as SlotRow | undefined
     return row ? this.normalizeSlotRow(row) : undefined
   }
 
   upsertModelSlot(slot: ModelSlotName, config: Partial<LLMModelSlotConfig>): LLMModelSlotConfig {
-    const db = getDb()
+    const db = this.getDb()
     const existing = this.getModelSlot(slot)
     const merged: LLMModelSlotConfig = {
       slot_name: slot,
@@ -452,7 +456,7 @@ class LLMService {
 
   private resolveChatTarget(providerId?: number, slot: ModelSlotName = 'planner'): ChatTarget {
     if (providerId) {
-      const db = getDb()
+      const db = this.getDb()
       const row = db.prepare(
         'SELECT * FROM llm_providers WHERE id = ? AND enabled = 1',
       ).get(providerId) as ProviderRow | undefined
@@ -501,7 +505,7 @@ class LLMService {
   }
 
   private getDefaultProvider(): LLMProviderConfig {
-    const db = getDb()
+    const db = this.getDb()
     const providerRow = db.prepare(
       'SELECT * FROM llm_providers WHERE is_default = 1 AND enabled = 1',
     ).get() as ProviderRow | undefined
