@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
-import { getDb as defaultGetDb } from '../../db/index.js'
 import { eventBus as defaultEventBus } from '../event-bus/index.js'
+import { SqlSkillsRepository, type SkillsRepository } from './repository.js'
 
 export interface SkillDefinition {
   name: string
@@ -15,45 +15,51 @@ export interface SkillDefinition {
   enabled: boolean
 }
 
-type GetDbFn = () => ReturnType<typeof defaultGetDb>
-
 interface EventBusInstance {
   fire(event: string, data?: unknown): void
   on(event: string, handler: (...args: unknown[]) => void): void
 }
 
-class SkillsService {
+export class SkillsService {
   private readonly skills = new Map<string, SkillDefinition>()
 
   constructor(
-    private readonly getDb: GetDbFn = defaultGetDb,
+    private readonly repo: SkillsRepository = new SqlSkillsRepository(),
     private readonly eventBus: EventBusInstance = defaultEventBus,
   ) {}
+
+  /**
+   * Repopulate the in-memory map from persistent storage. Should be called
+   * at startup so that previously-registered skills (especially source='converted'
+   * skills auto-promoted from experiences) survive a process restart.
+   */
+  loadAll(): number {
+    this.skills.clear()
+    const all = this.repo.listAllEnabled()
+    for (const skill of all) {
+      this.skills.set(skill.name, skill)
+    }
+    return all.length
+  }
 
   register(skill: SkillDefinition): void {
     if (!skill.name) throw new Error('Skill name is required')
 
     this.skills.set(skill.name, skill)
-
-    const db = this.getDb()
-    db.prepare(
-      `INSERT INTO skills (name, description, prompt_template, allowed_tools_json, action_schema_json, context_mode, source, skill_root, enabled)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(name) DO UPDATE SET description=excluded.description, prompt_template=excluded.prompt_template,
-       allowed_tools_json=excluded.allowed_tools_json, action_schema_json=excluded.action_schema_json,
-       context_mode=excluded.context_mode, source=excluded.source, skill_root=excluded.skill_root, enabled=excluded.enabled`,
-    ).run(
-      skill.name, skill.description, skill.prompt_template,
-      skill.allowed_tools_json, skill.action_schema_json,
-      skill.context_mode, skill.source, skill.skill_root,
-      skill.enabled ? 1 : 0,
-    )
-
+    this.repo.upsertSkill(skill)
     this.eventBus.fire('skill_registered', { name: skill.name })
   }
 
   getSkill(name: string): SkillDefinition | undefined {
-    return this.skills.get(name)
+    const cached = this.skills.get(name)
+    if (cached) return cached
+    // Fallback: skill may have been added by another process / not yet loaded.
+    const row = this.repo.getSkill(name)
+    if (row && row.enabled) {
+      this.skills.set(name, row)
+      return row
+    }
+    return undefined
   }
 
   listSkills(): SkillDefinition[] {
@@ -90,7 +96,7 @@ class SkillsService {
   }
 
   async loadFullSkill(skillName: string): Promise<string> {
-    const skill = this.skills.get(skillName)
+    const skill = this.getSkill(skillName)
     if (!skill) throw new Error(`Skill not found: ${skillName}`)
 
     if (skill.prompt_template) return skill.prompt_template

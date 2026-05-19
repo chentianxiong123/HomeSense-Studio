@@ -65,6 +65,10 @@ export async function buildApp() {
   workflowSeedService.ensureDefaults()
   ruleEngine.loadFromDb()
 
+  // Reload persisted skills (especially source='converted' from prior promotions)
+  // before overlaying disk skills, so the in-memory map survives restarts.
+  skillsService.loadAll()
+
   const skillsDir = process.env.SKILLS_DIR || path.resolve(moduleDir, '..', '..', '..', 'skills')
   try {
     await skillsService.loadDiskSkills(skillsDir)
