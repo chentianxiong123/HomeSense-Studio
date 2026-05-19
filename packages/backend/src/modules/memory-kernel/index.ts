@@ -1,7 +1,8 @@
 import { getDb as defaultGetDb } from '../../db/index.js'
-import { eventBus } from '../event-bus/index.js'
+import { eventBus as defaultEventBus } from '../event-bus/index.js'
 import { llmService as defaultLlmService } from '../llm-provider/service.js'
 import { skillsService as defaultSkillsService } from '../skills-system/index.js'
+import { SqlMemoryRepository, type MemoryRepository } from './repository.js'
 
 type GetDbFn = () => ReturnType<typeof defaultGetDb>
 
@@ -136,12 +137,13 @@ export interface MemoryKernelStatus {
   compiled_knowledge_count: number
 }
 
-class MemoryKernelService {
+export class MemoryKernelService {
   constructor(
     private readonly getDb: GetDbFn = defaultGetDb,
-    private readonly eventBus: EventBusInstance = eventBus,
+    private readonly eventBus: EventBusInstance = defaultEventBus,
     private readonly llmService: LLMServiceInstance = defaultLlmService,
     private readonly skillsService: SkillsServiceInstance = defaultSkillsService,
+    private readonly repo: MemoryRepository = new SqlMemoryRepository(getDb),
   ) {}
 
   initialize(): void {
@@ -151,7 +153,6 @@ class MemoryKernelService {
   ensureCanonicalEmbeddingProfile(): EmbeddingProfile | null {
     const slot = this.llmService.getModelSlot('embedding')
     const profileName = process.env.MODEL_PROFILE || 'default'
-    const db = this.getDb()
     const existing = this.getCanonicalEmbeddingProfile()
 
     if (!slot || !slot.enabled || !slot.model_name) {
@@ -165,61 +166,46 @@ class MemoryKernelService {
         || existing.dimensions !== (slot.dimensions ?? null)
 
       if (changed) {
-        db.prepare(
-          `UPDATE embedding_profiles
-           SET slot_name = ?, provider_type = ?, api_base = ?, model_name = ?, dimensions = ?, updated_at = datetime('now')
-           WHERE profile_name = ?`,
-        ).run(
-          'embedding',
-          slot.provider_type,
-          slot.api_base,
-          slot.model_name,
-          slot.dimensions ?? null,
-          existing.profile_name,
-        )
+        this.repo.updateCanonicalEmbeddingProfile({
+          profileName: existing.profile_name,
+          slotName: 'embedding',
+          providerType: slot.provider_type,
+          apiBase: slot.api_base,
+          modelName: slot.model_name,
+          dimensions: slot.dimensions ?? null,
+        })
       }
 
       return this.getCanonicalEmbeddingProfile()
     }
 
-    db.prepare(
-      `INSERT INTO embedding_profiles (
-        profile_name, slot_name, provider_type, api_base, model_name, dimensions, is_canonical, notes
-      ) VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
-    ).run(
+    this.repo.upsertCanonicalEmbeddingProfile({
       profileName,
-      'embedding',
-      slot.provider_type,
-      slot.api_base,
-      slot.model_name,
-      slot.dimensions ?? null,
-      'Canonical embedding profile. Rebuild required before changing embedding model.',
-    )
+      slotName: 'embedding',
+      providerType: slot.provider_type,
+      apiBase: slot.api_base,
+      modelName: slot.model_name,
+      dimensions: slot.dimensions ?? null,
+      notes: 'Canonical embedding profile. Rebuild required before changing embedding model.',
+    })
 
     return this.getCanonicalEmbeddingProfile()
   }
 
   listEmbeddingProfiles(): EmbeddingProfile[] {
-    const db = this.getDb()
-    return db.prepare(
-      'SELECT * FROM embedding_profiles ORDER BY is_canonical DESC, profile_name ASC',
-    ).all().map((row) => this.normalizeProfile(row as Record<string, unknown>))
+    return this.repo.listEmbeddingProfiles().map((row) => this.normalizeProfile(row as unknown as Record<string, unknown>))
   }
 
   getCanonicalEmbeddingProfile(): EmbeddingProfile | null {
-    const db = this.getDb()
-    const row = db.prepare(
-      'SELECT * FROM embedding_profiles WHERE is_canonical = 1 LIMIT 1',
-    ).get() as Record<string, unknown> | undefined
-    return row ? this.normalizeProfile(row) : null
+    const row = this.repo.getCanonicalEmbeddingProfile()
+    return row ? this.normalizeProfile(row as unknown as Record<string, unknown>) : null
   }
 
   getStatus(): MemoryKernelStatus {
-    const db = this.getDb()
     const canonical = this.getCanonicalEmbeddingProfile()
     const slot = this.llmService.getModelSlot('embedding')
-    const memoryEntityCount = Number((db.prepare('SELECT COUNT(*) AS count FROM memory_entities').get() as { count: number }).count)
-    const compiledKnowledgeCount = Number((db.prepare('SELECT COUNT(*) AS count FROM compiled_knowledge_items').get() as { count: number }).count)
+    const memoryEntityCount = this.repo.countEntities()
+    const compiledKnowledgeCount = this.repo.countCompiledKnowledge()
 
     return {
       canonical_profile: canonical,
@@ -248,64 +234,44 @@ class MemoryKernelService {
   }
 
   remember(content: string, metadata: MemoryMetadata): void {
-    const db = this.getDb()
     const entityId = this.generateEntityId(metadata.type, metadata.wing, metadata.room, content)
 
-    db.prepare(
-      `INSERT INTO memory_entities (id, name, type, wing, room, properties_json)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         name=excluded.name,
-         type=excluded.type,
-         wing=excluded.wing,
-         room=excluded.room,
-         properties_json=excluded.properties_json,
-         updated_at=datetime('now')`,
-    ).run(
-      entityId,
-      content.slice(0, 200),
-      metadata.type,
-      metadata.wing,
-      metadata.room,
-      JSON.stringify({ content, source: metadata.source ?? '', confidence: metadata.confidence ?? 1.0 }),
-    )
+    this.repo.upsertEntity({
+      id: entityId,
+      name: content.slice(0, 200),
+      type: metadata.type,
+      wing: metadata.wing,
+      room: metadata.room,
+      propertiesJson: JSON.stringify({
+        content,
+        source: metadata.source ?? '',
+        confidence: metadata.confidence ?? 1.0,
+      }),
+    })
 
     this.extractAndWriteTriples(entityId, content, metadata)
     this.extractAndWriteAttributes(entityId, content)
 
-    try {
-      db.prepare(
-        'INSERT INTO experiences_fts (title, content, category) VALUES (?, ?, ?)',
-      ).run(content.slice(0, 100), content, metadata.wing)
-    } catch {}
+    this.repo.insertExperienceFts({
+      title: content.slice(0, 100),
+      content,
+      category: metadata.wing,
+    })
 
     this.eventBus.fire('memory_remembered', { entity_id: entityId, type: metadata.type, wing: metadata.wing })
   }
 
   recall(wing: string, room?: string): RecallResult[] {
-    const db = this.getDb()
-    let query = 'SELECT * FROM memory_entities WHERE wing = ?'
-    const params: unknown[] = [wing]
-
-    if (room) {
-      query += ' AND room = ?'
-      params.push(room)
-    }
-
-    query += ' ORDER BY updated_at DESC LIMIT 50'
-
-    const entities = db.prepare(query).all(...params) as Array<Record<string, unknown>>
+    const entities = this.repo.listEntities({ wing, room, limit: 50 })
     return entities.map((entity) => {
-      const entityId = entity.id as string
-      const attributes = db.prepare(
-        'SELECT * FROM memory_attributes WHERE entity_id = ? AND valid_to IS NULL',
-      ).all(entityId) as Array<Record<string, unknown>>
-      const triples = db.prepare(
-        `SELECT * FROM memory_triples
-         WHERE (subject = ? OR object = ?) AND valid_to IS NULL
-         ORDER BY confidence DESC`,
-      ).all(entityId, entityId) as Array<Record<string, unknown>>
-      return { entity, attributes, triples }
+      const entityId = entity.id
+      const attributes = this.repo.listCurrentAttributesByEntity(entityId)
+      const triples = this.repo.listCurrentTriplesByEntity(entityId)
+      return {
+        entity: entity as unknown as Record<string, unknown>,
+        attributes: attributes as unknown as Array<Record<string, unknown>>,
+        triples: triples as unknown as Array<Record<string, unknown>>,
+      }
     })
   }
 
@@ -317,7 +283,6 @@ class MemoryKernelService {
     success: boolean
     error?: string
   }): void {
-    const db = this.getDb()
     const name = params.target_device_id
       ? `intent:${params.intent}→${params.target_device_id}`
       : `intent:${params.intent}`
@@ -328,56 +293,30 @@ class MemoryKernelService {
       name,
     )
 
-    db.prepare(
-      `INSERT INTO memory_entities (id, name, type, wing, room, properties_json)
-       VALUES (?, ?, 'concept', 'runtime_observations', ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         updated_at=datetime('now'),
-         properties_json=excluded.properties_json`,
-    ).run(
-      entityId,
-      name.slice(0, 200),
-      params.tool,
-      JSON.stringify({
+    this.repo.upsertEntity({
+      id: entityId,
+      name: name.slice(0, 200),
+      type: 'concept',
+      wing: 'runtime_observations',
+      room: params.tool,
+      propertiesJson: JSON.stringify({
         intent: params.intent,
         tool: params.tool,
         action: params.action,
         target_device_id: params.target_device_id,
       }),
-    )
+    })
 
     const key = params.success ? 'success_count' : 'failure_count'
-    const existing = db
-      .prepare(
-        `SELECT value FROM memory_attributes WHERE entity_id = ? AND key = ? AND valid_to IS NULL LIMIT 1`,
-      )
-      .get(entityId, key) as { value: string } | undefined
+    const existing = this.repo.getCurrentAttribute(entityId, key)
     const nextCount = (existing ? Number(existing.value) || 0 : 0) + 1
 
-    db.prepare(
-      `INSERT INTO memory_attributes (entity_id, key, value)
-       VALUES (?, ?, ?)
-       ON CONFLICT(entity_id, key, valid_from) DO UPDATE SET value=excluded.value`,
-    ).run(entityId, key, String(nextCount))
-
-    db.prepare(
-      `INSERT INTO memory_attributes (entity_id, key, value)
-       VALUES (?, 'last_seen', ?)
-       ON CONFLICT(entity_id, key, valid_from) DO UPDATE SET value=excluded.value`,
-    ).run(entityId, new Date().toISOString())
-
-    db.prepare(
-      `INSERT INTO memory_attributes (entity_id, key, value)
-       VALUES (?, 'last_action', ?)
-       ON CONFLICT(entity_id, key, valid_from) DO UPDATE SET value=excluded.value`,
-    ).run(entityId, `${params.tool}.${params.action}`)
+    this.repo.upsertAttribute({ entityId, key, value: String(nextCount) })
+    this.repo.upsertAttribute({ entityId, key: 'last_seen', value: new Date().toISOString() })
+    this.repo.upsertAttribute({ entityId, key: 'last_action', value: `${params.tool}.${params.action}` })
 
     if (!params.success && params.error) {
-      db.prepare(
-        `INSERT INTO memory_attributes (entity_id, key, value)
-         VALUES (?, 'last_error', ?)
-         ON CONFLICT(entity_id, key, valid_from) DO UPDATE SET value=excluded.value`,
-      ).run(entityId, params.error.slice(0, 200))
+      this.repo.upsertAttribute({ entityId, key: 'last_error', value: params.error.slice(0, 200) })
     }
 
     this.eventBus.fire('memory_observation', {
@@ -398,29 +337,14 @@ class MemoryKernelService {
     last_error?: string
     score: number
   }> {
-    const db = this.getDb()
     const keywords = query.split(/\s+/).filter((w) => w.length >= 2).slice(0, 4)
     if (keywords.length === 0) return []
 
-    const likeClauses = keywords.map(() => 'name LIKE ?').join(' OR ')
-    const likeParams = keywords.map((k) => `%${k}%`)
-
-    const rows = db
-      .prepare(
-        `SELECT id, name, type FROM memory_entities
-         WHERE wing = 'runtime_observations' AND (${likeClauses})
-         ORDER BY updated_at DESC
-         LIMIT 20`,
-      )
-      .all(...likeParams) as Array<{ id: string; name: string; type: string }>
+    const rows = this.repo.searchObservationEntitiesByName(keywords, 20)
 
     const now = Date.now()
     const results = rows.map((row) => {
-      const attrs = db
-        .prepare(
-          `SELECT key, value FROM memory_attributes WHERE entity_id = ? AND valid_to IS NULL`,
-        )
-        .all(row.id) as Array<{ key: string; value: string }>
+      const attrs = this.repo.listCurrentAttributesByEntity(row.id)
       const byKey = Object.fromEntries(attrs.map((a) => [a.key, a.value]))
       const success = Number(byKey.success_count ?? 0)
       const failure = Number(byKey.failure_count ?? 0)
@@ -934,7 +858,6 @@ class MemoryKernelService {
   }
 
   private extractAndWriteTriples(entityId: string, content: string, metadata: MemoryMetadata): void {
-    const db = this.getDb()
     const patterns: Array<{ regex: RegExp; predicate: string; subjectIndex: number; objectIndex: number }> = [
       { regex: /(\S+)\s+(?:is in|located in)\s+(\S+)/i, predicate: 'located_in', subjectIndex: 1, objectIndex: 2 },
       { regex: /(\S+)\s+(?:belongs to|for)\s+(\S+)/i, predicate: 'belongs_to', subjectIndex: 1, objectIndex: 2 },
@@ -952,24 +875,23 @@ class MemoryKernelService {
       const subjectId = this.ensureEntity(subjectName, metadata.type, metadata.wing, metadata.room)
       const objectId = this.ensureEntity(objectName, 'concept', metadata.wing, metadata.room)
 
-      db.prepare(
-        `INSERT INTO memory_triples (subject, predicate, object, confidence, source, source_file)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      ).run(subjectId, pattern.predicate, objectId, metadata.confidence ?? 1.0, metadata.source ?? '', metadata.source_file ?? '')
+      this.repo.insertTriple({
+        subject: subjectId,
+        predicate: pattern.predicate,
+        object: objectId,
+        confidence: metadata.confidence ?? 1.0,
+        source: metadata.source ?? '',
+        sourceFile: metadata.source_file ?? '',
+      })
       break
     }
 
     if (content.includes('TV') || content.toLowerCase().includes('bilibili')) {
-      db.prepare(
-        `INSERT INTO memory_attributes (entity_id, key, value)
-         VALUES (?, ?, ?)
-         ON CONFLICT(entity_id, key, valid_from) DO UPDATE SET value=excluded.value`,
-      ).run(entityId, 'media_related', 'true')
+      this.repo.upsertAttribute({ entityId, key: 'media_related', value: 'true' })
     }
   }
 
   private extractAndWriteAttributes(entityId: string, content: string): void {
-    const db = this.getDb()
     const pairs: Array<{ key: string; test: RegExp }> = [
       { key: 'supports_power', test: /power|on\/off|turn on|turn off/i },
       { key: 'supports_remote', test: /remote|ir|infrared/i },
@@ -979,22 +901,15 @@ class MemoryKernelService {
 
     for (const pair of pairs) {
       if (!pair.test.test(content)) continue
-      db.prepare(
-        `INSERT INTO memory_attributes (entity_id, key, value)
-         VALUES (?, ?, ?)
-         ON CONFLICT(entity_id, key, valid_from) DO UPDATE SET value=excluded.value`,
-      ).run(entityId, pair.key, 'true')
+      this.repo.upsertAttribute({ entityId, key: pair.key, value: 'true' })
     }
   }
 
   private ensureEntity(name: string, type: string, wing: string, room: string): string {
-    const db = this.getDb()
     const id = this.generateEntityId(type, wing, room, name)
-    const existing = db.prepare('SELECT id FROM memory_entities WHERE id = ?').get(id)
+    const existing = this.repo.getEntityById(id)
     if (!existing) {
-      db.prepare(
-        'INSERT INTO memory_entities (id, name, type, wing, room, properties_json) VALUES (?, ?, ?, ?, ?, ?)',
-      ).run(id, name, type, wing, room, '{}')
+      this.repo.upsertEntity({ id, name, type, wing, room, propertiesJson: '{}' })
     }
     return id
   }

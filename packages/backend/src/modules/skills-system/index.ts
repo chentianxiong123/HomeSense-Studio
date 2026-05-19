@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { getDb as defaultGetDb } from '../../db/index.js'
-import { eventBus } from '../event-bus/index.js'
+import { eventBus as defaultEventBus } from '../event-bus/index.js'
 
 export interface SkillDefinition {
   name: string
@@ -27,7 +27,7 @@ class SkillsService {
 
   constructor(
     private readonly getDb: GetDbFn = defaultGetDb,
-    private readonly eventBus: EventBusInstance = eventBus,
+    private readonly eventBus: EventBusInstance = defaultEventBus,
   ) {}
 
   register(skill: SkillDefinition): void {

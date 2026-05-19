@@ -26,6 +26,10 @@ export class EventBus {
       this.listeners.get(eventType)?.delete(listener)
     }
   }
+
+  on(eventType: string, listener: EventListener): () => void {
+    return this.listen(eventType, listener)
+  }
 }
 
 export const eventBus = new EventBus()
