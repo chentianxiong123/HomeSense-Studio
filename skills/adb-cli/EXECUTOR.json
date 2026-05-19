@@ -1,0 +1,36 @@
+{
+  "name": "adb-cli",
+  "executable": "./runner.mjs",
+  "protocol": "in_process_module",
+  "cwd": ".",
+  "args": [],
+  "timeout_ms": 30000,
+  "actions": {
+    "wait": {
+      "description": "Wait in the virtual Android TV runtime.",
+      "params_schema": {
+        "seconds": "number"
+      }
+    },
+    "ensure_connected": {
+      "description": "Ensure the virtual Android TV runtime is connected.",
+      "params_schema": {
+        "initial_wait_seconds": "number?",
+        "max_attempts": "number?",
+        "backoff_seconds": "number?"
+      }
+    },
+    "list_packages": {
+      "description": "List installed packages, optionally filtered by keyword.",
+      "params_schema": {
+        "keyword": "string?"
+      }
+    },
+    "launch_app": {
+      "description": "Launch a package in the virtual Android TV runtime.",
+      "params_schema": {
+        "package": "string"
+      }
+    }
+  }
+}

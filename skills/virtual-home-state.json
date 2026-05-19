@@ -1,0 +1,21 @@
+{
+  "adb": {
+    "device_id": "virtual-android-tv",
+    "connected": true,
+    "connection_attempts": 28,
+    "active_package": "com.xiaodianshi.tv.yst",
+    "last_launch_at": "2026-05-05T09:42:58.507Z",
+    "packages": [
+      "com.xiaodianshi.tv.yst",
+      "tv.danmaku.bili",
+      "com.dangbei.tvlauncher"
+    ]
+  },
+  "ir": {
+    "tvs_toshiba": true,
+    "stb": true,
+    "last_device": "stb",
+    "last_command": "电源",
+    "last_command_at": "2026-05-03T04:32:29.611Z"
+  }
+}
