@@ -26,9 +26,20 @@ export function initDb(): Database.Database {
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
 
-  createTables(db)
+  applySchema(db)
 
   return db
+}
+
+export function applySchema(target: Database.Database): void {
+  createTables(target)
+}
+
+export function createInMemoryDb(): Database.Database {
+  const memoryDb = new Database(':memory:')
+  memoryDb.pragma('foreign_keys = ON')
+  applySchema(memoryDb)
+  return memoryDb
 }
 
 function createTables(db: Database.Database) {
@@ -79,7 +90,7 @@ function createTables(db: Database.Database) {
     )`,
     `CREATE TABLE IF NOT EXISTS workflow_nodes (
       id INTEGER NOT NULL, workflow_id INTEGER NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
-      type TEXT NOT NULL CHECK (type IN ('start','schedule','device_control','xiaoai','ir_control','scene_execute','llm','if_else','delay','parallel','code','answer','executor_call','subflow')),
+      type TEXT NOT NULL CHECK (type IN ('start','schedule','device_control','xiaoai','ir_control','scene_execute','llm','if_else','delay','parallel','code','answer','executor_call','subflow','knowledge_retrieve','candidate_plan_resolve','rerank_score','agent_dispatch')),
       position_json TEXT NOT NULL DEFAULT '{}', config_json TEXT NOT NULL DEFAULT '{}', label TEXT NOT NULL DEFAULT '',
       PRIMARY KEY (id AUTOINCREMENT)
     )`,
@@ -157,6 +168,7 @@ function createTables(db: Database.Database) {
       id INTEGER NOT NULL, conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
       role TEXT NOT NULL CHECK (role IN ('user','assistant','system','tool')),
       content TEXT NOT NULL DEFAULT '', tool_calls_json TEXT NULL, tool_result_json TEXT NULL,
+      tool_call_id TEXT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (id AUTOINCREMENT)
     )`,
     `CREATE TABLE IF NOT EXISTS llm_providers (
@@ -311,19 +323,9 @@ function migrateEntitiesTable(db: Database.Database) {
   const tableSql = row?.sql
 
   const requiredCapabilities = [
-    'power',
-    'toggle',
-    'brightness',
-    'color_temperature',
-    'target_temperature',
-    'mode',
-    'fan_speed',
-    'cover_position',
-    'pm2_5',
-    'temperature',
-    'humidity',
-    'ir_keys',
-    'execute_directive',
+    'power','toggle','brightness','color_temperature','target_temperature',
+    'mode','fan_speed','cover_position','pm2_5','temperature','humidity',
+    'ir_keys','execute_directive',
   ]
 
   if (!tableSql || requiredCapabilities.every((capability) => tableSql.includes(`'${capability}'`))) return
@@ -367,24 +369,9 @@ function migrateWorkflowNodesTable(db: Database.Database) {
 
   const tableSql = row?.sql
   const requiredNodeTypes = [
-    'start',
-    'schedule',
-    'device_control',
-    'xiaoai',
-    'ir_control',
-    'scene_execute',
-    'llm',
-    'if_else',
-    'delay',
-    'parallel',
-    'code',
-    'answer',
-    'executor_call',
-    'subflow',
-    'knowledge_retrieve',
-    'candidate_plan_resolve',
-    'rerank_score',
-    'agent_dispatch',
+    'start','schedule','device_control','xiaoai','ir_control','scene_execute',
+    'llm','if_else','delay','parallel','code','answer','executor_call','subflow',
+    'knowledge_retrieve','candidate_plan_resolve','rerank_score','agent_dispatch',
   ]
 
   if (!tableSql || requiredNodeTypes.every((type) => tableSql.includes(`'${type}'`))) return

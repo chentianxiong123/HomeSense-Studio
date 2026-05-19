@@ -1,9 +1,9 @@
 import fs from 'fs'
-import { getDb } from '../../db/index.js'
+import { getDb as defaultGetDb } from '../../db/index.js'
 import { memoryKernel } from '../memory-kernel/index.js'
 import { planLibrary } from '../plan-library/index.js'
 
-type GetDbFn = () => ReturnType<typeof getDb>
+type GetDbFn = () => ReturnType<typeof defaultGetDb>
 
 interface MemoryKernelInstance {
   upsertCompiledKnowledge(params: {
@@ -40,7 +40,7 @@ interface ExperienceRow {
 
 class KnowledgeCompilerService {
   constructor(
-    private readonly getDb: GetDbFn = getDb,
+    private readonly getDb: GetDbFn = defaultGetDb,
     private readonly memoryKernel: MemoryKernelInstance = memoryKernel,
     private readonly planLibrary: PlanLibraryInstance = planLibrary,
   ) {}

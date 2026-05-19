@@ -1,11 +1,11 @@
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
-import { getDb } from '../../db/index.js'
+import { getDb as defaultGetDb } from '../../db/index.js'
 import { eventBus } from '../event-bus/index.js'
 import { skillsService } from '../skills-system/index.js'
 
-type GetDbFn = () => ReturnType<typeof getDb>
+type GetDbFn = () => ReturnType<typeof defaultGetDb>
 
 interface EventBusInstance {
   fire(event: string, data?: unknown): void
@@ -40,7 +40,7 @@ const EXPERIENCES_DIR = process.env.EXPERIENCES_DIR || './data/experiences'
 
 class ExperienceService {
   constructor(
-    private readonly getDb: GetDbFn = getDb,
+    private readonly getDb: GetDbFn = defaultGetDb,
     private readonly eventBus: EventBusInstance = eventBus,
     private readonly skillsService: SkillsServiceInstance = skillsService,
   ) {}

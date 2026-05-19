@@ -1,9 +1,9 @@
-import { getDb } from '../../db/index.js'
+import { getDb as defaultGetDb } from '../../db/index.js'
 import { resolveNodeValue } from './node-base.js'
 import type { WorkflowEdge, WorkflowNode } from './types.js'
 import { VariablePool, type VariableValueMode } from './variable-pool.js'
 
-type GetDbFn = () => ReturnType<typeof getDb>
+type GetDbFn = () => ReturnType<typeof defaultGetDb>
 
 export interface WorkflowPreviewStep {
   node_id: string
@@ -30,7 +30,7 @@ export interface WorkflowPreviewResult {
 }
 
 class WorkflowPreviewService {
-  constructor(private readonly getDb: GetDbFn = getDb) {}
+  constructor(private readonly getDb: GetDbFn = defaultGetDb) {}
 
   previewWorkflow(workflowId: number, inputs: Record<string, unknown> = {}): WorkflowPreviewResult {
     const workflow = this.getDb().prepare('SELECT id FROM workflows WHERE id = ?').get(workflowId)

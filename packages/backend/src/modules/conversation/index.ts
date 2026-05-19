@@ -1,7 +1,7 @@
-import { getDb } from '../../db/index.js'
+import { getDb as defaultGetDb } from '../../db/index.js'
 import { agentInstanceService as defaultAgentInstanceService } from '../agent-instance/index.js'
 
-type GetDbFn = () => ReturnType<typeof getDb>
+type GetDbFn = () => ReturnType<typeof defaultGetDb>
 
 interface AgentInstanceServiceInstance {
   getById(id: number): { id: number; default_channel: string } | undefined
@@ -64,9 +64,9 @@ export interface ConversationContextRecord {
   history: HistoryItem[]
 }
 
-class ConversationService {
+export class ConversationService {
   constructor(
-    private readonly getDb: GetDbFn = getDb,
+    private readonly getDb: GetDbFn = defaultGetDb,
     private readonly agentInstanceService: AgentInstanceServiceInstance = defaultAgentInstanceService,
   ) {}
 

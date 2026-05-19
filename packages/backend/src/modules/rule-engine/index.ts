@@ -1,8 +1,8 @@
-import { getDb } from '../../db/index.js'
+import { getDb as defaultGetDb } from '../../db/index.js'
 import { serviceRegistry } from '../service-registry/index.js'
 import { eventBus } from '../event-bus/index.js'
 
-type GetDbFn = () => ReturnType<typeof getDb>
+type GetDbFn = () => ReturnType<typeof defaultGetDb>
 
 interface EventBusInstance {
   fire(event: string, data?: unknown): void
@@ -39,7 +39,7 @@ class RuleEngine {
   private rules = new Map<number, Rule>()
 
   constructor(
-    private readonly getDb: GetDbFn = getDb,
+    private readonly getDb: GetDbFn = defaultGetDb,
     private readonly eventBus: EventBusInstance = eventBus,
     private readonly serviceRegistry: ServiceRegistryInstance = serviceRegistry,
   ) {}

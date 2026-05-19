@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { getDb } from '../../db/index.js'
+import { getDb as defaultGetDb } from '../../db/index.js'
 import { eventBus } from '../event-bus/index.js'
 
 export interface SkillDefinition {
@@ -15,7 +15,7 @@ export interface SkillDefinition {
   enabled: boolean
 }
 
-type GetDbFn = () => ReturnType<typeof getDb>
+type GetDbFn = () => ReturnType<typeof defaultGetDb>
 
 interface EventBusInstance {
   fire(event: string, data?: unknown): void
@@ -26,7 +26,7 @@ class SkillsService {
   private readonly skills = new Map<string, SkillDefinition>()
 
   constructor(
-    private readonly getDb: GetDbFn = getDb,
+    private readonly getDb: GetDbFn = defaultGetDb,
     private readonly eventBus: EventBusInstance = eventBus,
   ) {}
 

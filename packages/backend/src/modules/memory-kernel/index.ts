@@ -1,9 +1,9 @@
-import { getDb } from '../../db/index.js'
+import { getDb as defaultGetDb } from '../../db/index.js'
 import { eventBus } from '../event-bus/index.js'
 import { llmService as defaultLlmService } from '../llm-provider/service.js'
 import { skillsService as defaultSkillsService } from '../skills-system/index.js'
 
-type GetDbFn = () => ReturnType<typeof getDb>
+type GetDbFn = () => ReturnType<typeof defaultGetDb>
 
 interface EventBusInstance {
   fire(event: string, data?: unknown): void
@@ -138,7 +138,7 @@ export interface MemoryKernelStatus {
 
 class MemoryKernelService {
   constructor(
-    private readonly getDb: GetDbFn = getDb,
+    private readonly getDb: GetDbFn = defaultGetDb,
     private readonly eventBus: EventBusInstance = eventBus,
     private readonly llmService: LLMServiceInstance = defaultLlmService,
     private readonly skillsService: SkillsServiceInstance = defaultSkillsService,

@@ -1,4 +1,4 @@
-import { getDb } from '../../db/index.js'
+import { getDb as defaultGetDb } from '../../db/index.js'
 
 export type AgentProfile = 'entertainment' | 'productivity' | 'maintainer' | 'remote_bot'
 export type AgentSurface = 'chat' | 'studio' | 'scheduler' | 'remote'
@@ -65,10 +65,10 @@ const DEFAULT_AGENTS: SeedAgentInput[] = [
   },
 ]
 
-type GetDbFn = () => ReturnType<typeof getDb>
+type GetDbFn = () => ReturnType<typeof defaultGetDb>
 
-class AgentInstanceService {
-  constructor(private readonly getDb: GetDbFn = getDb) {}
+export class AgentInstanceService {
+  constructor(private readonly getDb: GetDbFn = defaultGetDb) {}
 
   ensureDefaults(): void {
     const db = this.getDb()

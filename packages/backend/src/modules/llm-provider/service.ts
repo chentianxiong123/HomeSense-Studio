@@ -1,7 +1,7 @@
 import OpenAI from 'openai'
-import { getDb } from '../../db/index.js'
+import { getDb as defaultGetDb } from '../../db/index.js'
 
-type GetDbFn = () => ReturnType<typeof getDb>
+type GetDbFn = () => ReturnType<typeof defaultGetDb>
 
 export type LLMProviderType = 'openai' | 'deepseek' | 'ollama' | 'mimo' | 'custom'
 export type ModelSlotName = 'planner' | 'fast' | 'vision' | 'embedding' | 'rerank' | 'local'
@@ -122,7 +122,7 @@ function normalizeProviderType(value: string | undefined): StoredProviderType {
 class LLMService {
   private clients = new Map<string, OpenAI>()
 
-  constructor(private readonly getDb: GetDbFn = getDb) {}
+  constructor(private readonly getDb: GetDbFn = defaultGetDb) {}
 
   listProviders(): LLMProviderConfig[] {
     const db = this.getDb()

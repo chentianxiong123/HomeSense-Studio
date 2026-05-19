@@ -1,8 +1,8 @@
-import { getDb } from '../../db/index.js'
+import { getDb as defaultGetDb } from '../../db/index.js'
 import { cliBridge, type CLIBridge } from '../cli-bridge/index.js'
 import { eventBus } from '../event-bus/index.js'
 
-type GetDbFn = () => ReturnType<typeof getDb>
+type GetDbFn = () => ReturnType<typeof defaultGetDb>
 
 interface EventBusInstance {
   fire(event: string, data?: unknown): void
@@ -21,7 +21,7 @@ export class DeviceStatePoller {
   private running = false
 
   constructor(
-    private readonly getDb: GetDbFn = getDb,
+    private readonly getDb: GetDbFn = defaultGetDb,
     private readonly cliBridge: CLIBridge = cliBridge,
     private readonly eventBus: EventBusInstance = eventBus,
   ) {}

@@ -1,6 +1,6 @@
 import { eventBus } from '../event-bus/index.js'
 import { cliBridge } from '../cli-bridge/index.js'
-import { getDb } from '../../db/index.js'
+import { getDb as defaultGetDb } from '../../db/index.js'
 import { stateMachine } from '../state-machine/index.js'
 
 export interface ServiceSchema {
@@ -20,7 +20,7 @@ export interface ServiceInfo {
   schema?: ServiceSchema
 }
 
-type GetDbFn = () => ReturnType<typeof getDb>
+type GetDbFn = () => ReturnType<typeof defaultGetDb>
 
 interface EventBusInstance {
   fire(event: string, data?: unknown): void
@@ -41,7 +41,7 @@ class ServiceRegistry {
 
   constructor(
     private readonly eventBus: EventBusInstance = eventBus,
-    private readonly getDb: GetDbFn = getDb,
+    private readonly getDb: GetDbFn = defaultGetDb,
     private readonly cliBridge: CliBridgeInstance = cliBridge,
     private readonly stateMachine: StateMachineInstance = stateMachine,
   ) {}

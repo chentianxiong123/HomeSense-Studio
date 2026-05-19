@@ -1,6 +1,6 @@
-import { getDb } from '../../db/index.js'
+import { getDb as defaultGetDb } from '../../db/index.js'
 
-type GetDbFn = () => ReturnType<typeof getDb>
+type GetDbFn = () => ReturnType<typeof defaultGetDb>
 
 interface SeedWorkflowNodeInput {
   type: string
@@ -596,7 +596,7 @@ const DEFAULT_WORKFLOW_SEEDS: SeedWorkflowInput[] = [
 ]
 
 class WorkflowSeedService {
-  constructor(private readonly getDb: GetDbFn = getDb) {}
+  constructor(private readonly getDb: GetDbFn = defaultGetDb) {}
 
   ensureDefaults(): SeedSyncResult {
     return this.syncDefaults()

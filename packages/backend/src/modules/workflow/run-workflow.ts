@@ -1,4 +1,4 @@
-import { getDb } from '../../db/index.js'
+import { getDb as defaultGetDb } from '../../db/index.js'
 import { eventBus } from '../event-bus/index.js'
 import { memoryKernel } from '../memory-kernel/index.js'
 import { executeNode, type NodeResult, type WorkflowNode } from './execute-node.js'
@@ -7,7 +7,7 @@ import type { WorkflowEdge, WorkflowResult, NodeTrace } from './types.js'
 import { VariablePool } from './variable-pool.js'
 import { GraphRuntimeState } from './runtime-state.js'
 
-type GetDbFn = () => ReturnType<typeof getDb>
+type GetDbFn = () => ReturnType<typeof defaultGetDb>
 
 interface EventBusInstance {
   fire(event: string, data?: unknown): void
@@ -25,7 +25,7 @@ interface RunWorkflowOptions {
 
 class WorkflowRuntime {
   constructor(
-    private readonly getDb: GetDbFn = getDb,
+    private readonly getDb: GetDbFn = defaultGetDb,
     private readonly eventBus: EventBusInstance = eventBus,
     private readonly memoryKernel: MemoryKernelInstance = memoryKernel,
   ) {}
