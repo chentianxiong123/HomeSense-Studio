@@ -1,11 +1,8 @@
-import fs from 'fs'
-import path from 'path'
 import crypto from 'crypto'
-import { getDb as defaultGetDb } from '../../db/index.js'
 import { eventBus as defaultEventBus } from '../event-bus/index.js'
 import { skillsService as defaultSkillsService } from '../skills-system/index.js'
-
-type GetDbFn = () => ReturnType<typeof defaultGetDb>
+import { SqlExperienceRepository, type ExperienceRepository } from './repository.js'
+import { FsExperienceFileStore, type ExperienceFileStore } from './file-store.js'
 
 interface EventBusInstance {
   fire(event: string, data?: unknown): void
@@ -38,9 +35,10 @@ export interface Experience {
 
 const EXPERIENCES_DIR = process.env.EXPERIENCES_DIR || './data/experiences'
 
-class ExperienceService {
+export class ExperienceService {
   constructor(
-    private readonly getDb: GetDbFn = defaultGetDb,
+    private readonly repo: ExperienceRepository = new SqlExperienceRepository(),
+    private readonly files: ExperienceFileStore = new FsExperienceFileStore(EXPERIENCES_DIR),
     private readonly eventBus: EventBusInstance = defaultEventBus,
     private readonly skillsService: SkillsServiceInstance = defaultSkillsService,
   ) {}
@@ -51,20 +49,12 @@ class ExperienceService {
     }
 
     const contentHash = this.computeHash(content)
+    const existingId = this.repo.findIdByContentHash(contentHash)
+    if (existingId !== undefined) return String(existingId)
 
-    const db = this.getDb()
-    const existing = db.prepare('SELECT id FROM experiences WHERE content_hash = ?').get(contentHash)
-    if (existing) {
-      return String((existing as { id: number }).id)
-    }
-
-    const categoryDir = path.join(EXPERIENCES_DIR, category)
-    if (!fs.existsSync(categoryDir)) {
-      fs.mkdirSync(categoryDir, { recursive: true })
-    }
-
+    this.files.ensureCategoryDir(category)
     const fileName = this.sanitizeFileName(title) + '.md'
-    const filePath = path.join(categoryDir, fileName)
+    const filePath = this.files.resolveFilePath(category, fileName)
 
     const frontmatter = [
       '---',
@@ -78,136 +68,74 @@ class ExperienceService {
       content,
     ].join('\n')
 
-    fs.writeFileSync(filePath, frontmatter, 'utf-8')
+    this.files.writeExperienceFile(filePath, frontmatter)
 
-    const result = db.prepare(
-      `INSERT INTO experiences (category, title, file_path, content_hash, importance)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).run(category, title, filePath, contentHash, importance)
+    const id = this.repo.insertExperience({ category, title, filePath, contentHash, importance })
+    this.repo.insertFts({ title, content, category })
 
-    try {
-      db.prepare(
-        `INSERT INTO experiences_fts (title, content, category) VALUES (?, ?, ?)`,
-      ).run(title, content, category)
-    } catch {}
-
-    this.eventBus.fire('experience_written', { id: result.lastInsertRowid, category, title, importance })
+    this.eventBus.fire('experience_written', { id, category, title, importance })
 
     if (importance >= 0.7) {
-      this.convertExperienceToSkill(Number(result.lastInsertRowid), category, title, content)
+      this.convertExperienceToSkill(id, category, title, content)
     }
 
-    return String(result.lastInsertRowid)
+    return String(id)
   }
 
   indexExperience(filePath: string): void {
-    if (!fs.existsSync(filePath)) return
+    if (!this.files.fileExists(filePath)) return
 
-    const content = fs.readFileSync(filePath, 'utf-8')
+    const content = this.files.readFile(filePath)
     const parsed = this.parseFrontmatter(content)
     if (!parsed.title) return
 
     const contentHash = this.computeHash(content)
+    if (this.repo.findIdByContentHash(contentHash) !== undefined) return
 
-    const db = this.getDb()
-    const existing = db.prepare('SELECT id FROM experiences WHERE content_hash = ?').get(contentHash)
-    if (existing) return
-
-    const result = db.prepare(
-      `INSERT INTO experiences (category, title, file_path, content_hash, importance)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).run(
-      parsed.category || 'uncategorized',
-      parsed.title,
+    const id = this.repo.insertExperience({
+      category: parsed.category || 'uncategorized',
+      title: parsed.title,
       filePath,
       contentHash,
-      parsed.importance ?? 0.5,
-    )
+      importance: parsed.importance ?? 0.5,
+    })
 
-    try {
-      db.prepare(
-        `INSERT INTO experiences_fts (title, content, category) VALUES (?, ?, ?)`,
-      ).run(parsed.title, parsed.body || '', parsed.category || 'uncategorized')
-    } catch {}
+    this.repo.insertFts({
+      title: parsed.title,
+      content: parsed.body || '',
+      category: parsed.category || 'uncategorized',
+    })
 
-    this.eventBus.fire('experience_indexed', { id: result.lastInsertRowid, file_path: filePath })
+    this.eventBus.fire('experience_indexed', { id, file_path: filePath })
   }
 
   indexAllExperiences(): number {
     let count = 0
-    if (!fs.existsSync(EXPERIENCES_DIR)) return count
-
-    const categories = fs.readdirSync(EXPERIENCES_DIR, { withFileTypes: true })
-    for (const cat of categories) {
-      if (!cat.isDirectory()) continue
-      const files = fs.readdirSync(path.join(EXPERIENCES_DIR, cat.name))
-      for (const file of files) {
-        if (!file.endsWith('.md')) continue
-        this.indexExperience(path.join(EXPERIENCES_DIR, cat.name, file))
+    for (const categoryDir of this.files.listCategoryDirs()) {
+      for (const filePath of this.files.listFilesInCategory(categoryDir)) {
+        this.indexExperience(filePath)
         count++
       }
     }
-
     return count
   }
 
   recallExperiences(query: string, topK: number = 5, category?: string): Experience[] {
-    const db = this.getDb()
     const results = new Map<number, Experience>()
 
-    try {
-      const ftsQuery = query.split(/\s+/).filter((w) => w.length >= 2).join(' OR ')
-      if (ftsQuery) {
-        let ftsSql = `SELECT e.*, rank FROM experiences e JOIN experiences_fts fts ON e.title = fts.title WHERE experiences_fts MATCH ?`
-        const ftsParams: unknown[] = [ftsQuery]
-        if (category) {
-          ftsSql += ` AND e.category = ?`
-          ftsParams.push(category)
-        }
-        ftsSql += ` ORDER BY rank LIMIT ?`
-        ftsParams.push(topK)
-
-        const ftsRows = db.prepare(ftsSql).all(...ftsParams) as Array<Record<string, unknown>>
-        for (const row of ftsRows) {
-          results.set(row.id as number, {
-            id: row.id as number,
-            category: row.category as string,
-            title: row.title as string,
-            content: this.readExperienceContent(row.file_path as string),
-            importance: row.importance as number,
-            file_path: row.file_path as string,
-            tags: [],
-          })
-        }
+    const ftsQuery = query.split(/\s+/).filter((w) => w.length >= 2).join(' OR ')
+    if (ftsQuery) {
+      const ftsRows = this.repo.searchByFts(ftsQuery, topK, category)
+      for (const row of ftsRows) {
+        results.set(row.id, this.toExperience(row))
       }
-    } catch {}
+    }
 
     const keywords = query.split(/\s+/).filter((w) => w.length >= 2)
     if (keywords.length > 0 && results.size < topK) {
-      let likeSql = `SELECT * FROM experiences WHERE `
-      const likeConditions = keywords.map(() => `title LIKE ?`)
-      likeSql += likeConditions.join(' OR ')
-      const likeParams: unknown[] = keywords.map((w) => `%${w}%`)
-      if (category) {
-        likeSql += ` AND category = ?`
-        likeParams.push(category)
-      }
-      likeSql += ` ORDER BY importance DESC LIMIT ?`
-      likeParams.push(topK)
-
-      const likeRows = db.prepare(likeSql).all(...likeParams) as Array<Record<string, unknown>>
+      const likeRows = this.repo.searchByTitleLike(keywords, topK, category)
       for (const row of likeRows) {
-        if (!results.has(row.id as number)) {
-          results.set(row.id as number, {
-            id: row.id as number,
-            category: row.category as string,
-            title: row.title as string,
-            content: this.readExperienceContent(row.file_path as string),
-            importance: row.importance as number,
-            file_path: row.file_path as string,
-            tags: [],
-          })
-        }
+        if (!results.has(row.id)) results.set(row.id, this.toExperience(row))
       }
     }
 
@@ -216,9 +144,20 @@ class ExperienceService {
       .slice(0, topK)
   }
 
+  private toExperience(row: { id: number; category: string; title: string; file_path: string; importance: number }): Experience {
+    return {
+      id: row.id,
+      category: row.category,
+      title: row.title,
+      content: this.files.readExperienceBody(row.file_path),
+      importance: row.importance,
+      file_path: row.file_path,
+      tags: [],
+    }
+  }
+
   private convertExperienceToSkill(id: number, category: string, title: string, content: string): void {
     const skillName = `exp_${category}_${this.sanitizeFileName(title)}`
-
     const actionSchemas = this.extractActionSchemas(content)
 
     this.skillsService.register({
@@ -233,10 +172,9 @@ class ExperienceService {
       enabled: true,
     })
 
-    const db = this.getDb()
-    const filePath = db.prepare('SELECT file_path FROM experiences WHERE id = ?').get(id) as { file_path: string } | undefined
+    const filePath = this.repo.getFilePathById(id)
     if (filePath) {
-      this.updateFrontmatterConverted(filePath.file_path, true)
+      this.files.updateFrontmatterConverted(filePath, true)
     }
 
     this.eventBus.fire('experience_converted_to_skill', { experience_id: id, skill_name: skillName })
@@ -254,20 +192,6 @@ class ExperienceService {
       })
     }
     return schemas
-  }
-
-  private readExperienceContent(filePath: string): string {
-    try {
-      if (!fs.existsSync(filePath)) return ''
-      const content = fs.readFileSync(filePath, 'utf-8')
-      const bodyStart = content.indexOf('---', content.indexOf('---') + 3)
-      if (bodyStart !== -1) {
-        return content.slice(bodyStart + 3).trim()
-      }
-      return content
-    } catch {
-      return ''
-    }
   }
 
   private parseFrontmatter(content: string): {
@@ -294,18 +218,6 @@ class ExperienceService {
       }
     }
     return result
-  }
-
-  private updateFrontmatterConverted(filePath: string, converted: boolean): void {
-    try {
-      if (!fs.existsSync(filePath)) return
-      let content = fs.readFileSync(filePath, 'utf-8')
-      content = content.replace(
-        /converted_to_skill:\s*(true|false)/,
-        `converted_to_skill: ${converted}`,
-      )
-      fs.writeFileSync(filePath, content, 'utf-8')
-    } catch {}
   }
 
   private computeHash(content: string): string {
