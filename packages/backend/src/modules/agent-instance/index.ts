@@ -65,9 +65,13 @@ const DEFAULT_AGENTS: SeedAgentInput[] = [
   },
 ]
 
+type GetDbFn = () => ReturnType<typeof getDb>
+
 class AgentInstanceService {
+  constructor(private readonly getDb: GetDbFn = getDb) {}
+
   ensureDefaults(): void {
-    const db = getDb()
+    const db = this.getDb()
 
     for (const agent of DEFAULT_AGENTS) {
       db.prepare(
@@ -100,17 +104,17 @@ class AgentInstanceService {
   }
 
   getById(id: number): AgentInstance | undefined {
-    const db = getDb()
+    const db = this.getDb()
     return db.prepare('SELECT * FROM agent_instances WHERE id = ?').get(id) as AgentInstance | undefined
   }
 
   getBySlug(slug: string): AgentInstance | undefined {
-    const db = getDb()
+    const db = this.getDb()
     return db.prepare('SELECT * FROM agent_instances WHERE slug = ?').get(slug) as AgentInstance | undefined
   }
 
   getDefaultForSurface(surface: AgentSurface = 'chat'): AgentInstance {
-    const db = getDb()
+    const db = this.getDb()
     const agent = db.prepare(
       `SELECT * FROM agent_instances WHERE surface = ? AND status = 'active' ORDER BY id ASC LIMIT 1`,
     ).get(surface) as AgentInstance | undefined
@@ -131,7 +135,7 @@ class AgentInstanceService {
   }
 
   listActive(): AgentInstance[] {
-    const db = getDb()
+    const db = this.getDb()
     return db.prepare(
       `SELECT * FROM agent_instances WHERE status = 'active' ORDER BY surface ASC, id ASC`,
     ).all() as AgentInstance[]

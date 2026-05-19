@@ -1,5 +1,14 @@
 import { getDb } from '../../db/index.js'
-import { agentInstanceService, type AgentSurface } from '../agent-instance/index.js'
+import { agentInstanceService as defaultAgentInstanceService } from '../agent-instance/index.js'
+
+type GetDbFn = () => ReturnType<typeof getDb>
+
+interface AgentInstanceServiceInstance {
+  getById(id: number): { id: number; default_channel: string } | undefined
+  getDefaultForSurface(surface: AgentSurface): { id: number; default_channel: string }
+}
+
+export type AgentSurface = 'chat' | 'studio' | 'scheduler' | 'remote'
 
 export interface ConversationSessionRecord {
   conversation_id: number
@@ -56,8 +65,13 @@ export interface ConversationContextRecord {
 }
 
 class ConversationService {
+  constructor(
+    private readonly getDb: GetDbFn = getDb,
+    private readonly agentInstanceService: AgentInstanceServiceInstance = defaultAgentInstanceService,
+  ) {}
+
   createOrAttach(input: StartConversationInput = {}): { conversation_id: number; session: ConversationSessionRecord } {
-    const db = getDb()
+    const db = this.getDb()
 
     let conversationId = input.conversation_id
     if (!conversationId) {
@@ -70,7 +84,7 @@ class ConversationService {
   }
 
   ensureSession(conversationId: number, input: StartConversationInput = {}): ConversationSessionRecord {
-    const db = getDb()
+    const db = this.getDb()
     const existing = db.prepare(
       `SELECT * FROM conversation_sessions WHERE conversation_id = ?`,
     ).get(conversationId) as ConversationSessionRecord | undefined
@@ -83,8 +97,8 @@ class ConversationService {
       return existing
     }
 
-    const agentInstanceId = input.agent_instance_id ?? agentInstanceService.getDefaultForSurface(input.surface ?? 'chat').id
-    const agent = agentInstanceService.getById(agentInstanceId)
+    const agentInstanceId = input.agent_instance_id ?? this.agentInstanceService.getDefaultForSurface(input.surface ?? 'chat').id
+    const agent = this.agentInstanceService.getById(agentInstanceId)
 
     db.prepare(
       `INSERT INTO conversation_sessions (
@@ -103,7 +117,7 @@ class ConversationService {
   }
 
   getSession(conversationId: number): ConversationSessionRecord {
-    const db = getDb()
+    const db = this.getDb()
     const session = db.prepare(
       `SELECT * FROM conversation_sessions WHERE conversation_id = ?`,
     ).get(conversationId) as ConversationSessionRecord | undefined
@@ -121,7 +135,7 @@ class ConversationService {
     content: string,
     extra?: { tool_calls?: unknown; tool_result?: unknown; tool_call_id?: string; name?: string },
   ): void {
-    const db = getDb()
+    const db = this.getDb()
     // Store name inside tool_result_json for tool role messages
     const toolResult = extra?.tool_result ?? (extra?.name ? { name: extra.name } : undefined)
     db.prepare(
@@ -140,7 +154,7 @@ class ConversationService {
   }
 
   getHistory(conversationId: number, limit = 20): HistoryItem[] {
-    const db = getDb()
+    const db = this.getDb()
     const rows = db.prepare(
       `SELECT role, content, tool_calls_json, tool_result_json, tool_call_id
        FROM conversation_messages
@@ -170,7 +184,7 @@ class ConversationService {
   }
 
   getMessages(conversationId: number): ConversationMessageRecord[] {
-    const db = getDb()
+    const db = this.getDb()
     return db.prepare(
       `SELECT * FROM conversation_messages WHERE conversation_id = ? ORDER BY created_at ASC, id ASC`,
     ).all(conversationId) as ConversationMessageRecord[]
@@ -183,7 +197,7 @@ class ConversationService {
   }
 
   listConversations(limit = 20): Array<Record<string, unknown>> {
-    const db = getDb()
+    const db = this.getDb()
     return db.prepare(
       `SELECT
         c.id,
@@ -218,7 +232,7 @@ class ConversationService {
     const session = this.ensureSession(conversationId)
     const workingContext = patch.working_context ?? this.parseJson(session.working_context_json, {})
 
-    getDb().prepare(
+    this.getDb().prepare(
       `UPDATE conversation_sessions SET
         working_context_json = ?,
         pending_task_id = ?,
@@ -242,7 +256,7 @@ class ConversationService {
   }
 
   private touchConversation(conversationId: number): void {
-    getDb().prepare(
+    this.getDb().prepare(
       `UPDATE conversations SET updated_at = datetime('now') WHERE id = ?`,
     ).run(conversationId)
   }
