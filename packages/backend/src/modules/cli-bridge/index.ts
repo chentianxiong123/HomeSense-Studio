@@ -1,8 +1,76 @@
 import fs from 'fs'
 import path from 'path'
-import { spawn } from 'child_process'
+import { spawn, type ChildProcess } from 'child_process'
 import { fileURLToPath, pathToFileURL } from 'url'
 import { z } from 'zod'
+
+// ─── Subprocess Runner 接口（可注入 mock）──────────────────────────────
+export interface SubprocessRunner {
+  run(opts: {
+    exePath: string
+    args: string[]
+    cwd?: string
+    stdinPayload?: string
+    timeoutMs: number
+  }): Promise<string>
+}
+
+export class RealSubprocessRunner implements SubprocessRunner {
+  async run(opts: {
+    exePath: string
+    args: string[]
+    cwd?: string
+    stdinPayload?: string
+    timeoutMs: number
+  }): Promise<string> {
+    const { exePath, args, cwd, stdinPayload, timeoutMs } = opts
+    return new Promise((resolve, reject) => {
+      const proc: ChildProcess = spawn(exePath, args, {
+        cwd,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        shell: false,
+      })
+
+      let stdout = ''
+      let stderr = ''
+      let settled = false
+      const timeout = setTimeout(() => {
+        if (settled) return
+        settled = true
+        proc.kill()
+        reject(new Error(`Process timeout after ${timeoutMs}ms`))
+      }, timeoutMs)
+
+      proc.stdout?.on('data', (data: Buffer) => { stdout += data.toString() })
+      proc.stderr?.on('data', (data: Buffer) => { stderr += data.toString() })
+
+      proc.on('close', (code) => {
+        clearTimeout(timeout)
+        if (settled) return
+        settled = true
+        if (code === 0 && stdout.trim()) {
+          resolve(stdout.trim())
+        } else {
+          reject(new Error(`Process exited with code ${code}: ${stderr.trim() || stdout.trim()}`))
+        }
+      })
+
+      proc.on('error', (err) => {
+        clearTimeout(timeout)
+        if (settled) return
+        settled = true
+        reject(err)
+      })
+
+      if (stdinPayload) {
+        proc.stdin?.write(stdinPayload)
+        proc.stdin?.end()
+      } else {
+        proc.stdin?.end()
+      }
+    })
+  }
+}
 
 const CLIResponseSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('success'), data: z.unknown() }),
@@ -236,7 +304,12 @@ function resolveManifestArg(baseDir: string, value: string): string {
 }
 
 export class CLIBridge {
+  private readonly runner: SubprocessRunner
   private thirdPartyExecutors = new Map<string, RegisteredExecutor>()
+
+  constructor(runner: SubprocessRunner = new RealSubprocessRunner()) {
+    this.runner = runner
+  }
 
   async run(cliName: string, action: string, params?: Record<string, unknown>): Promise<CLIResult> {
     if (ARCHIVED_EXECUTOR_NAMES.has(cliName)) {
@@ -468,61 +541,14 @@ export class CLIBridge {
     return getCLIWorkingDir(cliName) ?? undefined
   }
 
-  private execProcess(spec: {
+  private async execProcess(spec: {
     exePath: string
     args: string[]
     cwd?: string
     stdinPayload?: string
     timeoutMs: number
   }): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const proc = spawn(spec.exePath, spec.args, {
-        cwd: spec.cwd,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        shell: false,
-      })
-
-      let stdout = ''
-      let stderr = ''
-      let settled = false
-      const timeout = setTimeout(() => {
-        if (settled) return
-        settled = true
-        proc.kill()
-        reject(new Error(`Process timeout after ${spec.timeoutMs}ms`))
-      }, spec.timeoutMs)
-
-      proc.stdout.on('data', (data: Buffer) => {
-        stdout += data.toString()
-      })
-
-      proc.stderr.on('data', (data: Buffer) => {
-        stderr += data.toString()
-      })
-
-      proc.on('close', (code) => {
-        clearTimeout(timeout)
-        if (settled) return
-        settled = true
-        if (code === 0 && stdout.trim()) {
-          resolve(stdout.trim())
-        } else {
-          reject(new Error(`Process exited with code ${code}: ${stderr.trim() || stdout.trim()}`))
-        }
-      })
-
-      proc.on('error', (err) => {
-        clearTimeout(timeout)
-        if (settled) return
-        settled = true
-        reject(err)
-      })
-
-      if (spec.stdinPayload) {
-        proc.stdin.write(spec.stdinPayload)
-      }
-      proc.stdin.end()
-    })
+    return this.runner.run(spec)
   }
 
   private async execInProcess(
@@ -559,4 +585,5 @@ export class CLIBridge {
 }
 
 export const cliBridge = new CLIBridge()
+export const defaultCliBridge = cliBridge
 export { handleError, parseOutput, CLIResponseSchema }

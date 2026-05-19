@@ -5,6 +5,27 @@ import { getDb } from '../../db/index.js'
 import { eventBus } from '../event-bus/index.js'
 import { skillsService } from '../skills-system/index.js'
 
+type GetDbFn = () => ReturnType<typeof getDb>
+
+interface EventBusInstance {
+  fire(event: string, data?: unknown): void
+  on(event: string, handler: (...args: unknown[]) => void): void
+}
+
+interface SkillsServiceInstance {
+  register(skill: {
+    name: string
+    description: string
+    prompt_template: string
+    allowed_tools_json: string
+    action_schema_json: string
+    context_mode: string
+    source: string
+    skill_root: string
+    enabled: boolean
+  }): void
+}
+
 export interface Experience {
   id: number
   category: string
@@ -18,6 +39,12 @@ export interface Experience {
 const EXPERIENCES_DIR = process.env.EXPERIENCES_DIR || './data/experiences'
 
 class ExperienceService {
+  constructor(
+    private readonly getDb: GetDbFn = getDb,
+    private readonly eventBus: EventBusInstance = eventBus,
+    private readonly skillsService: SkillsServiceInstance = skillsService,
+  ) {}
+
   writeExperience(category: string, title: string, content: string, importance: number): string {
     if (importance < 0 || importance > 1) {
       throw new Error('importance must be between 0 and 1')
@@ -25,7 +52,7 @@ class ExperienceService {
 
     const contentHash = this.computeHash(content)
 
-    const db = getDb()
+    const db = this.getDb()
     const existing = db.prepare('SELECT id FROM experiences WHERE content_hash = ?').get(contentHash)
     if (existing) {
       return String((existing as { id: number }).id)
@@ -64,7 +91,7 @@ class ExperienceService {
       ).run(title, content, category)
     } catch {}
 
-    eventBus.fire('experience_written', { id: result.lastInsertRowid, category, title, importance })
+    this.eventBus.fire('experience_written', { id: result.lastInsertRowid, category, title, importance })
 
     if (importance >= 0.7) {
       this.convertExperienceToSkill(Number(result.lastInsertRowid), category, title, content)
@@ -82,7 +109,7 @@ class ExperienceService {
 
     const contentHash = this.computeHash(content)
 
-    const db = getDb()
+    const db = this.getDb()
     const existing = db.prepare('SELECT id FROM experiences WHERE content_hash = ?').get(contentHash)
     if (existing) return
 
@@ -103,7 +130,7 @@ class ExperienceService {
       ).run(parsed.title, parsed.body || '', parsed.category || 'uncategorized')
     } catch {}
 
-    eventBus.fire('experience_indexed', { id: result.lastInsertRowid, file_path: filePath })
+    this.eventBus.fire('experience_indexed', { id: result.lastInsertRowid, file_path: filePath })
   }
 
   indexAllExperiences(): number {
@@ -125,7 +152,7 @@ class ExperienceService {
   }
 
   recallExperiences(query: string, topK: number = 5, category?: string): Experience[] {
-    const db = getDb()
+    const db = this.getDb()
     const results = new Map<number, Experience>()
 
     try {
@@ -194,7 +221,7 @@ class ExperienceService {
 
     const actionSchemas = this.extractActionSchemas(content)
 
-    skillsService.register({
+    this.skillsService.register({
       name: skillName,
       description: title,
       prompt_template: content,
@@ -206,13 +233,13 @@ class ExperienceService {
       enabled: true,
     })
 
-    const db = getDb()
+    const db = this.getDb()
     const filePath = db.prepare('SELECT file_path FROM experiences WHERE id = ?').get(id) as { file_path: string } | undefined
     if (filePath) {
       this.updateFrontmatterConverted(filePath.file_path, true)
     }
 
-    eventBus.fire('experience_converted_to_skill', { experience_id: id, skill_name: skillName })
+    this.eventBus.fire('experience_converted_to_skill', { experience_id: id, skill_name: skillName })
   }
 
   private extractActionSchemas(content: string): Array<{ action: string; description: string; params_schema: Record<string, string> }> {
@@ -286,7 +313,7 @@ class ExperienceService {
   }
 
   private sanitizeFileName(name: string): string {
-    return name.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, '_').slice(0, 50)
+    return name.replace(/[^a-zA-Z0-9一-鿿_-]/g, '_').slice(0, 50)
   }
 }
 

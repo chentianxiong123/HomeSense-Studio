@@ -1,6 +1,13 @@
 import { getDb } from '../../db/index.js'
-import { cliBridge } from '../cli-bridge/index.js'
+import { cliBridge, type CLIBridge } from '../cli-bridge/index.js'
 import { eventBus } from '../event-bus/index.js'
+
+type GetDbFn = () => ReturnType<typeof getDb>
+
+interface EventBusInstance {
+  fire(event: string, data?: unknown): void
+  on(event: string, handler: (...args: unknown[]) => void): void
+}
 
 interface PollResult {
   did: string
@@ -12,6 +19,12 @@ export class DeviceStatePoller {
   private timer: ReturnType<typeof setInterval> | null = null
   private intervalMs: number = 30000
   private running = false
+
+  constructor(
+    private readonly getDb: GetDbFn = getDb,
+    private readonly cliBridge: CLIBridge = cliBridge,
+    private readonly eventBus: EventBusInstance = eventBus,
+  ) {}
 
   start(intervalMs: number = 30000): void {
     if (this.timer) return
@@ -37,7 +50,7 @@ export class DeviceStatePoller {
   async pollDevice(did: string): Promise<PollResult> {
     const result: PollResult = { did, success: false, states: {} }
 
-    const db = getDb()
+    const db = this.getDb()
     const entities = db
       .prepare('SELECT entity_id, domain, capability FROM entities WHERE device_did = ? AND enabled = 1')
       .all(did) as Array<{ entity_id: string; domain: string; capability: string }>
@@ -57,7 +70,7 @@ export class DeviceStatePoller {
     }
 
     const props = features.map((f) => ({ did, siid: f.siid, piid: f.piid }))
-    const cliResult = await cliBridge.run('mi-cli', 'get_prop', { props })
+    const cliResult = await this.cliBridge.run('mi-cli', 'get_prop', { props })
 
     if (cliResult.status === 'error') {
       for (const entity of entities) {
@@ -111,7 +124,7 @@ export class DeviceStatePoller {
   }
 
   private async poll(): Promise<void> {
-    const db = getDb()
+    const db = this.getDb()
     const devices = db
       .prepare('SELECT did FROM devices')
       .all() as Array<{ did: string }>
@@ -139,7 +152,7 @@ export class DeviceStatePoller {
               `INSERT INTO state_history (entity_id, old_state, new_state, old_attributes_json, new_attributes_json, changed_at) VALUES (?, ?, ?, ?, ?, datetime('now'))`,
             ).run(entityId, oldState, newState.state, oldAttrs, JSON.stringify(newState.attributes))
 
-            await eventBus.fire('state_changed', {
+            await this.eventBus.fire('state_changed', {
               entity_id: entityId,
               old_state: oldState,
               new_state: newState.state,

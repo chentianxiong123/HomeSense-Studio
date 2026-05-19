@@ -17,6 +17,7 @@ import { settingRoutes } from './modules/setting/routes.js'
 import { skillRoutes } from './modules/skill/routes.js'
 import { ruleRoutes } from './modules/rule/routes.js'
 import { compensationRoutes } from './modules/compensation/routes.js'
+import { compensationService } from './modules/compensation/index.js'
 import { cronRoutes } from './modules/cron/routes.js'
 import { executorGatewayRoutes } from './modules/executor-gateway/routes.js'
 import { manifestRegistryRoutes } from './modules/manifest-registry/routes.js'
@@ -30,7 +31,6 @@ import { ruleEngine } from './modules/rule-engine/index.js'
 import { skillsService } from './modules/skills-system/index.js'
 import { experienceService } from './modules/experience/index.js'
 import { cronService } from './modules/cron/index.js'
-import { processPendingTasks } from './modules/compensation/index.js'
 import { agentInstanceService } from './modules/agent-instance/index.js'
 import { agentAdapterRegistry } from './modules/agent-adapter/index.js'
 import { llmService } from './modules/llm-provider/service.js'
@@ -79,7 +79,7 @@ export async function buildApp() {
   cronService.start(60000)
 
   const compensationTimer = setInterval(() => {
-    processPendingTasks()
+    compensationService.processPendingTasks()
   }, 30000)
 
   app.get('/api/health', async () => {

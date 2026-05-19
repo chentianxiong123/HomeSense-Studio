@@ -2,6 +2,17 @@ import { getDb } from '../../db/index.js'
 import { serviceRegistry } from '../service-registry/index.js'
 import { eventBus } from '../event-bus/index.js'
 
+type GetDbFn = () => ReturnType<typeof getDb>
+
+interface EventBusInstance {
+  fire(event: string, data?: unknown): void
+  on(event: string, handler: (...args: unknown[]) => void): void
+}
+
+interface ServiceRegistryInstance {
+  call(serviceName: string, params: Record<string, unknown>): Promise<unknown>
+}
+
 export interface RuleAction {
   tool: string
   action: string
@@ -27,12 +38,28 @@ export interface RuleMatch {
 class RuleEngine {
   private rules = new Map<number, Rule>()
 
-  loadFromDb(): void {
-    const db = getDb()
-    const rules = db.prepare('SELECT * FROM rules WHERE enabled = 1 ORDER BY priority DESC').all() as Array<{ id: number; trigger_pattern: string; priority: number; enabled: number }>
+  constructor(
+    private readonly getDb: GetDbFn = getDb,
+    private readonly eventBus: EventBusInstance = eventBus,
+    private readonly serviceRegistry: ServiceRegistryInstance = serviceRegistry,
+  ) {}
 
-    for (const row of rules) {
-      const actions = db.prepare('SELECT * FROM rule_actions WHERE rule_id = ? ORDER BY "order" ASC').all(row.id) as Array<{ tool: string; action: string; params_json: string; order: number }>
+  loadFromDb(): void {
+    const db = this.getDb()
+    const rows = db.prepare('SELECT * FROM rules WHERE enabled = 1 ORDER BY priority DESC').all() as Array<{
+      id: number
+      trigger_pattern: string
+      priority: number
+      enabled: number
+    }>
+
+    for (const row of rows) {
+      const actions = db.prepare('SELECT * FROM rule_actions WHERE rule_id = ? ORDER BY "order" ASC').all(row.id) as Array<{
+        tool: string
+        action: string
+        params_json: string
+        order: number
+      }>
 
       this.rules.set(row.id, {
         id: row.id,
@@ -50,7 +77,7 @@ class RuleEngine {
   }
 
   addRule(rule: Omit<Rule, 'actions'> & { actions: RuleAction[] }): void {
-    const db = getDb()
+    const db = this.getDb()
     const result = db.prepare(
       `INSERT INTO rules (trigger_pattern, priority, enabled) VALUES (?, ?, ?)`,
     ).run(rule.trigger_pattern, rule.priority, rule.enabled ? 1 : 0)
@@ -66,14 +93,14 @@ class RuleEngine {
     }
 
     this.rules.set(ruleId, { ...rule, id: ruleId })
-    eventBus.fire('rule_added', { rule_id: ruleId })
+    this.eventBus.fire('rule_added', { rule_id: ruleId })
   }
 
   removeRule(ruleId: number): void {
-    const db = getDb()
+    const db = this.getDb()
     db.prepare('DELETE FROM rules WHERE id = ?').run(ruleId)
     this.rules.delete(ruleId)
-    eventBus.fire('rule_removed', { rule_id: ruleId })
+    this.eventBus.fire('rule_removed', { rule_id: ruleId })
   }
 
   match(input: string): RuleMatch | null {
@@ -130,7 +157,7 @@ class RuleEngine {
     }
 
     if (bestMatch) {
-      eventBus.fire('rule_matched', { rule_id: bestMatch.rule_id, input, confidence: bestMatch.confidence })
+      this.eventBus.fire('rule_matched', { rule_id: bestMatch.rule_id, input, confidence: bestMatch.confidence })
     }
 
     return bestMatch
@@ -139,7 +166,7 @@ class RuleEngine {
   async executeAction(action: RuleAction): Promise<{ success: boolean; data?: unknown; error?: string }> {
     try {
       const serviceName = `${action.tool}.${action.action}`
-      const result = await serviceRegistry.call(serviceName, action.params)
+      const result = await this.serviceRegistry.call(serviceName, action.params)
       return { success: true, data: result }
     } catch (err) {
       return { success: false, error: (err as Error).message }

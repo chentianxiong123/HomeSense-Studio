@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { createTask, persistState, preview, retryWithBackoff, getTask, getPendingTasks, processPendingTasks, type CompensationTask } from '../compensation/index.js'
+import { compensationService, type CompensationTask } from '../compensation/index.js'
 
 export async function compensationRoutes(app: FastifyInstance) {
   app.post('/api/compensation/tasks', async (request) => {
@@ -11,18 +11,18 @@ export async function compensationRoutes(app: FastifyInstance) {
     if (!body.type) {
       return { status: 'error', error: 'INVALID_PARAMS', message: '缺少 type 参数' }
     }
-    const task = createTask(body.type, body.params ?? {}, body.max_retries ?? 3)
+    const task = compensationService.createTask(body.type, body.params ?? {}, body.max_retries ?? 3)
     return { status: 'success', task }
   })
 
   app.get('/api/compensation/tasks', async () => {
-    const tasks = getPendingTasks()
+    const tasks = compensationService.getPendingTasks()
     return { tasks }
   })
 
   app.get('/api/compensation/tasks/:id', async (request) => {
     const { id } = request.params as { id: string }
-    const task = getTask(Number(id))
+    const task = compensationService.getTask(Number(id))
     if (!task) {
       return { status: 'error', error: 'NOT_FOUND' }
     }
@@ -31,26 +31,26 @@ export async function compensationRoutes(app: FastifyInstance) {
 
   app.post('/api/compensation/tasks/:id/retry', async (request) => {
     const { id } = request.params as { id: string }
-    const task = getTask(Number(id))
+    const task = compensationService.getTask(Number(id))
     if (!task) {
       return { status: 'error', error: 'NOT_FOUND' }
     }
-    const success = await retryWithBackoff(task)
+    const success = await compensationService.retryWithBackoff(task)
     return { status: 'success', success }
   })
 
   app.post('/api/compensation/tasks/:id/preview', async (request) => {
     const { id } = request.params as { id: string }
-    const task = getTask(Number(id))
+    const task = compensationService.getTask(Number(id))
     if (!task) {
       return { status: 'error', error: 'NOT_FOUND' }
     }
-    const result = preview(task)
+    const result = compensationService.preview(task)
     return { status: 'success', result }
   })
 
   app.post('/api/compensation/process', async () => {
-    processPendingTasks()
+    compensationService.processPendingTasks()
     return { status: 'success' }
   })
 }

@@ -3,6 +3,33 @@ import { getDb } from '../../db/index.js'
 import { memoryKernel } from '../memory-kernel/index.js'
 import { planLibrary } from '../plan-library/index.js'
 
+type GetDbFn = () => ReturnType<typeof getDb>
+
+interface MemoryKernelInstance {
+  upsertCompiledKnowledge(params: {
+    kind: string
+    title: string
+    body: string
+    wing?: string
+    room?: string
+    source_type: string
+    source_ref: string
+    tags?: string[]
+    metadata?: Record<string, unknown>
+    rank_score?: number
+  }): void
+}
+
+interface PlanLibraryInstance {
+  listPlans(): Array<{
+    id: string
+    name: string
+    intent?: string
+    input?: string
+    steps: Array<{ tool: string; action: string; params: Record<string, unknown> }>
+  }>
+}
+
 interface ExperienceRow {
   id: number
   category: string
@@ -12,6 +39,12 @@ interface ExperienceRow {
 }
 
 class KnowledgeCompilerService {
+  constructor(
+    private readonly getDb: GetDbFn = getDb,
+    private readonly memoryKernel: MemoryKernelInstance = memoryKernel,
+    private readonly planLibrary: PlanLibraryInstance = planLibrary,
+  ) {}
+
   refreshKnowledge(): {
     entity_pages: number
     experience_notes: number
@@ -32,7 +65,7 @@ class KnowledgeCompilerService {
   }
 
   private compileEntityPages(): number {
-    const db = getDb()
+    const db = this.getDb()
     const entities = db.prepare(
       'SELECT * FROM memory_entities ORDER BY updated_at DESC',
     ).all() as Array<Record<string, unknown>>
@@ -79,7 +112,7 @@ class KnowledgeCompilerService {
         }
       }
 
-      memoryKernel.upsertCompiledKnowledge({
+      this.memoryKernel.upsertCompiledKnowledge({
         kind: 'wiki_page',
         title,
         body: bodyLines.join('\n').trim(),
@@ -100,14 +133,14 @@ class KnowledgeCompilerService {
   }
 
   private compileExperienceNotes(): number {
-    const db = getDb()
+    const db = this.getDb()
     const experiences = db.prepare(
       'SELECT * FROM experiences ORDER BY importance DESC, created_at DESC',
     ).all() as ExperienceRow[]
 
     for (const experience of experiences) {
       const content = this.readExperienceBody(experience.file_path)
-      memoryKernel.upsertCompiledKnowledge({
+      this.memoryKernel.upsertCompiledKnowledge({
         kind: 'experience_note',
         title: experience.title,
         body: content,
@@ -128,7 +161,7 @@ class KnowledgeCompilerService {
   }
 
   private compileExperiencePlans(): number {
-    const db = getDb()
+    const db = this.getDb()
     const experiences = db.prepare(
       'SELECT * FROM experiences WHERE importance >= 0.7 ORDER BY importance DESC, created_at DESC',
     ).all() as ExperienceRow[]
@@ -138,7 +171,7 @@ class KnowledgeCompilerService {
       const planLines = this.extractPlanLines(content)
       if (planLines.length === 0) continue
 
-      memoryKernel.upsertCompiledKnowledge({
+      this.memoryKernel.upsertCompiledKnowledge({
         kind: 'compiled_plan',
         title: `Plan: ${experience.title}`,
         body: planLines.join('\n'),
@@ -158,7 +191,7 @@ class KnowledgeCompilerService {
   }
 
   private compileWorkflowCandidates(): number {
-    const db = getDb()
+    const db = this.getDb()
     const workflows = db.prepare(
       'SELECT * FROM workflows ORDER BY published DESC, updated_at DESC',
     ).all() as Array<Record<string, unknown>>
@@ -170,7 +203,7 @@ class KnowledgeCompilerService {
       )
       const nodeSummary = (graph.nodes ?? []).map((node) => `${node.label ?? node.type ?? 'node'}`).join(' -> ')
 
-      memoryKernel.upsertCompiledKnowledge({
+      this.memoryKernel.upsertCompiledKnowledge({
         kind: 'workflow_candidate',
         title: `Workflow: ${String(workflow.name)}`,
         body: [
@@ -193,7 +226,7 @@ class KnowledgeCompilerService {
   }
 
   private compileLibraryPlans(): number {
-    const plans = planLibrary.listPlans()
+    const plans = this.planLibrary.listPlans()
     for (const plan of plans) {
       const bodyLines = [
         `Intent: ${plan.intent || 'n/a'}`,
@@ -203,7 +236,7 @@ class KnowledgeCompilerService {
         ...plan.steps.map((step, index) => `${index + 1}. ${step.tool}.${step.action} ${JSON.stringify(step.params)}`),
       ]
 
-      memoryKernel.upsertCompiledKnowledge({
+      this.memoryKernel.upsertCompiledKnowledge({
         kind: 'compiled_plan',
         title: `Plan: ${plan.name}`,
         body: bodyLines.join('\n'),

@@ -1,9 +1,50 @@
-import { cliBridge, type CLIResult } from '../cli-bridge/index.js'
+import { cliBridge, type CLIResult, type CLIBridge } from '../cli-bridge/index.js'
 import { agentAdapterRegistry, type AgentCliAdapterBinding } from '../agent-adapter/index.js'
 import { a2aClient } from '../a2a-client/index.js'
 import { serviceRegistry } from '../service-registry/index.js'
 import { planLibrary, type CompiledPlanDefinition, type PlanStepDefinition } from '../plan-library/index.js'
 import { workflowRuntime } from '../workflow/run-workflow.js'
+import { memoryKernel } from '../memory-kernel/index.js'
+
+interface ServiceRegistryInstance {
+  call(serviceName: string, params: Record<string, unknown>): Promise<unknown>
+}
+
+interface PlanLibraryInstance {
+  listPlans(): CompiledPlanDefinition[]
+  getPlan(id: string): CompiledPlanDefinition | undefined
+}
+
+interface WorkflowRuntimeInstance {
+  runWorkflow(id: number, inputs: Record<string, unknown>): Promise<unknown>
+}
+
+interface MemoryKernelInstance {
+  observeOutcome(observation: {
+    intent: string
+    tool: string
+    action: string
+    success: boolean
+    error?: string
+  }): void
+}
+
+interface AgentAdapterRegistryInstance {
+  listEnabledTargets(): string[]
+  buildDispatchTemplate(): Record<string, unknown>
+  get(target: string): { adapter_binding?: AgentCliAdapterBinding } | null
+}
+
+interface A2AClientInstance {
+  sendTask(opts: {
+    target: string
+    task: string
+    payload: Record<string, unknown>
+    execution_mode: string
+    binding?: AgentCliAdapterBinding
+    dry_run: boolean
+  }): Promise<unknown>
+}
 
 export type ExecutorKind = 'cli' | 'service' | 'workflow' | 'agent' | 'plan'
 
@@ -47,6 +88,16 @@ interface RegisteredExecutor {
 class ExecutorGatewayService {
   private registry = new Map<string, RegisteredExecutor>()
 
+  constructor(
+    private readonly cliBridge: CLIBridge = cliBridge,
+    private readonly agentAdapterRegistry: AgentAdapterRegistryInstance = agentAdapterRegistry,
+    private readonly a2aClient: A2AClientInstance = a2aClient,
+    private readonly serviceRegistry: ServiceRegistryInstance = serviceRegistry,
+    private readonly planLibrary: PlanLibraryInstance = planLibrary,
+    private readonly workflowRuntime: WorkflowRuntimeInstance = workflowRuntime,
+    private readonly memoryKernel: MemoryKernelInstance = memoryKernel,
+  ) {}
+
   initialize(): void {
     this.registry.clear()
 
@@ -71,7 +122,7 @@ class ExecutorGatewayService {
         throw new Error('cli_name and action are required')
       }
       const cliParams = (params.params as Record<string, unknown>) ?? {}
-      return cliBridge.run(cliName, action, cliParams)
+      return this.cliBridge.run(cliName, action, cliParams)
     })
 
     this.register({
@@ -93,7 +144,7 @@ class ExecutorGatewayService {
         throw new Error('service_name is required')
       }
       const serviceParams = (params.params as Record<string, unknown>) ?? {}
-      return serviceRegistry.call(serviceName, serviceParams)
+      return this.serviceRegistry.call(serviceName, serviceParams)
     })
 
     this.register({
@@ -115,7 +166,7 @@ class ExecutorGatewayService {
         throw new Error('workflow_id must be a number')
       }
       const inputs = (params.inputs as Record<string, unknown>) ?? {}
-      return workflowRuntime.runWorkflow(workflowId, inputs)
+      return this.workflowRuntime.runWorkflow(workflowId, inputs)
     })
 
     this.register({
@@ -126,8 +177,8 @@ class ExecutorGatewayService {
       capabilities: ['agent', 'delegation', 'dry_run'],
       metadata: {
         mode: 'dry_run',
-        supported_targets: agentAdapterRegistry.listEnabledTargets(),
-        param_template: agentAdapterRegistry.buildDispatchTemplate(),
+        supported_targets: this.agentAdapterRegistry.listEnabledTargets(),
+        param_template: this.agentAdapterRegistry.buildDispatchTemplate(),
       },
     }, async (params) => {
       const target = String(params.target ?? '')
@@ -142,11 +193,11 @@ class ExecutorGatewayService {
         throw new Error('task is required')
       }
 
-      const adapter = agentAdapterRegistry.get(target)
+      const adapter = this.agentAdapterRegistry.get(target)
       const adapterResult = adapter?.adapter_binding?.kind === 'cli'
         ? await this.dispatchCliAdapter(adapter.adapter_binding, payload)
         : adapter?.adapter_binding?.kind === 'a2a'
-          ? await a2aClient.sendTask({
+          ? await this.a2aClient.sendTask({
               target,
               task,
               payload,
@@ -222,11 +273,11 @@ class ExecutorGatewayService {
   }
 
   listPlans(): CompiledPlanDefinition[] {
-    return planLibrary.listPlans()
+    return this.planLibrary.listPlans()
   }
 
   getPlan(id: string): CompiledPlanDefinition | undefined {
-    return planLibrary.getPlan(id)
+    return this.planLibrary.getPlan(id)
   }
 
   previewPlan(id: string): PlanPreview | null {
@@ -295,7 +346,7 @@ class ExecutorGatewayService {
 
       if (step.proposed_executor.startsWith('cli:')) {
         const cliName = step.proposed_executor.slice(4)
-        const result = await cliBridge.run(cliName, step.action, step.params)
+        const result = await this.cliBridge.run(cliName, step.action, step.params)
         results.push({
           order: step.order,
           tool: step.tool,
@@ -306,8 +357,7 @@ class ExecutorGatewayService {
           error: result.status === 'error' ? result.message ?? result.error : undefined,
         })
         try {
-          const { memoryKernel } = await import('../memory-kernel/index.js')
-          memoryKernel.observeOutcome({
+          this.memoryKernel.observeOutcome({
             intent: `plan.${id}.step.${step.order}`,
             tool: step.tool,
             action: step.action,
@@ -339,12 +389,12 @@ class ExecutorGatewayService {
 
   private resolveStepExecutor(step: PlanStepDefinition): string | null {
     if (step.tool === 'adb') {
-      return cliBridge.hasExecutor('adb-cli') ? 'cli:adb-cli' : null
+      return this.cliBridge.hasExecutor('adb-cli') ? 'cli:adb-cli' : null
     }
     if (step.tool === 'mi-cli') {
-      return cliBridge.hasExecutor('mi-cli') ? 'cli:mi-cli' : null
+      return this.cliBridge.hasExecutor('mi-cli') ? 'cli:mi-cli' : null
     }
-    if (cliBridge.hasExecutor(step.tool)) {
+    if (this.cliBridge.hasExecutor(step.tool)) {
       return `cli:${step.tool}`
     }
     return null
@@ -358,8 +408,10 @@ class ExecutorGatewayService {
       ? payload.action
       : binding.default_action
     const { action: _action, ...cliPayload } = payload
-    return cliBridge.run(binding.cli_name, action, cliPayload)
+    return this.cliBridge.run(binding.cli_name, action, cliPayload)
   }
 }
 
 export const executorGateway = new ExecutorGatewayService()
+export const defaultExecutorGateway = executorGateway
+export type { ServiceRegistryInstance, PlanLibraryInstance, WorkflowRuntimeInstance, MemoryKernelInstance, AgentAdapterRegistryInstance, A2AClientInstance }

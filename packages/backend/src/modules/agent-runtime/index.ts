@@ -1,12 +1,33 @@
 import { getDb } from '../../db/index.js'
-import { cliBridge } from '../cli-bridge/index.js'
+import { cliBridge, type CLIBridge } from '../cli-bridge/index.js'
 import { executorGateway } from '../executor-gateway/index.js'
 import { intentRouter as defaultIntentRouter, type RoutedCandidatePlan, type RoutedObservation } from '../intent-router/index.js'
 import { llmService, type LLMChatResult, type ModelSlotName } from '../llm-provider/service.js'
-import { approvalRegistry, isHighRiskCliCall } from '../approval/index.js'
+import { approvalRegistry, isHighRiskCliCall, type ApprovalRecord } from '../approval/index.js'
 import { memoryKernel } from '../memory-kernel/index.js'
 import type { AgentEvent, AgentStreamContext, MemoryHit } from './events.js'
 import type { HistoryItem } from '../conversation/index.js'
+
+interface ApprovalRegistryInstance {
+  create(turnId: string, reason: string, payload: unknown): ApprovalRecord
+  wait(id: string, timeoutMs: number): Promise<'approved' | 'denied' | 'timeout'>
+}
+
+interface MemoryKernelInstance {
+  observeOutcome(params: {
+    intent: string
+    target_device_id?: string
+    tool: string
+    action: string
+    success: boolean
+    error?: string
+  }): void
+}
+
+interface ExecutorGatewayInstance {
+  runPlan(id: string): Promise<unknown>
+  invoke(name: string, params: Record<string, unknown>): Promise<unknown>
+}
 
 export type { AgentEvent, AgentStreamContext, MemoryHit } from './events.js'
 
@@ -40,7 +61,13 @@ export interface AgentResponse {
 }
 
 class AgentRuntime {
-  constructor(private readonly intentRouter = defaultIntentRouter) {}
+  constructor(
+    private readonly intentRouter = defaultIntentRouter,
+    private readonly cliBridge: CLIBridge = cliBridge,
+    private readonly executorGateway: ExecutorGatewayInstance = executorGateway,
+    private readonly approvalRegistry: ApprovalRegistryInstance = approvalRegistry,
+    private readonly memoryKernel: MemoryKernelInstance = memoryKernel,
+  ) {}
 
   async *processMessageStream(
     message: string,
@@ -112,7 +139,7 @@ class AgentRuntime {
 
     if (route.route_level === 1) {
       if (route.matched_plan) {
-        const planResult = await executorGateway.runPlan(route.matched_plan.id)
+        const planResult = await this.executorGateway.runPlan(route.matched_plan.id)
         for (const stepResult of planResult.results) {
           yield {
             type: 'plan.step.start',
@@ -158,7 +185,7 @@ class AgentRuntime {
             args: action,
           }
           const stepStart = Date.now()
-          const result = await executorGateway.invoke('service.invoke', {
+          const result = await this.executorGateway.invoke('service.invoke', {
             service_name: `${action.tool}.${action.action}`,
             params: action.params,
           })
@@ -316,7 +343,7 @@ class AgentRuntime {
 
           const action = parsedArgs.action ?? ''
           if (isHighRiskCliCall('mi-cli', action)) {
-            const approval = approvalRegistry.create(
+            const approval = this.approvalRegistry.create(
               turnId,
               `High-risk device action: mi-cli.${action}`,
               { cli: 'mi-cli', action, params: parsedArgs.params },
@@ -328,7 +355,7 @@ class AgentRuntime {
               reason: approval.reason,
               payload: approval.payload,
             }
-            const decision = await approvalRegistry.wait(approval.id, 60_000)
+            const decision = await this.approvalRegistry.wait(approval.id, 60_000)
             if (decision !== 'approved') {
               yield {
                 type: 'tool.call.start',
@@ -366,7 +393,7 @@ class AgentRuntime {
           }
 
           const stepStart = Date.now()
-          const cliResult = await cliBridge.run('mi-cli', parsedArgs.action ?? '', parsedArgs.params ?? {})
+          const cliResult = await this.cliBridge.run('mi-cli', parsedArgs.action ?? '', parsedArgs.params ?? {})
 
           yield {
             type: 'tool.call.end',
@@ -379,7 +406,7 @@ class AgentRuntime {
           }
 
           try {
-            memoryKernel.observeOutcome({
+            this.memoryKernel.observeOutcome({
               intent: normalizedIntent,
               target_device_id: targetDeviceId,
               tool: 'mi-cli',
@@ -524,12 +551,12 @@ class AgentRuntime {
 
           const action = parsedArgs.action ?? ''
           if (isHighRiskCliCall('mi-cli', action)) {
-            const approval = approvalRegistry.create(
+            const approval = this.approvalRegistry.create(
               turnId, `High-risk device action: mi-cli.${action}`,
               { cli: 'mi-cli', action, params: parsedArgs.params },
             )
             yield { type: 'approval.request', turn_id: turnId, approval_id: approval.id, reason: approval.reason, payload: approval.payload }
-            const decision = await approvalRegistry.wait(approval.id, 60_000)
+            const decision = await this.approvalRegistry.wait(approval.id, 60_000)
             if (decision !== 'approved') {
               yield { type: 'tool.call.start', turn_id: turnId, call_id: callId, kind: 'cli', name: toolCall.function.name, args: parsedArgs }
               yield { type: 'tool.call.end', turn_id: turnId, call_id: callId, status: 'error', error: `Approval ${decision} by user.`, duration_ms: 0 }
@@ -540,7 +567,7 @@ class AgentRuntime {
 
           yield { type: 'tool.call.start', turn_id: turnId, call_id: callId, kind: 'cli', name: toolCall.function.name, args: parsedArgs }
           const stepStart = Date.now()
-          const cliResult = await cliBridge.run('mi-cli', parsedArgs.action ?? '', parsedArgs.params ?? {})
+          const cliResult = await this.cliBridge.run('mi-cli', parsedArgs.action ?? '', parsedArgs.params ?? {})
           yield { type: 'tool.call.end', turn_id: turnId, call_id: callId, status: cliResult.status === 'success' ? 'success' : 'error', result: cliResult.status === 'success' ? cliResult.data : undefined, error: cliResult.status === 'error' ? cliResult.error : undefined, duration_ms: Date.now() - stepStart }
 
           messages.push({ role: 'tool', tool_call_id: callId, name: toolCall.function.name, content: JSON.stringify(cliResult.status === 'success' ? cliResult.data : { error: cliResult.error }) } as typeof messages[0])
@@ -575,7 +602,7 @@ class AgentRuntime {
 
     if (route.route_level === 1) {
       if (route.matched_plan) {
-        const planResult = await executorGateway.runPlan(route.matched_plan.id)
+        const planResult = await this.executorGateway.runPlan(route.matched_plan.id)
         const successCount = planResult.results.filter((result) => result.status === 'success').length
         const failedStep = planResult.results.find((result) => result.status === 'error')
         const finalStep = planResult.results[planResult.results.length - 1]
@@ -605,7 +632,7 @@ class AgentRuntime {
       if (route.matched_rule) {
         const results: Array<{ success: boolean; data?: unknown; error?: string }> = []
         for (const action of route.matched_rule.actions.sort((left, right) => left.order - right.order)) {
-          const result = await executorGateway.invoke('service.invoke', {
+          const result = await this.executorGateway.invoke('service.invoke', {
             service_name: `${action.tool}.${action.action}`,
             params: action.params,
           })
@@ -822,11 +849,11 @@ class AgentRuntime {
             action: string
             params?: Record<string, unknown>
           }
-          const cliResult = await cliBridge.run('mi-cli', args.action, args.params ?? {})
+          const cliResult = await this.cliBridge.run('mi-cli', args.action, args.params ?? {})
           toolCallCount += 1
 
           try {
-            memoryKernel.observeOutcome({
+            this.memoryKernel.observeOutcome({
               intent: normalizedIntent,
               target_device_id: targetDeviceId,
               tool: 'mi-cli',
