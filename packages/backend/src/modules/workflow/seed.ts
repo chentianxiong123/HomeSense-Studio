@@ -1,5 +1,7 @@
 import { getDb } from '../../db/index.js'
 
+type GetDbFn = () => ReturnType<typeof getDb>
+
 interface SeedWorkflowNodeInput {
   type: string
   label: string
@@ -594,12 +596,14 @@ const DEFAULT_WORKFLOW_SEEDS: SeedWorkflowInput[] = [
 ]
 
 class WorkflowSeedService {
+  constructor(private readonly getDb: GetDbFn = getDb) {}
+
   ensureDefaults(): SeedSyncResult {
     return this.syncDefaults()
   }
 
   syncDefaults(options: SeedSyncOptions = {}): SeedSyncResult {
-    const db = getDb()
+    const db = this.getDb()
     const result: SeedSyncResult = { created: [], updated: [], skipped: [] }
 
     for (const seed of DEFAULT_WORKFLOW_SEEDS) {
@@ -626,7 +630,7 @@ class WorkflowSeedService {
   }
 
   private insertWorkflowSeed(seed: SeedWorkflowInput): number {
-    const db = getDb()
+    const db = this.getDb()
     const workflowResult = db.prepare(
       `INSERT INTO workflows (name, description, trigger_type, cron_expression, published, graph_json)
        VALUES (?, ?, ?, NULL, ?, ?)`,
@@ -644,7 +648,7 @@ class WorkflowSeedService {
   }
 
   private replaceWorkflowSeed(workflowId: number, seed: SeedWorkflowInput): void {
-    const db = getDb()
+    const db = this.getDb()
     db.prepare(
       `UPDATE workflows
        SET description = ?, trigger_type = ?, published = ?, graph_json = ?, updated_at = datetime('now')
@@ -663,7 +667,7 @@ class WorkflowSeedService {
   }
 
   private writeSeedGraph(workflowId: number, seed: SeedWorkflowInput): void {
-    const db = getDb()
+    const db = this.getDb()
     const insertedNodeIds: number[] = []
     const insertNode = db.prepare(
       `INSERT INTO workflow_nodes (workflow_id, type, label, position_json, config_json)

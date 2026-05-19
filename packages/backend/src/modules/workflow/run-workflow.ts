@@ -7,18 +7,35 @@ import type { WorkflowEdge, WorkflowResult, NodeTrace } from './types.js'
 import { VariablePool } from './variable-pool.js'
 import { GraphRuntimeState } from './runtime-state.js'
 
+type GetDbFn = () => ReturnType<typeof getDb>
+
+interface EventBusInstance {
+  fire(event: string, data?: unknown): void
+  on(event: string, handler: (...args: unknown[]) => void): void
+}
+
+interface MemoryKernelInstance {
+  observeOutcome(params: { intent: string; tool: string; action: string; success: boolean; error?: string }): void
+}
+
 interface RunWorkflowOptions {
   parentState?: GraphRuntimeState
   triggeredBy?: 'manual' | 'cron' | 'chat'
 }
 
 class WorkflowRuntime {
+  constructor(
+    private readonly getDb: GetDbFn = getDb,
+    private readonly eventBus: EventBusInstance = eventBus,
+    private readonly memoryKernel: MemoryKernelInstance = memoryKernel,
+  ) {}
+
   async runWorkflow(
     workflowId: number,
     inputs: Record<string, unknown> = {},
     options: RunWorkflowOptions = {},
   ): Promise<WorkflowResult> {
-    const db = getDb()
+    const db = this.getDb()
 
     const workflow = this.getWorkflowRecord(workflowId)
     if (!workflow) throw new Error(`Workflow not found: ${workflowId}`)
@@ -87,7 +104,7 @@ class WorkflowRuntime {
 
         const batchResults = await Promise.all(
           runnableNodes.map(async (node) => {
-            eventBus.fire('workflow_node_started', { run_id: runId, node_id: node.id })
+            this.eventBus.fire('workflow_node_started', { run_id: runId, node_id: node.id })
             const result = await executeNode(node, runtimeState)
             return { node, result }
           }),
@@ -112,9 +129,9 @@ class WorkflowRuntime {
 
           if (result.status === 'failed') {
             failed = true
-            eventBus.fire('workflow_node_failed', { run_id: runId, node_id: node.id, error: result.error })
+            this.eventBus.fire('workflow_node_failed', { run_id: runId, node_id: node.id, error: result.error })
           } else {
-            eventBus.fire('workflow_node_completed', { run_id: runId, node_id: node.id, outputs: result.outputs })
+            this.eventBus.fire('workflow_node_completed', { run_id: runId, node_id: node.id, outputs: result.outputs })
           }
 
           if (node.type === 'executor_call') {
@@ -140,7 +157,7 @@ class WorkflowRuntime {
                 tool = 'plan'
                 action = String(params.plan_id ?? 'run')
               }
-              memoryKernel.observeOutcome({
+              this.memoryKernel.observeOutcome({
                 intent: `workflow.node.${node.label || node.type}`,
                 tool,
                 action,
@@ -170,7 +187,7 @@ class WorkflowRuntime {
         `UPDATE workflow_runs SET status = ?, finished_at = datetime('now'), result_json = ? WHERE id = ?`,
       ).run(status, JSON.stringify(outputs), runId)
 
-      eventBus.fire(status === 'succeeded' ? 'workflow_completed' : 'workflow_failed', {
+      this.eventBus.fire(status === 'succeeded' ? 'workflow_completed' : 'workflow_failed', {
         run_id: runId,
         workflow_id: workflowId,
       })
@@ -355,12 +372,12 @@ class WorkflowRuntime {
   }
 
   private getWorkflowRecord(workflowId: number): Record<string, unknown> | undefined {
-    const db = getDb()
+    const db = this.getDb()
     return db.prepare('SELECT * FROM workflows WHERE id = ?').get(workflowId) as Record<string, unknown> | undefined
   }
 
   private getWorkflowRecordByName(workflowName: string): Record<string, unknown> | undefined {
-    const db = getDb()
+    const db = this.getDb()
     return db.prepare('SELECT * FROM workflows WHERE name = ? LIMIT 1').get(workflowName) as Record<string, unknown> | undefined
   }
 

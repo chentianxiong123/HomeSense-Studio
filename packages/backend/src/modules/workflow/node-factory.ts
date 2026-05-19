@@ -1,4 +1,4 @@
-import { UnknownWorkflowNode, WorkflowNodeBase } from './node-base.js'
+import { UnknownWorkflowNode, WorkflowNodeBase, type WorkflowNodeDependencies } from './node-base.js'
 import {
   AnswerWorkflowNode,
   CodeWorkflowNode,
@@ -19,12 +19,20 @@ import {
   XiaoAiWorkflowNode,
 } from './built-in-nodes.js'
 import { workflowNodeDefinitionRegistry } from './node-definitions.js'
+import { cliBridge } from '../cli-bridge/index.js'
+import { candidatePlanService } from '../candidate-plan/index.js'
+import { executorGateway } from '../executor-gateway/index.js'
+import { llmService } from '../llm-provider/service.js'
+import { memoryKernel } from '../memory-kernel/index.js'
+import { rerankService } from '../rerank-service/index.js'
 import type { WorkflowNode } from './types.js'
 
-type WorkflowNodeConstructor = new (node: WorkflowNode) => WorkflowNodeBase
+type WorkflowNodeConstructor = new (node: WorkflowNode, deps: WorkflowNodeDependencies) => WorkflowNodeBase
 
 class WorkflowNodeFactory {
   private readonly registry = new Map<string, WorkflowNodeConstructor>()
+
+  constructor(private readonly deps: WorkflowNodeDependencies = defaultDependencies()) {}
 
   register(type: string, ctor: WorkflowNodeConstructor): void {
     this.registry.set(type, ctor)
@@ -32,11 +40,22 @@ class WorkflowNodeFactory {
 
   create(node: WorkflowNode): WorkflowNodeBase {
     const Ctor = this.registry.get(node.type) ?? UnknownWorkflowNode
-    return new Ctor(node)
+    return new Ctor(node, this.deps)
   }
 
   listRegisteredTypes(): string[] {
     return Array.from(this.registry.keys()).sort()
+  }
+}
+
+function defaultDependencies(): WorkflowNodeDependencies {
+  return {
+    cliBridge,
+    executorGateway,
+    llmService,
+    memoryKernel,
+    candidatePlanService,
+    rerankService,
   }
 }
 

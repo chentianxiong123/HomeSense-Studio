@@ -1,9 +1,3 @@
-import { cliBridge } from '../cli-bridge/index.js'
-import { candidatePlanService } from '../candidate-plan/index.js'
-import { executorGateway } from '../executor-gateway/index.js'
-import { llmService } from '../llm-provider/service.js'
-import { memoryKernel } from '../memory-kernel/index.js'
-import { rerankService } from '../rerank-service/index.js'
 import { WorkflowNodeBase, type NodeExecutionContext } from './node-base.js'
 import type { WorkflowNodeRunOutcome } from './types.js'
 
@@ -34,11 +28,11 @@ export class DeviceControlWorkflowNode extends WorkflowNodeBase {
 
     let cliResult
     if (aiid != null) {
-      cliResult = await cliBridge.run('mi-cli', 'run_action', { did, siid, aiid, params: params ?? [] })
+      cliResult = await this.deps.cliBridge.run('mi-cli', 'run_action', { did, siid, aiid, params: params ?? [] })
     } else if (piid != null && value !== undefined) {
-      cliResult = await cliBridge.run('mi-cli', 'set_prop', { did, siid, piid, value })
+      cliResult = await this.deps.cliBridge.run('mi-cli', 'set_prop', { did, siid, piid, value })
     } else if (piid != null) {
-      cliResult = await cliBridge.run('mi-cli', 'get_prop', { did, siid, piid })
+      cliResult = await this.deps.cliBridge.run('mi-cli', 'get_prop', { did, siid, piid })
     } else {
       return { status: 'failed', outputs: {}, error: 'Invalid device_control config' }
     }
@@ -61,8 +55,8 @@ export class XiaoAiWorkflowNode extends WorkflowNodeBase {
     const silent = config.silent === true
     const did = config.did != null ? String(context.resolveValue(config.did)) : undefined
     const cliResult = mode === 'play'
-      ? await cliBridge.run('mi-cli', 'speaker_play', { text, ...(did ? { did } : {}) })
-      : await cliBridge.run('mi-cli', 'speaker_execute', { text, silent, ...(did ? { did } : {}) })
+      ? await this.deps.cliBridge.run('mi-cli', 'speaker_play', { text, ...(did ? { did } : {}) })
+      : await this.deps.cliBridge.run('mi-cli', 'speaker_execute', { text, silent, ...(did ? { did } : {}) })
     context.variables.set(`node.${context.node.id}.result`, cliResult)
     const success = cliResult.status === 'success'
     return {
@@ -78,7 +72,7 @@ export class IRControlWorkflowNode extends WorkflowNodeBase {
     const config = context.node.config
     const controllerId = context.resolveValue(config.controller_id) as string
     const keyId = context.resolveValue(config.key_id) as string
-    const cliResult = await cliBridge.run('mi-cli', 'ir_press_key', { controller_id: controllerId, key_id: keyId })
+    const cliResult = await this.deps.cliBridge.run('mi-cli', 'ir_press_key', { controller_id: controllerId, key_id: keyId })
     context.variables.set(`node.${context.node.id}.result`, cliResult)
     const success = cliResult.status === 'success'
     return {
@@ -105,7 +99,7 @@ export class SceneExecuteWorkflowNode extends WorkflowNodeBase {
       return { status: 'failed', outputs: {}, error: 'Scene execute requires scene_id or scene_name' }
     }
 
-    const cliResult = await cliBridge.run('mi-cli', 'scene_execute', params)
+    const cliResult = await this.deps.cliBridge.run('mi-cli', 'scene_execute', params)
     context.variables.set(`node.${context.node.id}.result`, cliResult)
     const success = cliResult.status === 'success'
     return {
@@ -123,7 +117,7 @@ export class LLMWorkflowNode extends WorkflowNodeBase {
     const temperature = config.temperature != null ? Number(config.temperature) : 0.7
 
     try {
-      const result = await llmService.chat({ messages: [{ role: 'user', content: prompt }], temperature })
+      const result = await this.deps.llmService.chat({ messages: [{ role: 'user', content: prompt }], temperature })
       const response = result.content ?? ''
       context.variables.set(`node.${context.node.id}.response`, response)
       return { status: 'succeeded', outputs: { response, trigger: true } }
@@ -259,7 +253,7 @@ export class ExecutorCallWorkflowNode extends WorkflowNodeBase {
     }
 
     const params = (context.resolveValue(config.params ?? {}) as Record<string, unknown>) ?? {}
-    const result = await executorGateway.invoke(executorName, params)
+    const result = await this.deps.executorGateway.invoke(executorName, params)
     context.variables.set(`node.${context.node.id}.result`, result)
 
     if (result.status === 'error') {
@@ -286,13 +280,13 @@ export class KnowledgeRetrieveWorkflowNode extends WorkflowNodeBase {
 
     let hits: unknown[] = []
     if (source === 'compiled_plan') {
-      hits = memoryKernel.listCompiledKnowledge({ kind: 'compiled_plan', limit })
+      hits = this.deps.memoryKernel.listCompiledKnowledge({ kind: 'compiled_plan', limit })
     } else if (source === 'compiled') {
-      hits = memoryKernel.listCompiledKnowledge({ limit })
+      hits = this.deps.memoryKernel.listCompiledKnowledge({ limit })
     } else if (source === 'semantic' && query) {
-      hits = await memoryKernel.semanticSearch(query, limit)
+      hits = await this.deps.memoryKernel.semanticSearch(query, limit)
     } else if (query) {
-      hits = memoryKernel.search(query).slice(0, limit)
+      hits = this.deps.memoryKernel.search(query).slice(0, limit)
     }
 
     context.variables.set(`node.${context.node.id}.hits`, hits)
@@ -313,7 +307,7 @@ export class CandidatePlanResolveWorkflowNode extends WorkflowNodeBase {
       return { status: 'failed', outputs: {}, error: 'Missing candidate plan query' }
     }
 
-    const candidates = await candidatePlanService.resolve({ query })
+    const candidates = await this.deps.candidatePlanService.resolve({ query })
     const candidatePlan = candidates[0] ?? null
 
     context.variables.set(`node.${context.node.id}.candidate_plans`, candidates)
@@ -325,8 +319,8 @@ export class CandidatePlanResolveWorkflowNode extends WorkflowNodeBase {
       trigger: candidatePlan !== null,
     }
 
-    if (candidatePlan && outputKey && outputKey in candidatePlan) {
-      outputs.value = (candidatePlan as unknown as Record<string, unknown>)[outputKey]
+    if (candidatePlan && outputKey && typeof candidatePlan === 'object' && outputKey in (candidatePlan as Record<string, unknown>)) {
+      outputs.value = (candidatePlan as Record<string, unknown>)[outputKey]
       context.variables.set(`node.${context.node.id}.value`, outputs.value)
     }
 
@@ -379,7 +373,7 @@ export class RerankScoreWorkflowNode extends WorkflowNodeBase {
     }>
 
     try {
-      const providerResult = await llmService.rerank({
+      const providerResult = await this.deps.llmService.rerank({
         query,
         documents: documents.map((document) => document.text),
       })
@@ -394,7 +388,7 @@ export class RerankScoreWorkflowNode extends WorkflowNodeBase {
         })
         .sort((left, right) => right.score - left.score)
     } catch {
-      ranked = await rerankService.rankDocuments({ query, documents })
+      ranked = await this.deps.rerankService.rankDocuments({ query, documents })
     }
 
     context.variables.set(`node.${context.node.id}.ranked`, ranked)
@@ -417,7 +411,7 @@ export class AgentDispatchWorkflowNode extends WorkflowNodeBase {
       return { status: 'failed', outputs: {}, error: 'Agent dispatch requires target and task' }
     }
 
-    const result = await executorGateway.invoke('agent.dispatch', {
+    const result = await this.deps.executorGateway.invoke('agent.dispatch', {
       target,
       task,
       payload,

@@ -2,6 +2,55 @@ import { VariablePool } from './variable-pool.js'
 import { GraphRuntimeState } from './runtime-state.js'
 import type { NodeResult, WorkflowNode, WorkflowNodeRunOutcome } from './types.js'
 
+export interface WorkflowNodeCliBridge {
+  run(cliName: string, action: string, params: Record<string, unknown>): Promise<{ status: string; data?: unknown; error?: string }>
+}
+
+export interface WorkflowNodeExecutorGateway {
+  invoke(
+    name: string,
+    params: Record<string, unknown>,
+  ): Promise<{ status: 'success' | 'error'; executor: string; data?: unknown; error?: string; message?: string }>
+}
+
+export interface WorkflowNodeLLMService {
+  chat(opts: { messages: Array<{ role: string; content: string }>; temperature?: number }): Promise<{ content?: string | null }>
+  rerank(opts: { query: string; documents: string[] }): Promise<{ results: Array<{ index: number; relevance_score: number }> }>
+}
+
+export interface WorkflowNodeMemoryKernel {
+  listCompiledKnowledge(opts: { kind?: 'wiki_page' | 'compiled_plan' | 'experience_note' | 'skill_candidate' | 'rule_candidate' | 'workflow_candidate'; limit?: number }): unknown[]
+  search(query: string): unknown[]
+  semanticSearch(query: string, limit: number): Promise<unknown[]>
+}
+
+export interface WorkflowNodeCandidatePlanService {
+  resolve(opts: { query: string }): Promise<unknown[]>
+}
+
+export interface WorkflowNodeRerankService {
+  rankDocuments(opts: {
+    query: string
+    documents: Array<{ id: string; text: string; base_score?: number; metadata?: Record<string, unknown> }>
+  }): Promise<Array<{
+    id: string
+    text: string
+    base_score?: number
+    metadata?: Record<string, unknown>
+    score: number
+    lexical_score: number
+  }>>
+}
+
+export interface WorkflowNodeDependencies {
+  cliBridge: WorkflowNodeCliBridge
+  executorGateway: WorkflowNodeExecutorGateway
+  llmService: WorkflowNodeLLMService
+  memoryKernel: WorkflowNodeMemoryKernel
+  candidatePlanService: WorkflowNodeCandidatePlanService
+  rerankService: WorkflowNodeRerankService
+}
+
 export interface NodeExecutionContext {
   node: WorkflowNode
   runtime_state: GraphRuntimeState
@@ -11,7 +60,10 @@ export interface NodeExecutionContext {
 }
 
 export abstract class WorkflowNodeBase {
-  constructor(protected readonly node: WorkflowNode) {}
+  constructor(
+    protected readonly node: WorkflowNode,
+    protected readonly deps: WorkflowNodeDependencies,
+  ) {}
 
   async run(runtimeState: GraphRuntimeState): Promise<NodeResult> {
     const startedAt = Date.now()

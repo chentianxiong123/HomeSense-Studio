@@ -3,6 +3,8 @@ import { resolveNodeValue } from './node-base.js'
 import type { WorkflowEdge, WorkflowNode } from './types.js'
 import { VariablePool, type VariableValueMode } from './variable-pool.js'
 
+type GetDbFn = () => ReturnType<typeof getDb>
+
 export interface WorkflowPreviewStep {
   node_id: string
   node_type: string
@@ -28,8 +30,10 @@ export interface WorkflowPreviewResult {
 }
 
 class WorkflowPreviewService {
+  constructor(private readonly getDb: GetDbFn = getDb) {}
+
   previewWorkflow(workflowId: number, inputs: Record<string, unknown> = {}): WorkflowPreviewResult {
-    const workflow = getDb().prepare('SELECT id FROM workflows WHERE id = ?').get(workflowId)
+    const workflow = this.getDb().prepare('SELECT id FROM workflows WHERE id = ?').get(workflowId)
     if (!workflow) throw new Error(`Workflow not found: ${workflowId}`)
 
     const { nodes, edges } = this.loadGraph(workflowId)
@@ -72,7 +76,7 @@ class WorkflowPreviewService {
   }
 
   private loadGraph(workflowId: number): { nodes: WorkflowNode[]; edges: WorkflowEdge[] } {
-    const db = getDb()
+    const db = this.getDb()
     const nodeRows = db.prepare('SELECT * FROM workflow_nodes WHERE workflow_id = ?').all(workflowId) as Array<Record<string, unknown>>
     const edgeRows = db.prepare('SELECT * FROM workflow_edges WHERE workflow_id = ?').all(workflowId) as Array<Record<string, unknown>>
 
