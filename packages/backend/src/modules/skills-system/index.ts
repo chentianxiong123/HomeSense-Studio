@@ -15,15 +15,27 @@ export interface SkillDefinition {
   enabled: boolean
 }
 
+type GetDbFn = () => ReturnType<typeof getDb>
+
+interface EventBusInstance {
+  fire(event: string, data?: unknown): void
+  on(event: string, handler: (...args: unknown[]) => void): void
+}
+
 class SkillsService {
-  private skills = new Map<string, SkillDefinition>()
+  private readonly skills = new Map<string, SkillDefinition>()
+
+  constructor(
+    private readonly getDb: GetDbFn = getDb,
+    private readonly eventBus: EventBusInstance = eventBus,
+  ) {}
 
   register(skill: SkillDefinition): void {
     if (!skill.name) throw new Error('Skill name is required')
 
     this.skills.set(skill.name, skill)
 
-    const db = getDb()
+    const db = this.getDb()
     db.prepare(
       `INSERT INTO skills (name, description, prompt_template, allowed_tools_json, action_schema_json, context_mode, source, skill_root, enabled)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -37,7 +49,7 @@ class SkillsService {
       skill.enabled ? 1 : 0,
     )
 
-    eventBus.fire('skill_registered', { name: skill.name })
+    this.eventBus.fire('skill_registered', { name: skill.name })
   }
 
   getSkill(name: string): SkillDefinition | undefined {

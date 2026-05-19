@@ -1,7 +1,23 @@
 import { getDb } from '../../db/index.js'
 import { eventBus } from '../event-bus/index.js'
-import { llmService } from '../llm-provider/service.js'
-import { skillsService } from '../skills-system/index.js'
+import { llmService as defaultLlmService } from '../llm-provider/service.js'
+import { skillsService as defaultSkillsService } from '../skills-system/index.js'
+
+type GetDbFn = () => ReturnType<typeof getDb>
+
+interface EventBusInstance {
+  fire(event: string, data?: unknown): void
+  on(event: string, handler: (...args: unknown[]) => void): void
+}
+
+interface LLMServiceInstance {
+  getModelSlot(slot: string): { provider_type: string; api_base: string; model_name: string; dimensions?: number | null; enabled: boolean } | undefined
+  embed(opts: { slot?: string; input: string | string[] }): Promise<{ data: Array<{ index: number; embedding: number[] }> }>
+}
+
+interface SkillsServiceInstance {
+  getSkill(name: string): { name: string; prompt_template: string; description: string } | undefined
+}
 
 export interface MemoryMetadata {
   type: 'person' | 'device' | 'room' | 'concept' | 'skill'
@@ -121,14 +137,21 @@ export interface MemoryKernelStatus {
 }
 
 class MemoryKernelService {
+  constructor(
+    private readonly getDb: GetDbFn = getDb,
+    private readonly eventBus: EventBusInstance = eventBus,
+    private readonly llmService: LLMServiceInstance = defaultLlmService,
+    private readonly skillsService: SkillsServiceInstance = defaultSkillsService,
+  ) {}
+
   initialize(): void {
     this.ensureCanonicalEmbeddingProfile()
   }
 
   ensureCanonicalEmbeddingProfile(): EmbeddingProfile | null {
-    const slot = llmService.getModelSlot('embedding')
+    const slot = this.llmService.getModelSlot('embedding')
     const profileName = process.env.MODEL_PROFILE || 'default'
-    const db = getDb()
+    const db = this.getDb()
     const existing = this.getCanonicalEmbeddingProfile()
 
     if (!slot || !slot.enabled || !slot.model_name) {
@@ -177,14 +200,14 @@ class MemoryKernelService {
   }
 
   listEmbeddingProfiles(): EmbeddingProfile[] {
-    const db = getDb()
+    const db = this.getDb()
     return db.prepare(
       'SELECT * FROM embedding_profiles ORDER BY is_canonical DESC, profile_name ASC',
     ).all().map((row) => this.normalizeProfile(row as Record<string, unknown>))
   }
 
   getCanonicalEmbeddingProfile(): EmbeddingProfile | null {
-    const db = getDb()
+    const db = this.getDb()
     const row = db.prepare(
       'SELECT * FROM embedding_profiles WHERE is_canonical = 1 LIMIT 1',
     ).get() as Record<string, unknown> | undefined
@@ -192,9 +215,9 @@ class MemoryKernelService {
   }
 
   getStatus(): MemoryKernelStatus {
-    const db = getDb()
+    const db = this.getDb()
     const canonical = this.getCanonicalEmbeddingProfile()
-    const slot = llmService.getModelSlot('embedding')
+    const slot = this.llmService.getModelSlot('embedding')
     const memoryEntityCount = Number((db.prepare('SELECT COUNT(*) AS count FROM memory_entities').get() as { count: number }).count)
     const compiledKnowledgeCount = Number((db.prepare('SELECT COUNT(*) AS count FROM compiled_knowledge_items').get() as { count: number }).count)
 
@@ -225,7 +248,7 @@ class MemoryKernelService {
   }
 
   remember(content: string, metadata: MemoryMetadata): void {
-    const db = getDb()
+    const db = this.getDb()
     const entityId = this.generateEntityId(metadata.type, metadata.wing, metadata.room, content)
 
     db.prepare(
@@ -256,11 +279,11 @@ class MemoryKernelService {
       ).run(content.slice(0, 100), content, metadata.wing)
     } catch {}
 
-    eventBus.fire('memory_remembered', { entity_id: entityId, type: metadata.type, wing: metadata.wing })
+    this.eventBus.fire('memory_remembered', { entity_id: entityId, type: metadata.type, wing: metadata.wing })
   }
 
   recall(wing: string, room?: string): RecallResult[] {
-    const db = getDb()
+    const db = this.getDb()
     let query = 'SELECT * FROM memory_entities WHERE wing = ?'
     const params: unknown[] = [wing]
 
@@ -294,7 +317,7 @@ class MemoryKernelService {
     success: boolean
     error?: string
   }): void {
-    const db = getDb()
+    const db = this.getDb()
     const name = params.target_device_id
       ? `intent:${params.intent}→${params.target_device_id}`
       : `intent:${params.intent}`
@@ -357,7 +380,7 @@ class MemoryKernelService {
       ).run(entityId, params.error.slice(0, 200))
     }
 
-    eventBus.fire('memory_observation', {
+    this.eventBus.fire('memory_observation', {
       entity_id: entityId,
       success: params.success,
       intent: params.intent,
@@ -375,7 +398,7 @@ class MemoryKernelService {
     last_error?: string
     score: number
   }> {
-    const db = getDb()
+    const db = this.getDb()
     const keywords = query.split(/\s+/).filter((w) => w.length >= 2).slice(0, 4)
     if (keywords.length === 0) return []
 
@@ -423,7 +446,7 @@ class MemoryKernelService {
   }
 
   search(query: string): SearchResult[] {
-    const db = getDb()
+    const db = this.getDb()
     const results = new Map<string, SearchResult>()
 
     try {
@@ -543,14 +566,14 @@ class MemoryKernelService {
     const canonical = this.getCanonicalEmbeddingProfile()
     if (!canonical) return []
 
-    const queryEmbedding = await llmService.embed({
+    const queryEmbedding = await this.llmService.embed({
       slot: 'embedding',
       input: query,
     })
     const vector = queryEmbedding.data[0]?.embedding ?? []
     if (vector.length === 0) return []
 
-    const db = getDb()
+    const db = this.getDb()
     const rows = db.prepare(
       `SELECT e.knowledge_id, e.profile_name, e.dimensions, e.embedding_json, c.title, c.body, c.kind, c.wing, c.room
        FROM compiled_knowledge_embeddings e
@@ -598,7 +621,7 @@ class MemoryKernelService {
       throw new Error('Canonical embedding profile is not configured')
     }
 
-    const db = getDb()
+    const db = this.getDb()
     const rows = db.prepare(
       `SELECT * FROM compiled_knowledge_items
        ORDER BY rank_score DESC, updated_at DESC
@@ -612,7 +635,7 @@ class MemoryKernelService {
     for (let offset = 0; offset < rows.length; offset += batchSize) {
       const sliceRows = rows.slice(offset, offset + batchSize)
       const sliceTexts = texts.slice(offset, offset + batchSize)
-      const result = await llmService.embed({
+      const result = await this.llmService.embed({
         slot: 'embedding',
         input: sliceTexts,
       })
@@ -647,8 +670,8 @@ class MemoryKernelService {
   }
 
   wakeUp(): MemoryStack {
-    const db = getDb()
-    const identitySkill = skillsService.getSkill('identity')
+    const db = this.getDb()
+    const identitySkill = this.skillsService.getSkill('identity')
     const l0 = identitySkill?.prompt_template || 'You are the HomeSense control agent. Prefer deterministic plans, device facts, and compiled wiki knowledge.'
     const l1: MemoryItem[] = []
 
@@ -689,7 +712,7 @@ class MemoryKernelService {
   }
 
   buildGraph(wing?: string): PalaceGraph {
-    const db = getDb()
+    const db = this.getDb()
     let entityQuery = 'SELECT * FROM memory_entities'
     const entityParams: unknown[] = []
     if (wing) {
@@ -731,7 +754,7 @@ class MemoryKernelService {
   }
 
   listCompiledKnowledge(filters: { kind?: CompiledKnowledgeItem['kind']; wing?: string; room?: string; limit?: number } = {}): CompiledKnowledgeItem[] {
-    const db = getDb()
+    const db = this.getDb()
     const conditions: string[] = []
     const params: unknown[] = []
 
@@ -760,7 +783,7 @@ class MemoryKernelService {
   }
 
   getCompiledKnowledgeItem(id: number): CompiledKnowledgeItem | null {
-    const db = getDb()
+    const db = this.getDb()
     const row = db.prepare(
       'SELECT * FROM compiled_knowledge_items WHERE id = ? LIMIT 1',
     ).get(id) as Record<string, unknown> | undefined
@@ -793,7 +816,7 @@ class MemoryKernelService {
     metadata?: Record<string, unknown>
     rank_score?: number
   }): number {
-    const db = getDb()
+    const db = this.getDb()
     const canonicalProfile = this.getCanonicalEmbeddingProfile()
     db.prepare(
       `INSERT INTO compiled_knowledge_items (
@@ -845,7 +868,7 @@ class MemoryKernelService {
       } catch {}
     }
 
-    eventBus.fire('compiled_knowledge_updated', {
+    this.eventBus.fire('compiled_knowledge_updated', {
       kind: input.kind,
       source_type: input.source_type,
       source_ref: input.source_ref,
@@ -911,7 +934,7 @@ class MemoryKernelService {
   }
 
   private extractAndWriteTriples(entityId: string, content: string, metadata: MemoryMetadata): void {
-    const db = getDb()
+    const db = this.getDb()
     const patterns: Array<{ regex: RegExp; predicate: string; subjectIndex: number; objectIndex: number }> = [
       { regex: /(\S+)\s+(?:is in|located in)\s+(\S+)/i, predicate: 'located_in', subjectIndex: 1, objectIndex: 2 },
       { regex: /(\S+)\s+(?:belongs to|for)\s+(\S+)/i, predicate: 'belongs_to', subjectIndex: 1, objectIndex: 2 },
@@ -946,7 +969,7 @@ class MemoryKernelService {
   }
 
   private extractAndWriteAttributes(entityId: string, content: string): void {
-    const db = getDb()
+    const db = this.getDb()
     const pairs: Array<{ key: string; test: RegExp }> = [
       { key: 'supports_power', test: /power|on\/off|turn on|turn off/i },
       { key: 'supports_remote', test: /remote|ir|infrared/i },
@@ -965,7 +988,7 @@ class MemoryKernelService {
   }
 
   private ensureEntity(name: string, type: string, wing: string, room: string): string {
-    const db = getDb()
+    const db = this.getDb()
     const id = this.generateEntityId(type, wing, room, name)
     const existing = db.prepare('SELECT id FROM memory_entities WHERE id = ?').get(id)
     if (!existing) {
