@@ -1,10 +1,10 @@
-import { cliBridge, type CLIResult, type CLIBridge } from '../cli-bridge/index.js'
-import { agentAdapterRegistry, type AgentCliAdapterBinding } from '../agent-adapter/index.js'
-import { a2aClient } from '../a2a-client/index.js'
-import { serviceRegistry } from '../service-registry/index.js'
-import { planLibrary, type CompiledPlanDefinition, type PlanStepDefinition } from '../plan-library/index.js'
-import { workflowRuntime } from '../workflow/run-workflow.js'
-import { memoryKernel } from '../memory-kernel/index.js'
+import { cliBridge as defaultCliBridge, type CLIResult, type CLIBridge } from '../cli-bridge/index.js'
+import { agentAdapterRegistry as defaultAgentAdapterRegistry, type AgentCliAdapterBinding } from '../agent-adapter/index.js'
+import { a2aClient as defaultA2aClient, type A2ASendParams } from '../a2a-client/index.js'
+import { serviceRegistry as defaultServiceRegistry } from '../service-registry/index.js'
+import { planLibrary as defaultPlanLibrary, type CompiledPlanDefinition, type PlanStepDefinition } from '../plan-library/index.js'
+import { workflowRuntime as defaultWorkflowRuntime } from '../workflow/run-workflow.js'
+import { memoryKernel as defaultMemoryKernel } from '../memory-kernel/index.js'
 
 interface ServiceRegistryInstance {
   call(serviceName: string, params: Record<string, unknown>): Promise<unknown>
@@ -29,22 +29,8 @@ interface MemoryKernelInstance {
   }): void
 }
 
-interface AgentAdapterRegistryInstance {
-  listEnabledTargets(): string[]
-  buildDispatchTemplate(): Record<string, unknown>
-  get(target: string): { adapter_binding?: AgentCliAdapterBinding } | null
-}
-
-interface A2AClientInstance {
-  sendTask(opts: {
-    target: string
-    task: string
-    payload: Record<string, unknown>
-    execution_mode: string
-    binding?: AgentCliAdapterBinding
-    dry_run: boolean
-  }): Promise<unknown>
-}
+type AgentAdapterRegistryInstance = Pick<import('../agent-adapter/index.js').AgentAdapterRegistry, 'listEnabledTargets' | 'buildDispatchTemplate' | 'get'>
+type A2AClientInstance = Pick<import('../a2a-client/index.js').A2AClient, 'sendTask'>
 
 export type ExecutorKind = 'cli' | 'service' | 'workflow' | 'agent' | 'plan'
 
@@ -89,13 +75,13 @@ class ExecutorGatewayService {
   private registry = new Map<string, RegisteredExecutor>()
 
   constructor(
-    private readonly cliBridge: CLIBridge = cliBridge,
-    private readonly agentAdapterRegistry: AgentAdapterRegistryInstance = agentAdapterRegistry,
-    private readonly a2aClient: A2AClientInstance = a2aClient,
-    private readonly serviceRegistry: ServiceRegistryInstance = serviceRegistry,
-    private readonly planLibrary: PlanLibraryInstance = planLibrary,
-    private readonly workflowRuntime: WorkflowRuntimeInstance = workflowRuntime,
-    private readonly memoryKernel: MemoryKernelInstance = memoryKernel,
+    private readonly cliBridge: CLIBridge = defaultCliBridge,
+    private readonly agentAdapterRegistry: AgentAdapterRegistryInstance = defaultAgentAdapterRegistry,
+    private readonly a2aClient: A2AClientInstance = defaultA2aClient,
+    private readonly serviceRegistry: ServiceRegistryInstance = defaultServiceRegistry,
+    private readonly planLibrary: PlanLibraryInstance = defaultPlanLibrary,
+    private readonly workflowRuntime: WorkflowRuntimeInstance = defaultWorkflowRuntime,
+    private readonly memoryKernel: MemoryKernelInstance = defaultMemoryKernel,
   ) {}
 
   initialize(): void {

@@ -1,7 +1,7 @@
-import { eventBus } from '../event-bus/index.js'
-import { cliBridge } from '../cli-bridge/index.js'
+import { eventBus as defaultEventBus } from '../event-bus/index.js'
+import { cliBridge as defaultCliBridge } from '../cli-bridge/index.js'
 import { getDb as defaultGetDb } from '../../db/index.js'
-import { stateMachine } from '../state-machine/index.js'
+import { stateMachine as defaultStateMachine } from '../state-machine/index.js'
 
 export interface ServiceSchema {
   description: string
@@ -40,10 +40,10 @@ class ServiceRegistry {
   private services = new Map<string, { handler: ServiceHandler; schema?: ServiceSchema }>()
 
   constructor(
-    private readonly eventBus: EventBusInstance = eventBus,
+    private readonly eventBus: EventBusInstance = defaultEventBus,
     private readonly getDb: GetDbFn = defaultGetDb,
-    private readonly cliBridge: CliBridgeInstance = cliBridge,
-    private readonly stateMachine: StateMachineInstance = stateMachine,
+    private readonly cliBridge: CliBridgeInstance = defaultCliBridge,
+    private readonly stateMachine: StateMachineInstance = defaultStateMachine,
   ) {}
 
   register(name: string, handler: ServiceHandler, schema?: ServiceSchema): void {

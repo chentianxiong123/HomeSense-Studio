@@ -1,6 +1,6 @@
 import { getDb as defaultGetDb } from '../../db/index.js'
-import { serviceRegistry } from '../service-registry/index.js'
-import { eventBus } from '../event-bus/index.js'
+import { serviceRegistry as defaultServiceRegistry } from '../service-registry/index.js'
+import { eventBus as defaultEventBus } from '../event-bus/index.js'
 
 type GetDbFn = () => ReturnType<typeof defaultGetDb>
 
@@ -40,8 +40,8 @@ class RuleEngine {
 
   constructor(
     private readonly getDb: GetDbFn = defaultGetDb,
-    private readonly eventBus: EventBusInstance = eventBus,
-    private readonly serviceRegistry: ServiceRegistryInstance = serviceRegistry,
+    private readonly eventBus: EventBusInstance = defaultEventBus,
+    private readonly serviceRegistry: ServiceRegistryInstance = defaultServiceRegistry,
   ) {}
 
   loadFromDb(): void {

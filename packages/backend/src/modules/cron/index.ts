@@ -1,5 +1,5 @@
 import { getDb as defaultGetDb } from '../../db/index.js'
-import { eventBus } from '../event-bus/index.js'
+import { eventBus as defaultEventBus } from '../event-bus/index.js'
 
 type GetDbFn = () => ReturnType<typeof defaultGetDb>
 
@@ -21,7 +21,7 @@ class CronService {
 
   constructor(
     private readonly getDb: GetDbFn = defaultGetDb,
-    private readonly eventBus: EventBusInstance = eventBus,
+    private readonly eventBus: EventBusInstance = defaultEventBus,
   ) {}
 
   addSchedule(cron: string, callback: () => Promise<void>): string {

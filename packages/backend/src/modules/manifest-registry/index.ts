@@ -1,7 +1,7 @@
-import { agentAdapterRegistry } from '../agent-adapter/index.js'
-import { cliBridge, type CLIBridge } from '../cli-bridge/index.js'
-import { serviceRegistry } from '../service-registry/index.js'
-import { channelRegistry } from '../channels/index.js'
+import { agentAdapterRegistry as defaultAgentAdapterRegistry } from '../agent-adapter/index.js'
+import { cliBridge as defaultCliBridge, type CLIBridge } from '../cli-bridge/index.js'
+import { serviceRegistry as defaultServiceRegistry } from '../service-registry/index.js'
+import { channelRegistry as defaultChannelRegistry } from '../channels/index.js'
 
 export type ExecutorKind = 'cli' | 'agent' | 'a2a' | 'service' | 'channel'
 
@@ -64,10 +64,10 @@ function normalizeParamsSchema(
 
 export class ManifestRegistryService {
   constructor(
-    private readonly cliBridge: CLIBridge = cliBridge,
-    private readonly agentAdapterRegistry: AgentAdapterRegistryInstance = agentAdapterRegistry,
-    private readonly serviceRegistry: ServiceRegistryInstance = serviceRegistry,
-    private readonly channelRegistry: ChannelRegistryInstance = channelRegistry,
+    private readonly cliBridge: CLIBridge = defaultCliBridge,
+    private readonly agentAdapterRegistry: AgentAdapterRegistryInstance = defaultAgentAdapterRegistry,
+    private readonly serviceRegistry: ServiceRegistryInstance = defaultServiceRegistry,
+    private readonly channelRegistry: ChannelRegistryInstance = defaultChannelRegistry,
   ) {}
 
   list(): UnifiedExecutorManifest[] {

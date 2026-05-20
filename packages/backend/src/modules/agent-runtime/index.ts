@@ -1,10 +1,10 @@
 import { getDb } from '../../db/index.js'
-import { cliBridge, type CLIBridge } from '../cli-bridge/index.js'
-import { executorGateway } from '../executor-gateway/index.js'
+import { cliBridge as defaultCliBridge, type CLIBridge } from '../cli-bridge/index.js'
+import { executorGateway as defaultExecutorGateway } from '../executor-gateway/index.js'
 import { intentRouter as defaultIntentRouter, type RoutedCandidatePlan, type RoutedObservation } from '../intent-router/index.js'
 import { llmService, type LLMChatResult, type ModelSlotName } from '../llm-provider/service.js'
-import { approvalRegistry, isHighRiskCliCall, type ApprovalRecord } from '../approval/index.js'
-import { memoryKernel } from '../memory-kernel/index.js'
+import { approvalRegistry as defaultApprovalRegistry, isHighRiskCliCall, type ApprovalRecord } from '../approval/index.js'
+import { memoryKernel as defaultMemoryKernel } from '../memory-kernel/index.js'
 import type { AgentEvent, AgentStreamContext, MemoryHit } from './events.js'
 import type { HistoryItem } from '../conversation/index.js'
 
@@ -77,10 +77,10 @@ export interface AgentResponse {
 class AgentRuntime {
   constructor(
     private readonly intentRouter = defaultIntentRouter,
-    private readonly cliBridge: CLIBridge = cliBridge,
-    private readonly executorGateway: ExecutorGatewayInstance = executorGateway,
-    private readonly approvalRegistry: ApprovalRegistryInstance = approvalRegistry,
-    private readonly memoryKernel: MemoryKernelInstance = memoryKernel,
+    private readonly cliBridge: CLIBridge = defaultCliBridge,
+    private readonly executorGateway: ExecutorGatewayInstance = defaultExecutorGateway,
+    private readonly approvalRegistry: ApprovalRegistryInstance = defaultApprovalRegistry,
+    private readonly memoryKernel: MemoryKernelInstance = defaultMemoryKernel,
   ) {}
 
   async *processMessageStream(

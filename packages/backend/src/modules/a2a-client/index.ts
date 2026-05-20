@@ -23,7 +23,7 @@ export interface A2ASendResult {
   accepted_at: string
 }
 
-class A2AClient {
+export class A2AClient {
   async sendTask(params: A2ASendParams): Promise<A2ASendResult> {
     const endpoint = this.resolveEndpoint(params.binding)
     const request = this.buildMessageSendRequest(params)

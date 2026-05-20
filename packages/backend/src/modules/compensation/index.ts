@@ -1,8 +1,8 @@
 import { getDb as defaultGetDb } from '../../db/index.js'
-import { eventBus } from '../event-bus/index.js'
-import { serviceRegistry } from '../service-registry/index.js'
-import { entityRegistry } from '../entity-registry/index.js'
-import { stateMachine } from '../state-machine/index.js'
+import { eventBus as defaultEventBus } from '../event-bus/index.js'
+import { serviceRegistry as defaultServiceRegistry } from '../service-registry/index.js'
+import { entityRegistry as defaultEntityRegistry } from '../entity-registry/index.js'
+import { stateMachine as defaultStateMachine } from '../state-machine/index.js'
 
 type GetDbFn = () => ReturnType<typeof defaultGetDb>
 
@@ -50,10 +50,10 @@ export interface PreviewResult {
 export class CompensationService {
   constructor(
     private readonly getDb: GetDbFn = defaultGetDb,
-    private readonly eventBus: EventBusInstance = eventBus,
-    private readonly serviceRegistry: ServiceRegistryInstance = serviceRegistry,
-    private readonly entityRegistry: EntityRegistryInstance = entityRegistry,
-    private readonly stateMachine: StateMachineInstance = stateMachine,
+    private readonly eventBus: EventBusInstance = defaultEventBus,
+    private readonly serviceRegistry: ServiceRegistryInstance = defaultServiceRegistry,
+    private readonly entityRegistry: EntityRegistryInstance = defaultEntityRegistry,
+    private readonly stateMachine: StateMachineInstance = defaultStateMachine,
   ) {}
 
   createTask(

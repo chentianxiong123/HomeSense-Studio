@@ -1,5 +1,5 @@
-import { ruleEngine } from '../rule-engine/index.js'
-import { skillsService } from '../skills-system/index.js'
+import { ruleEngine as defaultRuleEngine } from '../rule-engine/index.js'
+import { skillsService as defaultSkillsService } from '../skills-system/index.js'
 
 interface RuleEngineInstance {
   addRule(rule: {
@@ -105,8 +105,8 @@ const ERROR_PATTERNS: Array<{
 
 export class SelfEnhancementService {
   constructor(
-    private readonly ruleEngine: RuleEngineInstance = ruleEngine,
-    private readonly skillsService: SkillsServiceInstance = skillsService,
+    private readonly ruleEngine: RuleEngineInstance = defaultRuleEngine,
+    private readonly skillsService: SkillsServiceInstance = defaultSkillsService,
   ) {}
 
   reflect(failure: TaskFailure): ReflectionResult {

@@ -50,7 +50,7 @@ export interface AgentAdapterRuntimeStatus {
   agent_name?: string
 }
 
-class AgentAdapterRegistry {
+export class AgentAdapterRegistry {
   private adapters = new Map<string, AgentAdapterDescriptor>()
 
   initialize(): void {
