@@ -5,12 +5,18 @@ import { intentRouter as defaultIntentRouter, type RoutedCandidatePlan, type Rou
 import { llmService, type LLMChatResult, type ModelSlotName } from '../llm-provider/service.js'
 import { approvalRegistry as defaultApprovalRegistry, isHighRiskCliCall, type ApprovalRecord } from '../approval/index.js'
 import { memoryKernel as defaultMemoryKernel } from '../memory-kernel/index.js'
+import { selfEnhancementService as defaultSelfEnhancement } from '../self-enhancement/index.js'
+import type { TaskFailure } from '../self-enhancement/index.js'
 import type { AgentEvent, AgentStreamContext, MemoryHit } from './events.js'
 import type { HistoryItem } from '../conversation/index.js'
 
 interface ApprovalRegistryInstance {
   create(turnId: string, reason: string, payload: unknown): ApprovalRecord
   wait(id: string, timeoutMs: number): Promise<'approved' | 'denied' | 'timeout'>
+}
+
+interface SelfEnhancementInstance {
+  processFailureAndEnhance(failure: TaskFailure): void
 }
 
 interface MemoryKernelInstance {
@@ -81,6 +87,7 @@ class AgentRuntime {
     private readonly executorGateway: ExecutorGatewayInstance = defaultExecutorGateway,
     private readonly approvalRegistry: ApprovalRegistryInstance = defaultApprovalRegistry,
     private readonly memoryKernel: MemoryKernelInstance = defaultMemoryKernel,
+    private readonly selfEnhancement: SelfEnhancementInstance = defaultSelfEnhancement,
   ) {}
 
   async *processMessageStream(
@@ -174,6 +181,16 @@ class AgentRuntime {
           }
         }
         const failedStep = planResult.results.find((result) => result.status === 'error')
+        if (failedStep) {
+          this.selfEnhancement.processFailureAndEnhance({
+            task_type: 'compiled_plan',
+            input: message,
+            expected: 'all steps succeed',
+            actual: `step ${failedStep.order}: ${failedStep.tool}.${failedStep.action}`,
+            error: failedStep.error ?? 'unknown plan step error',
+            trace: planResult.results.map((r) => ({ step: `step ${r.order}:${r.tool}.${r.action}`, result: r.status, duration_ms: 0 })),
+          })
+        }
         const successCount = planResult.results.filter((result) => result.status === 'success').length
         const finalStep = planResult.results[planResult.results.length - 1]
         const launchedPackage = this.extractLaunchedPackage(finalStep?.result)
@@ -212,7 +229,17 @@ class AgentRuntime {
             error: result.status === 'error' ? (result.message ?? result.error) : undefined,
             duration_ms: Date.now() - stepStart,
           }
-          if (result.status === 'error') break
+          if (result.status === 'error') {
+            this.selfEnhancement.processFailureAndEnhance({
+              task_type: 'rule_action',
+              input: message,
+              expected: 'all rule actions succeed',
+              actual: `action ${action.tool}.${action.action}`,
+              error: result.message ?? result.error ?? 'unknown rule action error',
+              trace: [{ step: `action:${action.tool}.${action.action}`, result: 'error', duration_ms: Date.now() - stepStart }],
+            })
+            break
+          }
         }
         yield {
           type: 'assistant.final',
@@ -430,6 +457,19 @@ class AgentRuntime {
             })
           } catch {}
 
+          if (cliResult.status === 'error') {
+            try {
+              this.selfEnhancement.processFailureAndEnhance({
+                task_type: 'cli_call',
+                input: `${normalizedIntent}: ${parsedArgs.action ?? ''}`,
+                expected: 'mi-cli call succeeds',
+                actual: cliResult.error ?? 'error',
+                error: cliResult.error ?? 'unknown cli error',
+                trace: [{ step: `mi-cli.${parsedArgs.action}`, result: 'error', duration_ms: Date.now() - stepStart }],
+              })
+            } catch {}
+          }
+
           messages.push({
             role: 'tool',
             tool_call_id: callId,
@@ -584,6 +624,19 @@ class AgentRuntime {
           const cliResult = await this.cliBridge.run('mi-cli', parsedArgs.action ?? '', parsedArgs.params ?? {})
           yield { type: 'tool.call.end', turn_id: turnId, call_id: callId, status: cliResult.status === 'success' ? 'success' : 'error', result: cliResult.status === 'success' ? cliResult.data : undefined, error: cliResult.status === 'error' ? cliResult.error : undefined, duration_ms: Date.now() - stepStart }
 
+          if (cliResult.status === 'error') {
+            try {
+              this.selfEnhancement.processFailureAndEnhance({
+                task_type: 'cli_call',
+                input: `${(parsedArgs as { action?: string }).action ?? ''}`,
+                expected: 'mi-cli call succeeds',
+                actual: cliResult.error ?? 'error',
+                error: cliResult.error ?? 'unknown cli error',
+                trace: [{ step: `mi-cli.${(parsedArgs as { action?: string }).action ?? ''}`, result: 'error', duration_ms: Date.now() - stepStart }],
+              })
+            } catch {}
+          }
+
           messages.push({ role: 'tool', tool_call_id: callId, name: toolCall.function.name, content: JSON.stringify(cliResult.status === 'success' ? cliResult.data : { error: cliResult.error }) } as typeof messages[0])
         }
       }
@@ -619,6 +672,18 @@ class AgentRuntime {
         const planResult = await this.executorGateway.runPlan(route.matched_plan.id)
         const successCount = planResult.results.filter((result) => result.status === 'success').length
         const failedStep = planResult.results.find((result) => result.status === 'error')
+        if (failedStep) {
+          try {
+            this.selfEnhancement.processFailureAndEnhance({
+              task_type: 'compiled_plan',
+              input: message,
+              expected: 'all steps succeed',
+              actual: `step ${failedStep.order}: ${failedStep.tool}.${failedStep.action}`,
+              error: failedStep.error ?? 'unknown plan step error',
+              trace: planResult.results.map((r) => ({ step: `step ${r.order}:${r.tool}.${r.action}`, result: r.status, duration_ms: 0 })),
+            })
+          } catch {}
+        }
         const finalStep = planResult.results[planResult.results.length - 1]
         const launchedPackage = this.extractLaunchedPackage(finalStep?.result)
 
@@ -654,6 +719,16 @@ class AgentRuntime {
             results.push({ success: true, data: result.data })
           } else {
             results.push({ success: false, error: result.message ?? result.error })
+            try {
+              this.selfEnhancement.processFailureAndEnhance({
+                task_type: 'rule_action',
+                input: message,
+                expected: `rule ${route.matched_rule!.rule_id} actions succeed`,
+                actual: `action ${action.tool}.${action.action} failed`,
+                error: result.message ?? result.error ?? 'unknown rule action error',
+                trace: [{ step: `action:${action.tool}.${action.action}`, result: 'error', duration_ms: 0 }],
+              })
+            } catch {}
             break
           }
         }
@@ -881,6 +956,16 @@ class AgentRuntime {
             actionResults.push({ success: true, data: cliResult.data })
           } else {
             actionResults.push({ success: false, error: cliResult.error })
+            try {
+              this.selfEnhancement.processFailureAndEnhance({
+                task_type: 'cli_call',
+                input: `${normalizedIntent}: ${args.action}`,
+                expected: 'mi-cli call succeeds',
+                actual: cliResult.error ?? 'error',
+                error: cliResult.error ?? 'unknown cli error',
+                trace: [{ step: `mi-cli.${args.action}`, result: 'error', duration_ms: 0 }],
+              })
+            } catch {}
           }
         }
 

@@ -3,9 +3,12 @@ import { eventBus as defaultEventBus } from '../event-bus/index.js'
 import { memoryKernel as defaultMemoryKernel } from '../memory-kernel/index.js'
 import { executeNode, type NodeResult, type WorkflowNode } from './execute-node.js'
 import { resolveNodeValue } from './node-base.js'
+import { selfEnhancementService as defaultSelfEnhancement } from '../self-enhancement/index.js'
 import type { WorkflowEdge, WorkflowResult, NodeTrace } from './types.js'
 import { VariablePool } from './variable-pool.js'
 import { GraphRuntimeState } from './runtime-state.js'
+
+import type { TaskFailure } from '../self-enhancement/index.js'
 
 type GetDbFn = () => ReturnType<typeof defaultGetDb>
 
@@ -18,6 +21,10 @@ interface MemoryKernelInstance {
   observeOutcome(params: { intent: string; tool: string; action: string; success: boolean; error?: string }): void
 }
 
+interface SelfEnhancementInstance {
+  processFailureAndEnhance(failure: TaskFailure): void
+}
+
 interface RunWorkflowOptions {
   parentState?: GraphRuntimeState
   triggeredBy?: 'manual' | 'cron' | 'chat'
@@ -28,6 +35,7 @@ class WorkflowRuntime {
     private readonly getDb: GetDbFn = defaultGetDb,
     private readonly eventBus: EventBusInstance = defaultEventBus,
     private readonly memoryKernel: MemoryKernelInstance = defaultMemoryKernel,
+    private readonly selfEnhancement: SelfEnhancementInstance = defaultSelfEnhancement,
   ) {}
 
   async runWorkflow(
@@ -164,6 +172,16 @@ class WorkflowRuntime {
                 success: result.status === 'succeeded',
                 error: result.error,
               })
+              if (result.status === 'failed') {
+                this.selfEnhancement.processFailureAndEnhance({
+                  task_type: 'workflow_executor_call',
+                  input: JSON.stringify({ executorName, params }),
+                  expected: 'executor call succeeds',
+                  actual: result.error ?? 'failed',
+                  error: result.error ?? 'unknown executor call error',
+                  trace: [{ step: `${tool}.${action}`, result: 'failed', duration_ms: result.duration_ms ?? 0 }],
+                })
+              }
             } catch {}
           }
         }
