@@ -20,7 +20,7 @@ def handle_ir_discover(command: dict) -> dict:
         controllers = []
         for ctrl in result.get("controllers", result.get("result", [])):
             controllers.append({
-                "controller_id": ctrl.get("controller_id", ctrl.get("id", "")),
+                "controller_id": ctrl.get("controller_id", ctrl.get("did", "")),
                 "name": ctrl.get("name", ""),
                 "type": ctrl.get("type", ""),
             })
@@ -40,7 +40,7 @@ def handle_ir_get_keys(command: dict) -> dict:
         return {"status": "error", "error": "INVALID_PARAMS", "message": "缺少 did 或 controller_id 参数"}
 
     try:
-        data = {"controller_id": controller_id or did}
+        data = {"did": controller_id or did}
         result = _request_api(auth_data, "/v2/irdevice/controller/keys", data)
         keys = []
         for key in result.get("keys", result.get("result", [])):
@@ -69,7 +69,7 @@ def handle_ir_press_key(command: dict) -> dict:
 
     try:
         data = {
-            "controller_id": controller_id or did,
+            "did": controller_id or did,
             "key_id": key_id,
         }
         result = _request_api(auth_data, "/v2/irdevice/controller/key/click", data)

@@ -1,4 +1,4 @@
-import { eventBus as defaultEventBus } from '../event-bus/index.js'
+import { eventBus as defaultEventBus, HeartEvent } from '../event-bus/index.js'
 import { cliBridge as defaultCliBridge } from '../cli-bridge/index.js'
 import { getDb as defaultGetDb } from '../../db/index.js'
 import { stateMachine as defaultStateMachine } from '../state-machine/index.js'
@@ -48,7 +48,7 @@ class ServiceRegistry {
 
   register(name: string, handler: ServiceHandler, schema?: ServiceSchema): void {
     this.services.set(name, { handler, schema })
-    this.eventBus.fire('service_registered', { name, schema })
+    this.eventBus.fire(HeartEvent.SERVICE_REGISTERED, { name, schema })
   }
 
   async call(name: string, params: Record<string, unknown>): Promise<unknown> {
@@ -70,7 +70,7 @@ class ServiceRegistry {
     }
 
     const result = await service.handler(params)
-    this.eventBus.fire('service_called', { name, params })
+    this.eventBus.fire(HeartEvent.SERVICE_CALLED, { name, params })
     return result
   }
 

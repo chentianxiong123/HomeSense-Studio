@@ -1,36 +1,42 @@
 CAPABILITY_REGISTRY = {
     "power": {
         "kind": "property",
+        "name_cn": "电源开关",
         "aliases": ["on", "switch-status", "power", "status"],
         "value_type": "boolean",
         "domains": ["switch"],
     },
     "toggle": {
         "kind": "action",
+        "name_cn": "翻转",
         "aliases": ["toggle"],
         "value_type": "none",
         "domains": ["switch"],
     },
     "brightness": {
         "kind": "property",
+        "name_cn": "亮度",
         "aliases": ["brightness"],
         "value_type": "integer",
         "domains": ["light"],
     },
     "color_temperature": {
         "kind": "property",
+        "name_cn": "色温",
         "aliases": ["color-temperature", "color_temperature", "colortemperature"],
         "value_type": "integer",
         "domains": ["light"],
     },
     "target_temperature": {
         "kind": "property",
+        "name_cn": "目标温度",
         "aliases": ["target-temperature", "target_temperature", "target-temp", "ac-target-temperature"],
         "value_type": "integer",
         "domains": ["climate"],
     },
     "mode": {
         "kind": "property",
+        "name_cn": "模式",
         "aliases": ["mode", "air-conditioner-mode", "ac-mode", "fan-mode"],
         "value_type": "string",
         "value_resolution": ["enum", "string"],
@@ -38,139 +44,141 @@ CAPABILITY_REGISTRY = {
     },
     "fan_speed": {
         "kind": "property",
+        "name_cn": "风速",
         "aliases": ["fan-level", "fan_level", "speed-level", "wind-speed", "fan_speed"],
         "value_type": "integer",
         "domains": ["fan"],
     },
     "cover_position": {
         "kind": "property",
+        "name_cn": "窗帘位置",
         "aliases": ["motor-control", "target-position", "target_position", "position"],
         "value_type": "integer",
         "domains": ["cover"],
     },
     "pm2_5": {
         "kind": "property",
+        "name_cn": "PM2.5",
         "aliases": ["pm2.5", "pm25", "pm-2-5", "pm2_5_density"],
         "value_type": "integer",
         "domains": ["sensor"],
     },
     "temperature": {
         "kind": "property",
+        "name_cn": "温度",
         "aliases": ["temperature", "indoor-temperature", "current-temperature"],
         "value_type": "float",
         "domains": ["sensor"],
     },
     "humidity": {
         "kind": "property",
+        "name_cn": "湿度",
         "aliases": ["humidity", "relative-humidity", "indoor-humidity"],
         "value_type": "float",
         "domains": ["sensor"],
     },
     "ir_keys": {
         "kind": "property",
+        "name_cn": "红外按键",
         "aliases": ["ir-keys", "ir_key"],
         "value_type": "string",
         "domains": ["remote"],
     },
-    "execute_directive": {
-        "kind": "action",
-        "aliases": ["execute-text-directive", "execute_directive", "play-text", "speak"],
-        "value_type": "string",
-        "domains": ["xiaoai"],
-    },
-    "volume": {
-        "kind": "property",
-        "aliases": ["volume"],
-        "value_type": "integer",
-        "domains": ["media_player"],
-    },
-    "play": {
-        "kind": "action",
-        "aliases": ["play"],
-        "value_type": "none",
-        "domains": ["media_player"],
-    },
-    "pause": {
-        "kind": "action",
-        "aliases": ["pause"],
-        "value_type": "none",
-        "domains": ["media_player"],
-    },
-    "next": {
-        "kind": "action",
-        "aliases": ["next", "next-track"],
-        "value_type": "none",
-        "domains": ["media_player"],
-    },
-    "previous": {
-        "kind": "action",
-        "aliases": ["previous", "previous-track"],
-        "value_type": "none",
-        "domains": ["media_player"],
-    },
     "play_music": {
         "kind": "action",
+        "name_cn": "播放音乐",
         "aliases": ["play-music"],
         "value_type": "string",
         "domains": ["media_player"],
     },
-    "play_radio": {
+    "execute_text": {
         "kind": "action",
-        "aliases": ["play-radio"],
+        "name_cn": "执行文本命令",
+        "aliases": ["execute-text-directive", "execute_directive", "execute-text"],
+        "value_type": "string",
+        "domains": ["xiaoai"],
+    },
+    "play_text": {
+        "kind": "action",
+        "name_cn": "播放文本",
+        "aliases": ["play-text", "speak"],
         "value_type": "string",
         "domains": ["media_player"],
     },
     # 红外电视/投影仪/机顶盒通用动作 — 只归 remote domain，避免重复
     "turn_on": {
         "kind": "action",
+        "name_cn": "开机",
         "aliases": ["turn-on", "turn_on", "power-on", "power_on"],
         "value_type": "none",
         "domains": ["remote"],
     },
     "turn_off": {
         "kind": "action",
+        "name_cn": "关机",
         "aliases": ["turn-off", "turn_off", "power-off", "power_off"],
         "value_type": "none",
         "domains": ["remote"],
     },
     "volume_up": {
         "kind": "action",
-        "aliases": ["volume-up", "volume_up"],
+        "name_cn": "音量增加",
+        "aliases": ["volume-up", "volume_up", "音量加"],
         "value_type": "none",
-        "domains": ["remote"],
+        "domains": ["media_player", "remote"],
     },
     "volume_down": {
         "kind": "action",
-        "aliases": ["volume-down", "volume_down"],
+        "name_cn": "音量减小",
+        "aliases": ["volume-down", "volume_down", "音量减"],
         "value_type": "none",
-        "domains": ["remote"],
+        "domains": ["media_player", "remote"],
+    },
+    "shutdown": {
+        "kind": "action",
+        "name_cn": "关机",
+        "aliases": ["shutdown", "power-off-speaker"],
+        "value_type": "none",
+        "domains": ["media_player"],
+    },
+    "pause": {
+        "kind": "action",
+        "name_cn": "暂停播放",
+        "aliases": ["pause", "pause-playback"],
+        "value_type": "none",
+        "domains": ["media_player"],
     },
     "channel_up": {
         "kind": "action",
+        "name_cn": "频道加",
         "aliases": ["channel-up", "channel_up"],
         "value_type": "none",
         "domains": ["remote"],
     },
     "channel_down": {
         "kind": "action",
+        "name_cn": "频道减",
         "aliases": ["channel-down", "channel_down"],
         "value_type": "none",
         "domains": ["remote"],
     },
     "mute_on": {
         "kind": "action",
+        "name_cn": "静音开启",
         "aliases": ["mute-on", "mute_on"],
         "value_type": "none",
         "domains": ["remote"],
     },
     "mute_off": {
         "kind": "action",
+        "name_cn": "静音关闭",
         "aliases": ["mute-off", "mute_off"],
         "value_type": "none",
         "domains": ["remote"],
     },
     "input_source": {
         "kind": "action",
+        "name_cn": "切换输入源",
         "aliases": ["input-source-switch", "input_source_switch", "input-source", "input_source"],
         "value_type": "string",
         "domains": ["remote"],
@@ -178,18 +186,21 @@ CAPABILITY_REGISTRY = {
     # 路由器传感器
     "download_speed": {
         "kind": "property",
+        "name_cn": "下载速度",
         "aliases": ["download-speed", "download_speed"],
         "value_type": "float",
         "domains": ["sensor"],
     },
     "upload_speed": {
         "kind": "property",
+        "name_cn": "上传速度",
         "aliases": ["upload-speed", "upload_speed"],
         "value_type": "float",
         "domains": ["sensor"],
     },
     "connected_devices": {
         "kind": "property",
+        "name_cn": "已连接设备数",
         "aliases": ["connected-device-number", "connected_device_number"],
         "value_type": "integer",
         "domains": ["sensor"],
@@ -352,6 +363,60 @@ def build_discover_summary(devices: list) -> list:
             },
         })
     return summary
+
+
+def build_device_capabilities_list(device_info: dict) -> list:
+    """Build a pure Chinese structured capability list for a single device.
+
+    Returns a list of capabilities with Chinese names and kinds only —
+    no siid/piid/aiid exposed. Suitable for LLM-facing consumption.
+    """
+    cap_profile = device_info.get("capability_profile", {})
+    device_type = cap_profile.get("device_type", "")
+
+    # IR 设备（机顶盒/电视）：用统一"遥控按键"能力替代 MIoT 动作映射。
+    # 每个设备的真实按键码表不同，不能靠 MIoT spec 通用映射覆盖全部键。
+    if device_type in ("stb", "television"):
+        return [{"name": "遥控按键", "kind": "action", "type": "string"}]
+
+    controls = cap_profile.get("controls", {})
+    domains = cap_profile.get("domains", [])
+    capabilities = []
+    for cap_key in controls:
+        entry = CAPABILITY_REGISTRY.get(cap_key, {})
+        cap_info = controls[cap_key]
+        item = {
+            "name": entry.get("name_cn", cap_key),
+            "kind": cap_info.get("kind", entry.get("kind", "property")),
+        }
+        vtype = cap_info.get("type", entry.get("value_type"))
+        if vtype and vtype != "none":
+            item["type"] = vtype
+        if entry.get("value_resolution"):
+            item["value_resolution"] = entry["value_resolution"]
+        capabilities.append(item)
+
+    # Inject volume_up/volume_down/shutdown/pause for speaker-type devices only.
+    # Don't use `domains` here — it's polluted by multi-domain registry entries
+    # (e.g., volume_up belongs to both media_player and remote, so a remote-only
+    # STB ends up with media_player in its domain set).
+    device_type = cap_profile.get("device_type", "")
+    if device_type == "speaker":
+        injected_keys = {"volume_up", "volume_down", "shutdown", "pause"}
+        existing = {c["name"] for c in capabilities}
+        for key in injected_keys:
+            if CAPABILITY_REGISTRY[key].get("name_cn") not in existing:
+                entry = CAPABILITY_REGISTRY[key]
+                item = {
+                    "name": entry.get("name_cn", key),
+                    "kind": entry.get("kind", "action"),
+                }
+                vtype = entry.get("value_type")
+                if vtype and vtype != "none":
+                    item["type"] = vtype
+                capabilities.append(item)
+
+    return capabilities
 
 
 def generate_entities(device: dict, capability_profile: dict) -> list:

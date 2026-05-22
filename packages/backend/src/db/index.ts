@@ -44,42 +44,6 @@ export function createInMemoryDb(): Database.Database {
 
 function createTables(db: Database.Database) {
   const tables = [
-    `CREATE TABLE IF NOT EXISTS devices (
-      did TEXT NOT NULL, model TEXT NOT NULL, name TEXT NOT NULL,
-      manufacturer TEXT NOT NULL DEFAULT '', connection_type TEXT NOT NULL CHECK (connection_type IN ('wifi','bt','ir','gateway')),
-      parent_id TEXT NULL REFERENCES devices(did) ON DELETE CASCADE,
-      home_id TEXT NOT NULL DEFAULT '', home_name TEXT NOT NULL DEFAULT '', room_name TEXT NOT NULL DEFAULT '',
-      capability_profile_json TEXT NOT NULL DEFAULT '{}',
-      spec_json TEXT NOT NULL DEFAULT '{}', last_seen TEXT NOT NULL DEFAULT (datetime('now')),
-      created_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (did)
-    )`,
-    `CREATE TABLE IF NOT EXISTS device_features (
-      id INTEGER NOT NULL, device_did TEXT NOT NULL REFERENCES devices(did) ON DELETE CASCADE,
-      siid INTEGER NOT NULL, piid INTEGER NULL, aiid INTEGER NULL,
-      type TEXT NOT NULL CHECK (type IN ('property','action')), name TEXT NOT NULL,
-      rw TEXT NOT NULL DEFAULT 'read' CHECK (rw IN ('read','write','read_write')),
-      value_range_json TEXT NOT NULL DEFAULT '{}', value_list_json TEXT NOT NULL DEFAULT '[]', unit TEXT NOT NULL DEFAULT '',
-      PRIMARY KEY (id AUTOINCREMENT)
-    )`,
-    `CREATE TABLE IF NOT EXISTS entities (
-      entity_id TEXT NOT NULL, device_did TEXT NOT NULL REFERENCES devices(did) ON DELETE CASCADE,
-      domain TEXT NOT NULL CHECK (domain IN ('switch','sensor','select','remote','xiaoai','climate','light','fan','cover')),
-      capability TEXT NOT NULL CHECK (capability IN ('power','toggle','brightness','color_temperature','target_temperature','mode','fan_speed','cover_position','pm2_5','temperature','humidity','ir_keys','execute_directive')),
-      feature_id INTEGER NULL REFERENCES device_features(id) ON DELETE SET NULL,
-      name TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
-      PRIMARY KEY (entity_id)
-    )`,
-    `CREATE TABLE IF NOT EXISTS entity_states (
-      entity_id TEXT NOT NULL REFERENCES entities(entity_id) ON DELETE CASCADE,
-      state TEXT NOT NULL DEFAULT 'unknown', attributes_json TEXT NOT NULL DEFAULT '{}',
-      last_updated TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (entity_id)
-    )`,
-    `CREATE TABLE IF NOT EXISTS state_history (
-      id INTEGER NOT NULL, entity_id TEXT NOT NULL REFERENCES entities(entity_id) ON DELETE CASCADE,
-      old_state TEXT NULL, new_state TEXT NOT NULL, old_attributes_json TEXT NULL,
-      new_attributes_json TEXT NOT NULL DEFAULT '{}', changed_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (id AUTOINCREMENT)
-    )`,
     `CREATE TABLE IF NOT EXISTS workflows (
       id INTEGER NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
       graph_json TEXT NOT NULL DEFAULT '{}',
@@ -199,6 +163,20 @@ function createTables(db: Database.Database) {
       key TEXT NOT NULL, value_json TEXT NOT NULL DEFAULT 'null',
       updated_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (key)
     )`,
+    `CREATE TABLE IF NOT EXISTS rooms (
+      id INTEGER NOT NULL, name TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (id AUTOINCREMENT)
+    )`,
+    `CREATE TABLE IF NOT EXISTS user_devices (
+      id INTEGER NOT NULL, name TEXT NOT NULL,
+      device_type TEXT NOT NULL CHECK (device_type IN ('television','stb','speaker','router','outlet','phone','computer','other')) DEFAULT 'other',
+      room_id INTEGER NULL REFERENCES rooms(id) ON DELETE SET NULL,
+      mi_did TEXT NULL,
+      adb_ip TEXT NOT NULL DEFAULT '', ip_address TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (id AUTOINCREMENT)
+    )`,
     `CREATE TABLE IF NOT EXISTS compensation_tasks (
       id INTEGER NOT NULL, type TEXT NOT NULL, params_json TEXT NOT NULL DEFAULT '{}',
       retry_count INTEGER NOT NULL DEFAULT 0, max_retries INTEGER NOT NULL DEFAULT 3,
@@ -279,12 +257,6 @@ function createTables(db: Database.Database) {
 }
 
 function runMigrations(db: Database.Database) {
-  ensureColumns(db, 'devices', [
-    { name: 'home_id', sql: "ALTER TABLE devices ADD COLUMN home_id TEXT NOT NULL DEFAULT ''" },
-    { name: 'home_name', sql: "ALTER TABLE devices ADD COLUMN home_name TEXT NOT NULL DEFAULT ''" },
-    { name: 'room_name', sql: "ALTER TABLE devices ADD COLUMN room_name TEXT NOT NULL DEFAULT ''" },
-    { name: 'capability_profile_json', sql: "ALTER TABLE devices ADD COLUMN capability_profile_json TEXT NOT NULL DEFAULT '{}'" },
-  ])
   ensureColumns(db, 'memory_entities', [
     { name: 'wing', sql: "ALTER TABLE memory_entities ADD COLUMN wing TEXT NOT NULL DEFAULT ''" },
     { name: 'room', sql: "ALTER TABLE memory_entities ADD COLUMN room TEXT NOT NULL DEFAULT ''" },
@@ -292,9 +264,10 @@ function runMigrations(db: Database.Database) {
   ensureColumns(db, 'conversation_messages', [
     { name: 'tool_call_id', sql: "ALTER TABLE conversation_messages ADD COLUMN tool_call_id TEXT NULL" },
   ])
-  migrateEntitiesTable(db)
   migrateWorkflowNodesTable(db)
   migrateLlmSlotsCheckConstraint(db)
+  migrateDropDeprecatedTables(db)
+  migrateDeviceCapabilities(db)
 }
 
 function ensureColumns(
@@ -360,6 +333,42 @@ function migrateEntitiesTable(db: Database.Database) {
   } finally {
     db.exec('PRAGMA foreign_keys = ON')
   }
+}
+
+function migrateDropDeprecatedTables(db: Database.Database) {
+  // Drop deprecated mi-cli cache tables that were never populated
+  const deprecated = [
+    'state_history',
+    'entity_states',
+    'entities',
+    'device_features',
+    'devices',
+  ]
+  db.exec('PRAGMA foreign_keys = OFF')
+  try {
+    for (const table of deprecated) {
+      const row = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+      ).get(table) as { name: string } | undefined
+      if (row) {
+        db.exec(`DROP TABLE IF EXISTS ${table}`)
+      }
+    }
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON')
+  }
+}
+
+function migrateDeviceCapabilities(db: Database.Database) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS device_capabilities (
+      mi_did TEXT NOT NULL,
+      capabilities_json TEXT NOT NULL DEFAULT '[]',
+      ir_keys_json TEXT NOT NULL DEFAULT '[]',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (mi_did)
+    )
+  `)
 }
 
 function migrateWorkflowNodesTable(db: Database.Database) {
@@ -430,16 +439,7 @@ function migrateLlmSlotsCheckConstraint(db: Database.Database) {
 
 function createIndexes(db: Database.Database) {
   const indexes = [
-    'CREATE INDEX IF NOT EXISTS idx_devices_parent_id ON devices(parent_id)',
-    'CREATE INDEX IF NOT EXISTS idx_devices_connection_type ON devices(connection_type)',
-    'CREATE INDEX IF NOT EXISTS idx_device_features_device_did ON device_features(device_did)',
-    'CREATE UNIQUE INDEX IF NOT EXISTS idx_device_features_spec ON device_features(device_did, siid, COALESCE(piid, -1), COALESCE(aiid, -1))',
-    'CREATE INDEX IF NOT EXISTS idx_entities_device_did ON entities(device_did)',
-    'CREATE INDEX IF NOT EXISTS idx_entities_domain ON entities(domain)',
-    'CREATE INDEX IF NOT EXISTS idx_entities_feature_id ON entities(feature_id)',
-    'CREATE INDEX IF NOT EXISTS idx_state_history_entity_id ON state_history(entity_id)',
-    'CREATE INDEX IF NOT EXISTS idx_state_history_changed_at ON state_history(changed_at)',
-    'CREATE INDEX IF NOT EXISTS idx_state_history_entity_changed ON state_history(entity_id, changed_at)',
+    'CREATE INDEX IF NOT EXISTS idx_user_devices_mi_did ON user_devices(mi_did)',
     'CREATE INDEX IF NOT EXISTS idx_workflows_trigger_type ON workflows(trigger_type)',
     'CREATE INDEX IF NOT EXISTS idx_workflows_published ON workflows(published)',
     'CREATE INDEX IF NOT EXISTS idx_workflow_nodes_workflow_id ON workflow_nodes(workflow_id)',

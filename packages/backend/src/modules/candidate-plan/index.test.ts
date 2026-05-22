@@ -2,9 +2,11 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   applyCandidateKindStrategy,
+  applyObservationAdjustment,
   mergeDuplicateCandidates,
   mergeProviderRerankScores,
   type CandidatePlan,
+  type ObservationForAdjustment,
 } from './index.js'
 
 test('mergeProviderRerankScores reorders candidates by provider rerank scores', () => {
@@ -159,4 +161,157 @@ test('applyCandidateKindStrategy prefers workflow candidates for workflow-orient
   const ranked = applyCandidateKindStrategy('run the bilibili workflow', candidates)
 
   assert.equal(ranked[0]?.candidate_kind, 'workflow_candidate')
+})
+
+test('applyObservationAdjustment boosts confidence for successful past actions', () => {
+  const candidates: CandidatePlan[] = [
+    {
+      id: 'plan:lamp_on',
+      title: 'Turn on lamp',
+      source: 'plan_library',
+      candidate_kind: 'compiled_plan',
+      confidence: 0.8,
+      goal: 'Turn on the bedroom lamp',
+      entities: ['lamp'],
+      steps: [{ tool: 'mi-cli', action: 'set_prop', params: {} }],
+      assumptions: [],
+      risks: [],
+      evidence: [],
+    },
+  ]
+  const observations: ObservationForAdjustment[] = [
+    { success_count: 3, failure_count: 0, last_action: 'mi-cli.set_prop' },
+  ]
+
+  const adjusted = applyObservationAdjustment(candidates, observations)
+
+  assert.equal(adjusted.length, 1)
+  assert.ok(adjusted[0].confidence > 0.8)
+  // 3/3 success = success_rate 1.0 → delta = 0.05 * (1.0 - 0.5) * 2 = 0.05
+  assert.ok(Math.abs(adjusted[0].confidence - 0.85) < 0.001)
+})
+
+test('applyObservationAdjustment penalizes confidence for failed past actions', () => {
+  const candidates: CandidatePlan[] = [
+    {
+      id: 'plan:list_packages',
+      title: 'List packages',
+      source: 'plan_library',
+      candidate_kind: 'compiled_plan',
+      confidence: 0.8,
+      goal: 'List installed packages on TV',
+      entities: ['tv'],
+      steps: [{ tool: 'adb-cli', action: 'list_packages', params: {} }],
+      assumptions: [],
+      risks: [],
+      evidence: [],
+    },
+  ]
+  const observations: ObservationForAdjustment[] = [
+    { success_count: 0, failure_count: 3, last_action: 'adb-cli.list_packages' },
+  ]
+
+  const adjusted = applyObservationAdjustment(candidates, observations)
+
+  assert.equal(adjusted.length, 1)
+  // 0/3 success = success_rate 0 → delta = 0.05 * (0 - 0.5) * 2 = -0.05
+  assert.equal(adjusted[0].confidence, 0.75)
+})
+
+test('applyObservationAdjustment noise guard: fewer than 2 total runs does nothing', () => {
+  const candidates: CandidatePlan[] = [
+    {
+      id: 'plan:test',
+      title: 'Test action',
+      source: 'plan_library',
+      candidate_kind: 'compiled_plan',
+      confidence: 0.7,
+      goal: 'Test',
+      entities: [],
+      steps: [{ tool: 'mi-cli', action: 'set_prop', params: {} }],
+      assumptions: [],
+      risks: [],
+      evidence: [],
+    },
+  ]
+  const observations: ObservationForAdjustment[] = [
+    { success_count: 1, failure_count: 0, last_action: 'mi-cli.set_prop' },
+  ]
+
+  const adjusted = applyObservationAdjustment(candidates, observations)
+
+  assert.equal(adjusted[0].confidence, 0.7)
+})
+
+test('applyObservationAdjustment accumulation: multiple steps with offsetting deltas', () => {
+  const candidates: CandidatePlan[] = [
+    {
+      id: 'plan:watch_bilibili',
+      title: 'Watch bilibili',
+      source: 'plan_library',
+      candidate_kind: 'compiled_plan',
+      confidence: 0.8,
+      goal: 'Watch bilibili on TV',
+      entities: ['bilibili'],
+      steps: [
+        { tool: 'mi-cli', action: 'scene_execute', params: {} },
+        { tool: 'adb-cli', action: 'launch_app', params: {} },
+      ],
+      assumptions: [],
+      risks: [],
+      evidence: [],
+    },
+  ]
+  // mi-cli.scene_execute: 3/3 success → +0.05
+  // adb-cli.launch_app: 0/3 success → -0.05
+  // total delta = 0 → confidence unchanged
+  const observations: ObservationForAdjustment[] = [
+    { success_count: 3, failure_count: 0, last_action: 'mi-cli.scene_execute' },
+    { success_count: 0, failure_count: 3, last_action: 'adb-cli.launch_app' },
+  ]
+
+  const adjusted = applyObservationAdjustment(candidates, observations)
+
+  assert.equal(adjusted[0].confidence, 0.8)
+})
+
+test('applyObservationAdjustment clamps confidence within [0, 0.99]', () => {
+  const candidates: CandidatePlan[] = [
+    {
+      id: 'plan:maxed',
+      title: 'Max confidence',
+      source: 'plan_library',
+      candidate_kind: 'compiled_plan',
+      confidence: 0.98,
+      goal: 'Test clamping upper bound',
+      entities: [],
+      steps: [{ tool: 'tool', action: 'always_works', params: {} }],
+      assumptions: [],
+      risks: [],
+      evidence: [],
+    },
+    {
+      id: 'plan:minned',
+      title: 'Min confidence',
+      source: 'plan_library',
+      candidate_kind: 'compiled_plan',
+      confidence: 0.02,
+      goal: 'Test clamping lower bound',
+      entities: [],
+      steps: [{ tool: 'tool', action: 'always_fails', params: {} }],
+      assumptions: [],
+      risks: [],
+      evidence: [],
+    },
+  ]
+  const observations: ObservationForAdjustment[] = [
+    { success_count: 10, failure_count: 0, last_action: 'tool.always_works' },
+    { success_count: 0, failure_count: 10, last_action: 'tool.always_fails' },
+  ]
+
+  const adjusted = applyObservationAdjustment(candidates, observations)
+
+  assert.equal(adjusted.length, 2)
+  assert.equal(adjusted.find((p) => p.id === 'plan:maxed')!.confidence, 0.99)
+  assert.equal(adjusted.find((p) => p.id === 'plan:minned')!.confidence, 0)
 })

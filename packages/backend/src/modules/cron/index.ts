@@ -1,5 +1,5 @@
 import { getDb as defaultGetDb } from '../../db/index.js'
-import { eventBus as defaultEventBus } from '../event-bus/index.js'
+import { eventBus as defaultEventBus, HeartEvent } from '../event-bus/index.js'
 
 type GetDbFn = () => ReturnType<typeof defaultGetDb>
 
@@ -32,7 +32,7 @@ class CronService {
     const id = `cron_${++this.counter}_${Date.now()}`
     this.schedules.set(id, { id, cron, callback })
 
-    this.eventBus.fire('cron_schedule_added', { schedule_id: id, cron })
+    this.eventBus.fire(HeartEvent.CRON_SCHEDULE_ADDED, { schedule_id: id, cron })
     return id
   }
 
@@ -44,9 +44,9 @@ class CronService {
     const now = new Date()
     for (const [id, schedule] of this.schedules) {
       if (this.matchesCron(schedule.cron, now)) {
-        this.eventBus.fire('cron_fired', { schedule_id: id, cron: schedule.cron, fired_at: now.toISOString() })
+        this.eventBus.fire(HeartEvent.CRON_FIRED, { schedule_id: id, cron: schedule.cron, fired_at: now.toISOString() })
         schedule.callback().catch((err) => {
-          this.eventBus.fire('cron_failed', { schedule_id: id, error: (err as Error).message })
+          this.eventBus.fire(HeartEvent.CRON_FAILED, { schedule_id: id, error: (err as Error).message })
         })
       }
     }
@@ -81,7 +81,7 @@ class CronService {
         const wfId = wf.id as number
         if (cronExpr && this.isValidCron(cronExpr)) {
           this.addSchedule(cronExpr, async () => {
-            this.eventBus.fire('cron_workflow_triggered', { workflow_id: wfId })
+            this.eventBus.fire(HeartEvent.CRON_WORKFLOW_TRIGGERED, { workflow_id: wfId })
           })
         }
       }

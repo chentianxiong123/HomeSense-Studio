@@ -1,5 +1,5 @@
 import { getDb as defaultGetDb } from '../../db/index.js'
-import { eventBus as defaultEventBus } from '../event-bus/index.js'
+import { eventBus as defaultEventBus, HeartEvent } from '../event-bus/index.js'
 import { llmService as defaultLlmService } from '../llm-provider/service.js'
 import { skillsService as defaultSkillsService } from '../skills-system/index.js'
 import { SqlMemoryRepository, type MemoryRepository } from './repository.js'
@@ -258,7 +258,7 @@ export class MemoryKernelService {
       category: metadata.wing,
     })
 
-    this.eventBus.fire('memory_remembered', { entity_id: entityId, type: metadata.type, wing: metadata.wing })
+    this.eventBus.fire(HeartEvent.MEMORY_REMEMBERED, { entity_id: entityId, type: metadata.type, wing: metadata.wing })
   }
 
   recall(wing: string, room?: string): RecallResult[] {
@@ -319,7 +319,7 @@ export class MemoryKernelService {
       this.repo.upsertAttribute({ entityId, key: 'last_error', value: params.error.slice(0, 200) })
     }
 
-    this.eventBus.fire('memory_observation', {
+    this.eventBus.fire(HeartEvent.MEMORY_OBSERVATION, {
       entity_id: entityId,
       success: params.success,
       intent: params.intent,
@@ -792,7 +792,7 @@ export class MemoryKernelService {
       } catch {}
     }
 
-    this.eventBus.fire('compiled_knowledge_updated', {
+    this.eventBus.fire(HeartEvent.COMPILED_KNOWLEDGE_UPDATED, {
       kind: input.kind,
       source_type: input.source_type,
       source_ref: input.source_ref,

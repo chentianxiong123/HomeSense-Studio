@@ -1,5 +1,5 @@
 import { getDb as defaultGetDb } from '../../db/index.js'
-import { eventBus as defaultEventBus } from '../event-bus/index.js'
+import { eventBus as defaultEventBus, HeartEvent } from '../event-bus/index.js'
 import { serviceRegistry as defaultServiceRegistry } from '../service-registry/index.js'
 import { entityRegistry as defaultEntityRegistry } from '../entity-registry/index.js'
 import { stateMachine as defaultStateMachine } from '../state-machine/index.js'
@@ -82,7 +82,7 @@ export class CompensationService {
       created_at: now,
     }
 
-    this.eventBus.fire('compensation_task_created', { task_id: task.id, type })
+    this.eventBus.fire(HeartEvent.COMPENSATION_TASK_CREATED, { task_id: task.id, type })
     return task
   }
 
@@ -165,7 +165,7 @@ export class CompensationService {
       task.state = 'failed'
       task.error_message = `已达最大重试次数 ${task.max_retries}`
       this.persistState(task)
-      this.eventBus.fire('compensation_task_failed', { task_id: task.id, error: task.error_message })
+      this.eventBus.fire(HeartEvent.COMPENSATION_TASK_FAILED, { task_id: task.id, error: task.error_message })
       return false
     }
 
@@ -196,7 +196,7 @@ export class CompensationService {
         task.state = 'succeeded'
         task.error_message = ''
         this.persistState(task)
-        this.eventBus.fire('compensation_task_succeeded', { task_id: task.id })
+        this.eventBus.fire(HeartEvent.COMPENSATION_TASK_SUCCEEDED, { task_id: task.id })
         return true
       } else {
         throw new Error('执行失败')
@@ -206,7 +206,7 @@ export class CompensationService {
       task.state = 'pending'
       task.error_message = (err as Error).message
       this.persistState(task)
-      this.eventBus.fire('compensation_retry', { task_id: task.id, retry_count: task.retry_count })
+      this.eventBus.fire(HeartEvent.COMPENSATION_RETRY, { task_id: task.id, retry_count: task.retry_count })
       return false
     }
   }

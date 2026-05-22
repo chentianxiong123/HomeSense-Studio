@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { eventBus as defaultEventBus } from '../event-bus/index.js'
+import { eventBus as defaultEventBus, HeartEvent } from '../event-bus/index.js'
 import { SqlSkillsRepository, type SkillsRepository } from './repository.js'
 
 export interface SkillDefinition {
@@ -47,7 +47,7 @@ export class SkillsService {
 
     this.skills.set(skill.name, skill)
     this.repo.upsertSkill(skill)
-    this.eventBus.fire('skill_registered', { name: skill.name })
+    this.eventBus.fire(HeartEvent.SKILL_REGISTERED, { name: skill.name })
   }
 
   getSkill(name: string): SkillDefinition | undefined {

@@ -1,5 +1,5 @@
 import crypto from 'crypto'
-import { eventBus as defaultEventBus } from '../event-bus/index.js'
+import { eventBus as defaultEventBus, HeartEvent } from '../event-bus/index.js'
 import { skillsService as defaultSkillsService } from '../skills-system/index.js'
 import { SqlExperienceRepository, type ExperienceRepository } from './repository.js'
 import { FsExperienceFileStore, type ExperienceFileStore } from './file-store.js'
@@ -73,7 +73,7 @@ export class ExperienceService {
     const id = this.repo.insertExperience({ category, title, filePath, contentHash, importance })
     this.repo.insertFts({ title, content, category })
 
-    this.eventBus.fire('experience_written', { id, category, title, importance })
+    this.eventBus.fire(HeartEvent.EXPERIENCE_WRITTEN, { id, category, title, importance })
 
     if (importance >= 0.7) {
       this.convertExperienceToSkill(id, category, title, content)
@@ -106,7 +106,7 @@ export class ExperienceService {
       category: parsed.category || 'uncategorized',
     })
 
-    this.eventBus.fire('experience_indexed', { id, file_path: filePath })
+    this.eventBus.fire(HeartEvent.EXPERIENCE_INDEXED, { id, file_path: filePath })
   }
 
   indexAllExperiences(): number {
@@ -177,7 +177,7 @@ export class ExperienceService {
       this.files.updateFrontmatterConverted(filePath, true)
     }
 
-    this.eventBus.fire('experience_converted_to_skill', { experience_id: id, skill_name: skillName })
+    this.eventBus.fire(HeartEvent.EXPERIENCE_CONVERTED_TO_SKILL, { experience_id: id, skill_name: skillName })
   }
 
   private extractActionSchemas(content: string): Array<{ action: string; description: string; params_schema: Record<string, string> }> {

@@ -131,7 +131,7 @@ const ExecutorManifestSchema = z.object({
   actions: z.record(ExecutorActionManifestSchema),
 })
 
-const MI_CLI_SCHEMAS: Record<string, Record<string, z.ZodSchema>> = {
+const CLI_SCHEMAS: Record<string, Record<string, z.ZodSchema>> = {
   'mi-cli': {
     login_password: z.object({ username: z.string(), password: z.string() }),
     verify_ticket: z.object({ ticket: z.string(), username: z.string().optional(), password: z.string().optional() }),
@@ -172,14 +172,41 @@ const MI_CLI_SCHEMAS: Record<string, Record<string, z.ZodSchema>> = {
     speaker_status: z.object({ did: z.string().optional() }).optional(),
     ir_discover: z.object({ parent_did: z.string() }),
     ir_get_keys: z.union([z.object({ controller_id: z.string() }), z.object({ did: z.string() })]),
-    ir_pir_press_key: z.union([
+    ir_press_key: z.union([
       z.object({ controller_id: z.string(), key_id: z.string() }),
       z.object({ did: z.string(), key_id: z.string() }),
     ]),
     device_action: z.object({ did: z.string(), capability: z.string(), params: z.array(z.unknown()).optional() }),
     device_prop: z.object({ did: z.string(), capability: z.string(), value: z.unknown().optional() }),
+    device_capabilities: z.object({ did: z.string().optional(), name: z.string().optional() }),
+    device_ir_keys: z.object({ did: z.string() }),
+    device_ir_press: z.object({ did: z.string(), key_id: z.string() }),
     config_get: z.object({ key: z.string().optional() }).optional(),
     config_set: z.object({ key: z.string(), value: z.unknown() }),
+  },
+  'adb-cli': {
+    list_devices: z.void(),
+    connect: z.object({ device: z.string().optional(), dev: z.string().optional(), address: z.string().optional(), max_attempts: z.number().optional(), backoff_seconds: z.number().optional() }),
+    disconnect: z.object({ device: z.string().optional(), dev: z.string().optional(), address: z.string().optional() }),
+    screenshot: z.object({ device: z.string().optional(), dev: z.string().optional(), path: z.string().optional() }).optional(),
+    get_display_size: z.object({ device: z.string().optional(), dev: z.string().optional() }).optional(),
+    get_ui_elements: z.object({ device: z.string().optional(), dev: z.string().optional(), timeout: z.number().optional() }).optional(),
+    tap_element: z.object({ device: z.string().optional(), dev: z.string().optional(), index: z.number().optional(), text: z.string().optional() }),
+    tap: z.object({ device: z.string().optional(), dev: z.string().optional(), x: z.number(), y: z.number() }),
+    tap_ratio: z.object({ device: z.string().optional(), dev: z.string().optional(), x_ratio: z.number(), y_ratio: z.number() }),
+    swipe: z.object({ device: z.string().optional(), dev: z.string().optional(), start_x: z.number(), start_y: z.number(), end_x: z.number(), end_y: z.number(), duration: z.number().optional() }),
+    input_text: z.object({ device: z.string().optional(), dev: z.string().optional(), text: z.string() }),
+    press_key: z.object({ device: z.string().optional(), dev: z.string().optional(), key: z.string() }),
+    back: z.object({ device: z.string().optional(), dev: z.string().optional() }).optional(),
+    home: z.object({ device: z.string().optional(), dev: z.string().optional() }).optional(),
+    enter: z.object({ device: z.string().optional(), dev: z.string().optional() }).optional(),
+    launch_app: z.object({ device: z.string().optional(), dev: z.string().optional(), package: z.string(), package_name: z.string().optional() }),
+    get_current_app: z.object({ device: z.string().optional(), dev: z.string().optional() }).optional(),
+    list_packages: z.object({ device: z.string().optional(), dev: z.string().optional(), keyword: z.string().optional() }).optional(),
+    check_package: z.object({ device: z.string().optional(), dev: z.string().optional(), package: z.string() }),
+    find_element: z.object({ device: z.string().optional(), dev: z.string().optional(), text: z.string() }),
+    wait: z.object({ seconds: z.number().optional() }).optional(),
+    ensure_connected: z.object({ device: z.string(), dev: z.string().optional(), initial_wait_seconds: z.number().optional(), max_attempts: z.number().optional(), backoff_seconds: z.number().optional() }),
   },
 }
 
@@ -203,6 +230,7 @@ const ERROR_STRATEGIES: Record<string, CompensationAction> = {
 }
 
 const ARCHIVED_EXECUTOR_NAMES = new Set(['hami-cli'])
+const BUILT_IN_CLIS = new Set(['mi-cli', 'adb-cli'])
 
 function handleError(error: { cliName: string; action: string; code: string; message: string; timeout: boolean }): CompensationAction {
   if (error.timeout) {
@@ -219,23 +247,23 @@ function parseOutput(output: string): CLIResult {
   return { ...parsed.data, duration_ms: 0 }
 }
 
-function getBuiltInCLIPath(cliName: 'mi-cli'): string {
+function getBuiltInCLIPath(cliName: string): string {
   const moduleDir = path.dirname(fileURLToPath(import.meta.url))
   const packagesDir = path.resolve(moduleDir, '..', '..', '..', '..')
   return path.join(packagesDir, cliName)
 }
 
 function getCLIExePath(cliName: string): string | null {
-  if (cliName === 'mi-cli') {
-    const miCliPath = getBuiltInCLIPath('mi-cli')
-    return path.join(miCliPath, '.venv', 'Scripts', 'python.exe')
+  if (BUILT_IN_CLIS.has(cliName)) {
+    const cliPath = getBuiltInCLIPath(cliName)
+    return path.join(cliPath, '.venv', 'Scripts', 'python.exe')
   }
   return null
 }
 
 function getCLIWorkingDir(cliName: string): string | null {
-  if (cliName === 'mi-cli') {
-    return getBuiltInCLIPath('mi-cli')
+  if (BUILT_IN_CLIS.has(cliName)) {
+    return getBuiltInCLIPath(cliName)
   }
   return null
 }
@@ -332,13 +360,19 @@ export class CLIBridge {
     const start = Date.now()
     try {
       const thirdParty = this.thirdPartyExecutors.get(cliName)
-      if (thirdParty?.protocol === 'in_process_module') {
-        const result = await this.execInProcess(thirdParty, action, params)
+      const spawnSpec = this.buildSpawnSpec(cliName, action, params)
+      if (thirdParty?.actions[action]) {
+        if (thirdParty.protocol === 'in_process_module') {
+          const result = await this.execInProcess(thirdParty, action, params)
+          result.duration_ms = Date.now() - start
+          return result
+        }
+
+        const stdout = await this.execProcess(spawnSpec)
+        const result = parseOutput(stdout)
         result.duration_ms = Date.now() - start
         return result
       }
-
-      const spawnSpec = this.buildSpawnSpec(cliName, action, params)
       const stdout = await this.execProcess(spawnSpec)
       const result = parseOutput(stdout)
       result.duration_ms = Date.now() - start
@@ -458,7 +492,7 @@ export class CLIBridge {
       params_schema: Record<string, string>
     }>
   }> {
-    const builtins = Object.entries(MI_CLI_SCHEMAS).map(([name, actions]) => ({
+    const builtins = Object.entries(CLI_SCHEMAS).map(([name, actions]) => ({
       name,
       source: 'builtin' as const,
       protocol: 'process_json_arg' as const,
@@ -486,13 +520,13 @@ export class CLIBridge {
 
   hasExecutor(name: string): boolean {
     if (ARCHIVED_EXECUTOR_NAMES.has(name)) return false
-    if (MI_CLI_SCHEMAS[name]) return true
+    if (CLI_SCHEMAS[name]) return true
     return this.thirdPartyExecutors.has(name)
   }
 
   private getSchemas(cliName: string): Record<string, z.ZodSchema> | undefined {
     if (ARCHIVED_EXECUTOR_NAMES.has(cliName)) return undefined
-    if (MI_CLI_SCHEMAS[cliName]) return MI_CLI_SCHEMAS[cliName]
+    if (CLI_SCHEMAS[cliName]) return CLI_SCHEMAS[cliName]
     return this.thirdPartyExecutors.get(cliName)?.actions
   }
 
@@ -502,7 +536,7 @@ export class CLIBridge {
     params?: Record<string, unknown>,
   ): { exePath: string; args: string[]; cwd?: string; stdinPayload?: string; timeoutMs: number } {
     const thirdParty = this.thirdPartyExecutors.get(cliName)
-    if (thirdParty) {
+    if (thirdParty?.actions[action]) {
       const payload = JSON.stringify({ action, ...(params ?? {}) })
       if (thirdParty.protocol === 'process_stdin_json') {
         return {

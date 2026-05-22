@@ -46,12 +46,16 @@ class WorkflowNodeFactory {
   listRegisteredTypes(): string[] {
     return Array.from(this.registry.keys()).sort()
   }
+
+  getDeps(): WorkflowNodeDependencies {
+    return this.deps
+  }
 }
 
 function defaultDependencies(): WorkflowNodeDependencies {
   return {
     cliBridge,
-    executorGateway,
+    get executorGateway() { return executorGateway },
     llmService,
     memoryKernel,
     candidatePlanService,

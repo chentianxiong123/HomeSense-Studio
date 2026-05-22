@@ -11,7 +11,7 @@ from mi_cli.api.auth import (
     handle_prepare_login,
     handle_verify_ticket,
 )
-from mi_cli.api.device import handle_discover, handle_discover_ir, handle_get_prop, handle_set_prop, handle_run_action, handle_device_action, handle_device_prop, handle_device_info
+from mi_cli.api.device import handle_discover, handle_discover_ir, handle_get_prop, handle_set_prop, handle_run_action, handle_device_action, handle_device_prop, handle_device_info, handle_device_capabilities, handle_device_ir_keys, handle_device_ir_press
 from mi_cli.api.spec import handle_spec_parse
 from mi_cli.api.speaker import handle_speaker_execute, handle_speaker_play, handle_speaker_status, handle_speaker_list
 from mi_cli.api.ir import handle_ir_discover, handle_ir_get_keys, handle_ir_press_key
@@ -45,6 +45,9 @@ ACTION_MAP = {
     "device_action": handle_device_action,
     "device_prop": handle_device_prop,
     "device_info": handle_device_info,
+    "device_capabilities": handle_device_capabilities,
+    "device_ir_keys": handle_device_ir_keys,
+    "device_ir_press": handle_device_ir_press,
     "config_get": handle_config_get,
     "config_set": handle_config_set,
 }

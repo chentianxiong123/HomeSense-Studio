@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { cliBridge } from '../cli-bridge/index.js'
 import { serviceRegistry } from '../service-registry/index.js'
 import { memoryKernel } from '../memory-kernel/index.js'
-import { eventBus } from '../event-bus/index.js'
+import { eventBus, HeartEvent } from '../event-bus/index.js'
 
 interface SmokeStep {
   order: number
@@ -32,7 +32,7 @@ export async function devtestRoutes(app: FastifyInstance) {
     const started = Date.now()
     const steps: SmokeStep[] = []
 
-    eventBus.fire('devtest_smoke_started', { intent, started_at: new Date().toISOString() })
+    eventBus.fire(HeartEvent.DEVTEST_SMOKE_STARTED, { intent, started_at: new Date().toISOString() })
 
     for (const spec of SMOKE_SEQUENCE) {
       const stepStart = Date.now()
@@ -88,7 +88,7 @@ export async function devtestRoutes(app: FastifyInstance) {
     const overall: 'success' | 'partial' | 'failed' =
       totalError === 0 && totalSkipped === 0 ? 'success' : totalError > 0 ? 'failed' : 'partial'
 
-    eventBus.fire('devtest_smoke_completed', {
+    eventBus.fire(HeartEvent.DEVTEST_SMOKE_COMPLETED, {
       intent,
       duration_ms: Date.now() - started,
       overall,

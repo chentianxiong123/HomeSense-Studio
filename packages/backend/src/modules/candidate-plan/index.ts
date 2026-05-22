@@ -11,6 +11,12 @@ export interface CandidatePlanEvidence {
   note?: string
 }
 
+export interface ObservationForAdjustment {
+  success_count: number
+  failure_count: number
+  last_action?: string
+}
+
 export interface CandidatePlan {
   id: string
   title: string
@@ -144,9 +150,14 @@ class CandidatePlanService {
     completion?: ContextCompletionResult
     matchedPlan?: CompiledPlanDefinition
     searchHits?: SearchResult[]
+    observations?: ObservationForAdjustment[]
   }): Promise<CandidatePlan[]> {
     const candidates = await this.collectCandidates(params)
-    return this.rankCandidates(params.query, candidates)
+    const ranked = await this.rankCandidates(params.query, candidates)
+    if (params.observations && params.observations.length > 0) {
+      return applyObservationAdjustment(ranked, params.observations)
+    }
+    return ranked
   }
 
   private fromPlanLibrary(
@@ -358,6 +369,35 @@ export function applyCandidateKindStrategy(query: string, candidates: CandidateP
   })
 
   return boosted.sort((left, right) => right.confidence - left.confidence)
+}
+
+export function applyObservationAdjustment(
+  candidates: CandidatePlan[],
+  observations: ObservationForAdjustment[],
+): CandidatePlan[] {
+  if (candidates.length === 0 || observations.length === 0) return candidates
+  const obsByAction = new Map<string, { success_rate: number }>()
+  for (const obs of observations) {
+    if (!obs.last_action) continue
+    const total = obs.success_count + obs.failure_count
+    if (total < 2) continue
+    obsByAction.set(obs.last_action, { success_rate: obs.success_count / total })
+  }
+  if (obsByAction.size === 0) return candidates
+  const BASE_DELTA = 0.05
+  const adjusted = candidates.map((candidate) => {
+    let totalDelta = 0
+    for (const step of candidate.steps) {
+      const actionKey = `${step.tool}.${step.action}`
+      const match = obsByAction.get(actionKey)
+      if (!match) continue
+      const delta = BASE_DELTA * (match.success_rate - 0.5) * 2
+      totalDelta += delta
+    }
+    if (totalDelta === 0) return candidate
+    return { ...candidate, confidence: Math.max(0, Math.min(0.99, candidate.confidence + totalDelta)) }
+  })
+  return adjusted.sort((a, b) => b.confidence - a.confidence)
 }
 
 function uniqueEvidence(evidence: CandidatePlanEvidence[]): CandidatePlanEvidence[] {

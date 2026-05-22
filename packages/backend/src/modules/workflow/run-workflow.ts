@@ -1,5 +1,5 @@
 import { getDb as defaultGetDb } from '../../db/index.js'
-import { eventBus as defaultEventBus } from '../event-bus/index.js'
+import { eventBus as defaultEventBus, HeartEvent } from '../event-bus/index.js'
 import { memoryKernel as defaultMemoryKernel } from '../memory-kernel/index.js'
 import { executeNode, type NodeResult, type WorkflowNode } from './execute-node.js'
 import { resolveNodeValue } from './node-base.js'
@@ -112,7 +112,7 @@ class WorkflowRuntime {
 
         const batchResults = await Promise.all(
           runnableNodes.map(async (node) => {
-            this.eventBus.fire('workflow_node_started', { run_id: runId, node_id: node.id })
+            this.eventBus.fire(HeartEvent.WORKFLOW_NODE_STARTED, { run_id: runId, node_id: node.id })
             const result = await executeNode(node, runtimeState)
             return { node, result }
           }),
@@ -137,9 +137,9 @@ class WorkflowRuntime {
 
           if (result.status === 'failed') {
             failed = true
-            this.eventBus.fire('workflow_node_failed', { run_id: runId, node_id: node.id, error: result.error })
+            this.eventBus.fire(HeartEvent.WORKFLOW_NODE_FAILED, { run_id: runId, node_id: node.id, error: result.error })
           } else {
-            this.eventBus.fire('workflow_node_completed', { run_id: runId, node_id: node.id, outputs: result.outputs })
+            this.eventBus.fire(HeartEvent.WORKFLOW_NODE_COMPLETED, { run_id: runId, node_id: node.id, outputs: result.outputs })
           }
 
           if (node.type === 'executor_call') {
@@ -205,7 +205,7 @@ class WorkflowRuntime {
         `UPDATE workflow_runs SET status = ?, finished_at = datetime('now'), result_json = ? WHERE id = ?`,
       ).run(status, JSON.stringify(outputs), runId)
 
-      this.eventBus.fire(status === 'succeeded' ? 'workflow_completed' : 'workflow_failed', {
+      this.eventBus.fire(status === 'succeeded' ? HeartEvent.WORKFLOW_COMPLETED : HeartEvent.WORKFLOW_FAILED, {
         run_id: runId,
         workflow_id: workflowId,
       })

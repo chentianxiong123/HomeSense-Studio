@@ -146,6 +146,7 @@ class IntentRouterService {
       matchedPlan,
       completion,
       searchHits,
+      observations,
     })
 
     if (!matchedPlan && candidatePlans.length > 0) {
