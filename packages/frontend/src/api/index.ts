@@ -140,7 +140,7 @@ export interface LLMModelSlot {
 export interface UserDevice {
   id: number
   name: string
-  device_type: 'television' | 'stb' | 'speaker' | 'router' | 'outlet' | 'phone' | 'computer' | 'other'
+  device_type: 'television' | 'stb' | 'speaker' | 'router' | 'outlet' | 'phone' | 'tv_box' | 'tablet' | 'computer' | 'other'
   room_id: number | null
   room_name: string | null
   mi_did: string | null
@@ -164,6 +164,13 @@ export interface MiDeviceCandidate {
   device_type: string
   room_name: string
   home_name: string
+}
+
+export interface AdbConnection {
+  address: string
+  name: string
+  model: string
+  status: string
 }
 
 export const api = {
@@ -234,11 +241,18 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ key_id: keyId }),
       }),
+    listApps: (id: number, refresh?: boolean) =>
+      request<{ status: string; data?: { apps: Array<{ package: string; name: string }>; updated_at: string }; error?: string; message?: string }>(`/api/user-devices/${id}/apps${refresh ? '?refresh=true' : ''}`),
+    launchApp: (id: number, packageName: string) =>
+      request<{ status: string; data?: unknown; error?: string; message?: string }>(`/api/user-devices/${id}/apps/launch`, {
+        method: 'POST',
+        body: JSON.stringify({ package: packageName }),
+      }),
   },
   adbDevices: {
-    list: () => request<{ devices: unknown[]; duration_ms?: number }>('/api/devices/adb/list'),
-    connect: (address: string) =>
-      request<{ status: string; data?: unknown }>('/api/devices/adb/connect', { method: 'POST', body: JSON.stringify({ address }) }),
+    list: () => request<{ devices: AdbConnection[]; duration_ms?: number }>('/api/devices/adb/list'),
+    connect: (address: string, name?: string, model?: string) =>
+      request<{ status: string; data?: unknown }>('/api/devices/adb/connect', { method: 'POST', body: JSON.stringify({ address, name, model }) }),
     disconnect: (address: string) =>
       request<{ status: string; data?: unknown }>('/api/devices/adb/disconnect', { method: 'POST', body: JSON.stringify({ address }) }),
     info: (address: string) =>

@@ -426,8 +426,8 @@ h3 {
 }
 
 .close-btn {
-  background: rgba(0, 0, 0, 0.04);
-  border: none;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(229, 231, 235, 0.6);
   border-radius: 16px;
   width: 48px;
   height: 48px;
@@ -435,8 +435,9 @@ h3 {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: var(--text-tertiary);
+  color: var(--text-secondary, #64748b);
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
 .close-btn:hover {

@@ -1,17 +1,15 @@
 import { getDb as defaultGetDb } from '../../db/index.js'
+import { eventBus as defaultEventBus } from '../event-bus/index.js'
 import { serviceRegistry as defaultServiceRegistry } from '../service-registry/index.js'
-import { eventBus as defaultEventBus, HeartEvent } from '../event-bus/index.js'
-
-type GetDbFn = () => ReturnType<typeof defaultGetDb>
-
-interface EventBusInstance {
-  fire(event: string, data?: unknown): void
-  on(event: string, handler: (...args: unknown[]) => void): void
-}
+import type { EventBusInstance } from '../../composition.js'
 
 interface ServiceRegistryInstance {
   call(serviceName: string, params: Record<string, unknown>): Promise<unknown>
 }
+
+type GetDbFn = () => ReturnType<typeof defaultGetDb>
+
+export type { GetDbFn }
 
 export interface RuleAction {
   tool: string
@@ -93,14 +91,14 @@ class RuleEngine {
     }
 
     this.rules.set(ruleId, { ...rule, id: ruleId })
-    this.eventBus.fire(HeartEvent.RULE_ADDED, { rule_id: ruleId })
+    this.eventBus.fire('rule_added', { rule_id: ruleId })
   }
 
   removeRule(ruleId: number): void {
     const db = this.getDb()
     db.prepare('DELETE FROM rules WHERE id = ?').run(ruleId)
     this.rules.delete(ruleId)
-    this.eventBus.fire(HeartEvent.RULE_REMOVED, { rule_id: ruleId })
+    this.eventBus.fire('rule_removed', { rule_id: ruleId })
   }
 
   match(input: string): RuleMatch | null {
@@ -157,7 +155,7 @@ class RuleEngine {
     }
 
     if (bestMatch) {
-      this.eventBus.fire(HeartEvent.RULE_MATCHED, { rule_id: bestMatch.rule_id, input, confidence: bestMatch.confidence })
+      this.eventBus.fire('rule_matched', { rule_id: bestMatch.rule_id, input, confidence: bestMatch.confidence })
     }
 
     return bestMatch

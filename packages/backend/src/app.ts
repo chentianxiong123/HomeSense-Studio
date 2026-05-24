@@ -3,9 +3,12 @@ import cors from '@fastify/cors'
 import websocket from '@fastify/websocket'
 import { fileURLToPath } from 'url'
 import path from 'path'
+import fs from 'fs'
 import { initDb } from './db/index.js'
 import { authRoutes } from './modules/auth/routes.js'
 import { deviceRoutes } from './modules/device/routes.js'
+import { userDeviceRoutes } from './modules/device/user-device-routes.js'
+import { roomRoutes } from './modules/device/room-routes.js'
 import { chatRoutes } from './modules/chat/routes.js'
 import { chatStreamRoutes } from './modules/chat/stream.js'
 import { workflowRoutes } from './modules/workflow/routes.js'
@@ -26,7 +29,7 @@ import { agentInstanceRoutes } from './modules/agent-instance/routes.js'
 import { devtestRoutes } from './modules/devtest/routes.js'
 import { intentRouterRoutes } from './modules/intent-router/routes.js'
 import { eventBus } from './modules/event-bus/index.js'
-import { deviceStatePoller } from './modules/device-state-poller/index.js'
+// import { deviceStatePoller } from './modules/device-state-poller/index.js'
 import { ruleEngine } from './modules/rule-engine/index.js'
 import { skillsService } from './modules/skills-system/index.js'
 import { experienceService } from './modules/experience/index.js'
@@ -42,6 +45,7 @@ import { planLibrary } from './modules/plan-library/index.js'
 import { assertWorkflowNodeRegistryIntegrity } from './modules/workflow/node-factory.js'
 import './modules/service-registry/index.js'
 import { channelRegistry } from './modules/channels/index.js'
+import { stateMachine } from './modules/state-machine/index.js'
 
 const wsClients = new Set<import('ws').WebSocket>()
 
@@ -54,16 +58,24 @@ export async function buildApp() {
 
   initDb()
 
+  stateMachine.hydrate()
+
   agentInstanceService.ensureDefaults()
   agentAdapterRegistry.initialize()
   llmService.seedSlotsFromEnv()
   memoryKernel.initialize()
-  planLibrary.loadLegacyPlans()
   executorGateway.initialize()
   channelRegistry.register()
   assertWorkflowNodeRegistryIntegrity()
   workflowSeedService.ensureDefaults()
   ruleEngine.loadFromDb()
+
+  // Serve the standalone Mi Home login test page
+  app.get('/test.html', async (request, reply) => {
+    const testHtmlPath = path.resolve(moduleDir, '..', '..', 'mi-cli', 'test.html')
+    const content = fs.readFileSync(testHtmlPath, 'utf-8')
+    reply.type('text/html').send(content)
+  })
 
   // Reload persisted skills (especially source='converted' from prior promotions)
   // before overlaying disk skills, so the in-memory map survives restarts.
@@ -79,6 +91,23 @@ export async function buildApp() {
 
   experienceService.indexAllExperiences()
   knowledgeCompiler.refreshKnowledge()
+
+  // setTimeout(() => {
+  //   if (process.env.ENABLE_STARTUP_EMBEDDING === 'true') {
+  //     memoryKernel.rebuildCompiledKnowledgeEmbeddings()
+  //       .then((result) => {
+  //         app.log.info(
+  //           `[startup] Knowledge embeddings rebuilt: ${result.stored}/${result.processed} ` +
+  //           `(profile=${result.profile_name})`,
+  //         )
+  //       })
+  //       .catch((err: Error) => {
+  //         app.log.warn(`[startup] Knowledge embedding rebuild skipped: ${err.message}`)
+  //       })
+  //   } else {
+  //     app.log.info('[startup] Knowledge embedding rebuild skipped (ENABLE_STARTUP_EMBEDDING != true)')
+  //   }
+  // }, 0)
 
   cronService.start(60000)
 
@@ -113,6 +142,8 @@ export async function buildApp() {
 
   app.register(authRoutes)
   app.register(deviceRoutes)
+  app.register(userDeviceRoutes)
+  app.register(roomRoutes)
   app.register(chatRoutes)
   app.register(chatStreamRoutes)
   app.register(workflowRoutes)
@@ -208,12 +239,12 @@ export async function buildApp() {
     })
   }
 
-  deviceStatePoller.start(30000)
+  // deviceStatePoller.start(30000)
 
   app.addHook('onClose', async () => {
     clearInterval(compensationTimer)
     cronService.stop()
-    deviceStatePoller.stop()
+    // deviceStatePoller.stop()
     wsClients.clear()
   })
 

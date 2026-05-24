@@ -377,7 +377,7 @@ def build_device_capabilities_list(device_info: dict) -> list:
     # IR 设备（机顶盒/电视）：用统一"遥控按键"能力替代 MIoT 动作映射。
     # 每个设备的真实按键码表不同，不能靠 MIoT spec 通用映射覆盖全部键。
     if device_type in ("stb", "television"):
-        return [{"name": "遥控按键", "kind": "action", "type": "string"}]
+        return [{"name": "遥控按键", "kind": "action", "type": "string", "source": "mi"}]
 
     controls = cap_profile.get("controls", {})
     domains = cap_profile.get("domains", [])
@@ -388,6 +388,7 @@ def build_device_capabilities_list(device_info: dict) -> list:
         item = {
             "name": entry.get("name_cn", cap_key),
             "kind": cap_info.get("kind", entry.get("kind", "property")),
+            "source": "mi",
         }
         vtype = cap_info.get("type", entry.get("value_type"))
         if vtype and vtype != "none":
@@ -410,6 +411,7 @@ def build_device_capabilities_list(device_info: dict) -> list:
                 item = {
                     "name": entry.get("name_cn", key),
                     "kind": entry.get("kind", "action"),
+                    "source": "mi",
                 }
                 vtype = entry.get("value_type")
                 if vtype and vtype != "none":

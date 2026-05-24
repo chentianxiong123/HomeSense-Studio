@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, type UserDevice } from '@/api'
 import { useLocale } from '@/composables/useLocale'
+import AppBrowserModal from '@/components/AppBrowserModal.vue'
 
 const { locale } = useLocale()
 const isZh = computed(() => locale.value === 'zh')
@@ -28,13 +29,14 @@ const execHistory = ref<Array<{ capability: string; params: string; result: stri
 const irKeys = ref<Array<{ key_id: string; name: string; type?: string }>>([])
 const irKeysLoading = ref(false)
 const irControllerName = ref('')
+const showAppBrowser = ref(false)
 
 onMounted(async () => {
   loading.value = true
   try {
     const result = await api.userDevices.get(deviceId)
     device.value = result.device ?? null
-    if (device.value?.mi_did) {
+    if (device.value?.mi_did || device.value?.adb_ip) {
       await loadCapabilities()
     }
     loadHistory()
@@ -46,7 +48,7 @@ onMounted(async () => {
 })
 
 async function loadCapabilities(refresh = false) {
-  if (!device.value?.mi_did) return
+  if (!device.value?.mi_did && !device.value?.adb_ip) return
   capsLoading.value = true
   capsError.value = ''
   try {
@@ -69,10 +71,10 @@ async function loadHistory() {
   try {
     const result = await api.userDevices.capabilityHistory(deviceId)
     if (result.history) {
-      execHistory.value = result.history.map((e: { time: string; deviceId: string; capability: string; params: string; status: string }) => ({
+      execHistory.value = result.history.map((e: { time: string; deviceId: string; capability: string; params: string; status: string; result: string }) => ({
         capability: e.capability,
         params: e.params,
-        result: e.status === 'ok' ? label('成功', 'Success') : label('失败: ', 'Failed: ') + e.status,
+        result: e.status === 'ok' ? (e.result || label('成功', 'Success')) : label('失败: ', 'Failed: ') + e.status,
         time: new Date(e.time).toLocaleTimeString(),
       })).reverse()
     }
@@ -149,9 +151,11 @@ async function executeCapability(cap: { name: string; type?: string }) {
   }
 }
 
-const actionCaps = computed(() => capabilities.value.filter(c => c.kind === 'action' && c.name !== '遥控按键' && c.name !== 'Remote Keys'))
-const propertyCaps = computed(() => capabilities.value.filter(c => c.kind === 'property'))
+const miActionCaps = computed(() => capabilities.value.filter(c => c.source === 'mi' && c.kind === 'action' && c.name !== '遥控按键' && c.name !== 'Remote Keys'))
+const miPropertyCaps = computed(() => capabilities.value.filter(c => c.source === 'mi' && c.kind === 'property'))
+const adbCaps = computed(() => capabilities.value.filter(c => c.source === 'adb'))
 const isIrDevice = computed(() => capabilities.value.some(c => c.name === '遥控按键' || c.name === 'Remote Keys'))
+const isAdbDevice = computed(() => capabilities.value.some(c => c.source === 'adb'))
 
 const deviceTypeOptions: Record<string, { zh: string; en: string }> = {
   television: { zh: '电视', en: 'TV' },
@@ -160,6 +164,8 @@ const deviceTypeOptions: Record<string, { zh: string; en: string }> = {
   router: { zh: '路由器', en: 'Router' },
   outlet: { zh: '插座', en: 'Outlet' },
   phone: { zh: '手机', en: 'Phone' },
+  tv_box: { zh: '电视盒', en: 'TV Box' },
+  tablet: { zh: '平板', en: 'Tablet' },
   computer: { zh: '电脑', en: 'Computer' },
   other: { zh: '其他', en: 'Other' },
 }
@@ -216,14 +222,14 @@ function sourceTags(d: UserDevice): string[] {
       <section class="capabilities-section glass-panel">
         <div class="section-head">
           <h2>{{ label('设备能力', 'Capabilities') }}</h2>
-          <button v-if="device.mi_did" class="refresh-caps-btn" :disabled="capsLoading" @click="loadCapabilities(true)">
+          <button v-if="device.mi_did || device.adb_ip" class="refresh-caps-btn" :disabled="capsLoading" @click="loadCapabilities(true)">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
             {{ label('刷新', 'Refresh') }}
           </button>
         </div>
 
-        <div v-if="!device.mi_did" class="no-mi">
-          {{ label('该设备未绑定 MI 来源，无法获取能力列表。', 'This device has no MI binding, capabilities are unavailable.') }}
+        <div v-if="!device.mi_did && !device.adb_ip" class="no-mi">
+          {{ label('该设备未绑定 MI 或 ADB 来源，无法获取能力列表。', 'This device has no MI or ADB binding, capabilities are unavailable.') }}
         </div>
 
         <div v-else-if="capsLoading" class="caps-loading">{{ label('正在加载能力…', 'Loading capabilities…') }}</div>
@@ -259,11 +265,20 @@ function sourceTags(d: UserDevice): string[] {
             </div>
           </div>
 
-          <!-- Actions -->
-          <div v-if="actionCaps.length > 0" class="cap-group">
-            <h3 class="cap-group-title">{{ label('可执行操作', 'Actions') }} · {{ actionCaps.length }}</h3>
+          <!-- App Browser (ADB only) -->
+          <div v-if="isAdbDevice" class="cap-group">
+            <h3 class="cap-group-title">{{ label('应用', 'Apps') }}</h3>
+            <button class="app-browser-btn" @click="showAppBrowser = true">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+              {{ label('浏览已安装应用', 'Browse Installed Apps') }}
+            </button>
+          </div>
+
+          <!-- MI Actions -->
+          <div v-if="miActionCaps.length > 0" class="cap-group">
+            <h3 class="cap-group-title">MI · {{ miActionCaps.length }}</h3>
             <div class="cap-cards">
-              <div v-for="cap in actionCaps" :key="cap.name" class="cap-card-wrapper">
+              <div v-for="cap in miActionCaps" :key="cap.name" class="cap-card-wrapper">
                 <div class="cap-card card-action" :class="{ 'cap-executing': executingCap === cap.name }" @click="cap.type !== 'string' && executeCapability(cap)">
                   <div class="cap-card-icon">
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
@@ -273,7 +288,6 @@ function sourceTags(d: UserDevice): string[] {
                     <span v-if="cap.type" class="cap-card-type">{{ cap.type }}</span>
                   </div>
                 </div>
-                <!-- Text input for string-type capabilities -->
                 <div v-if="cap.type === 'string'" class="cap-text-input-row">
                   <input
                     v-model="textInputs[cap.name]"
@@ -291,17 +305,48 @@ function sourceTags(d: UserDevice): string[] {
             </div>
           </div>
 
-          <!-- Properties -->
-          <div v-if="propertyCaps.length > 0" class="cap-group">
-            <h3 class="cap-group-title">{{ label('可查询属性', 'Properties') }} · {{ propertyCaps.length }}</h3>
+          <!-- MI Properties -->
+          <div v-if="miPropertyCaps.length > 0" class="cap-group">
+            <h3 class="cap-group-title">MI · {{ miPropertyCaps.length }}</h3>
             <div class="cap-cards">
-              <div v-for="cap in propertyCaps" :key="cap.name" class="cap-card card-property">
+              <div v-for="cap in miPropertyCaps" :key="cap.name" class="cap-card card-property">
                 <div class="cap-card-icon">
                   <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
                 </div>
                 <div class="cap-card-body">
                   <span class="cap-card-name">{{ cap.name }}</span>
                   <span v-if="cap.type" class="cap-card-type">{{ cap.type }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ADB Actions -->
+          <div v-if="adbCaps.length > 0" class="cap-group">
+            <h3 class="cap-group-title">ADB · {{ adbCaps.length }}</h3>
+            <div class="cap-cards">
+              <div v-for="cap in adbCaps" :key="cap.name" class="cap-card-wrapper">
+                <div class="cap-card card-action" :class="{ 'cap-executing': executingCap === cap.name, 'card-cap-disabled': cap.type === 'string' }" @click="cap.type !== 'string' && executeCapability(cap)">
+                  <div class="cap-card-icon">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                  </div>
+                  <div class="cap-card-body">
+                    <span class="cap-card-name">{{ executingCap === cap.name ? label('发送中…', 'Sending…') : cap.name }}</span>
+                    <span v-if="cap.type" class="cap-card-type">{{ cap.type }}</span>
+                  </div>
+                </div>
+                <div v-if="cap.type === 'string'" class="cap-text-input-row">
+                  <input
+                    v-model="textInputs[cap.name]"
+                    type="text"
+                    class="cap-text-input"
+                    :placeholder="label('输入文本…', 'Enter text…')"
+                    @click.stop
+                    @keydown.enter.stop="executeCapability(cap)"
+                  />
+                  <button class="cap-send-btn" :disabled="executingCap === cap.name || !textInputs[cap.name]" @click.stop="executeCapability(cap)">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                  </button>
                 </div>
               </div>
             </div>
@@ -325,6 +370,9 @@ function sourceTags(d: UserDevice): string[] {
           </div>
         </div>
       </section>
+
+      <!-- App Browser Modal -->
+      <AppBrowserModal v-if="showAppBrowser" :device-id="deviceId" @close="showAppBrowser = false" />
     </template>
   </div>
 </template>
@@ -675,6 +723,29 @@ h1 {
 .ir-key-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* ── App Browser button ── */
+.app-browser-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 24px;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.app-browser-btn:hover {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.4);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.1);
 }
 
 .exec-feedback {

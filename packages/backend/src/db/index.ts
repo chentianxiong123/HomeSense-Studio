@@ -170,7 +170,7 @@ function createTables(db: Database.Database) {
     )`,
     `CREATE TABLE IF NOT EXISTS user_devices (
       id INTEGER NOT NULL, name TEXT NOT NULL,
-      device_type TEXT NOT NULL CHECK (device_type IN ('television','stb','speaker','router','outlet','phone','computer','other')) DEFAULT 'other',
+      device_type TEXT NOT NULL CHECK (device_type IN ('television','stb','speaker','router','outlet','phone','tv_box','tablet','computer','other')) DEFAULT 'other',
       room_id INTEGER NULL REFERENCES rooms(id) ON DELETE SET NULL,
       mi_did TEXT NULL,
       adb_ip TEXT NOT NULL DEFAULT '', ip_address TEXT NOT NULL DEFAULT '',
@@ -268,6 +268,7 @@ function runMigrations(db: Database.Database) {
   migrateLlmSlotsCheckConstraint(db)
   migrateDropDeprecatedTables(db)
   migrateDeviceCapabilities(db)
+  migrateDeviceApps(db)
 }
 
 function ensureColumns(
@@ -367,6 +368,17 @@ function migrateDeviceCapabilities(db: Database.Database) {
       ir_keys_json TEXT NOT NULL DEFAULT '[]',
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (mi_did)
+    )
+  `)
+}
+
+function migrateDeviceApps(db: Database.Database) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS device_apps (
+      adb_ip TEXT NOT NULL,
+      apps_json TEXT NOT NULL DEFAULT '[]',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (adb_ip)
     )
   `)
 }

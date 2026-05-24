@@ -25,10 +25,13 @@ export class RealSubprocessRunner implements SubprocessRunner {
   }): Promise<string> {
     const { exePath, args, cwd, stdinPayload, timeoutMs } = opts
     return new Promise((resolve, reject) => {
+      const env = { ...process.env }
+      delete env.PYTHONHOME
       const proc: ChildProcess = spawn(exePath, args, {
         cwd,
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: false,
+        env,
       })
 
       let stdout = ''
@@ -191,6 +194,8 @@ const CLI_SCHEMAS: Record<string, Record<string, z.ZodSchema>> = {
     screenshot: z.object({ device: z.string().optional(), dev: z.string().optional(), path: z.string().optional() }).optional(),
     get_display_size: z.object({ device: z.string().optional(), dev: z.string().optional() }).optional(),
     get_ui_elements: z.object({ device: z.string().optional(), dev: z.string().optional(), timeout: z.number().optional() }).optional(),
+    ui_elements: z.object({ device: z.string().optional(), dev: z.string().optional(), timeout: z.number().optional() }).optional(),
+    ui_tree: z.object({ device: z.string().optional(), dev: z.string().optional(), timeout: z.number().optional() }).optional(),
     tap_element: z.object({ device: z.string().optional(), dev: z.string().optional(), index: z.number().optional(), text: z.string().optional() }),
     tap: z.object({ device: z.string().optional(), dev: z.string().optional(), x: z.number(), y: z.number() }),
     tap_ratio: z.object({ device: z.string().optional(), dev: z.string().optional(), x_ratio: z.number(), y_ratio: z.number() }),
@@ -202,11 +207,14 @@ const CLI_SCHEMAS: Record<string, Record<string, z.ZodSchema>> = {
     enter: z.object({ device: z.string().optional(), dev: z.string().optional() }).optional(),
     launch_app: z.object({ device: z.string().optional(), dev: z.string().optional(), package: z.string(), package_name: z.string().optional() }),
     get_current_app: z.object({ device: z.string().optional(), dev: z.string().optional() }).optional(),
+    current_app: z.object({ device: z.string().optional(), dev: z.string().optional() }).optional(),
     list_packages: z.object({ device: z.string().optional(), dev: z.string().optional(), keyword: z.string().optional() }).optional(),
     check_package: z.object({ device: z.string().optional(), dev: z.string().optional(), package: z.string() }),
     find_element: z.object({ device: z.string().optional(), dev: z.string().optional(), text: z.string() }),
     wait: z.object({ seconds: z.number().optional() }).optional(),
     ensure_connected: z.object({ device: z.string(), dev: z.string().optional(), initial_wait_seconds: z.number().optional(), max_attempts: z.number().optional(), backoff_seconds: z.number().optional() }),
+    wake: z.object({ device: z.string().optional(), dev: z.string().optional() }).optional(),
+    wakeup: z.object({ device: z.string().optional(), dev: z.string().optional() }).optional(),
   },
 }
 

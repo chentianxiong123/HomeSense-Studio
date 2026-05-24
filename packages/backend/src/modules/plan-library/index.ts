@@ -83,10 +83,7 @@ class PlanLibraryService {
     return bestScore >= 2 ? bestPlan : undefined
   }
 
-  resolveByContext(completion: Pick<ContextCompletionResult, 'target_device_id' | 'target_device_type' | 'matched_media_app'>): CompiledPlanDefinition | undefined {
-    if (completion.matched_media_app === 'bilibili' && completion.target_device_type === 'tv') {
-      return this.plans.get('path_demo_watch_bilibili')
-    }
+  resolveByContext(_completion: Pick<ContextCompletionResult, 'target_device_id' | 'target_device_type' | 'matched_media_app'>): CompiledPlanDefinition | undefined {
     return undefined
   }
 

@@ -70,21 +70,6 @@ class CandidatePlanService {
       candidates.set(exact.id, exact)
     }
 
-    if (completion?.matched_media_app === 'bilibili' && completion.target_device_type === 'tv') {
-      const contextPlan = this.planLibrary.getPlan('path_demo_watch_bilibili')
-      if (contextPlan) {
-        const plan = this.fromPlanLibrary(contextPlan, 0.96, [
-          {
-            source: 'context',
-            ref: `${completion.matched_media_app}:${completion.target_device_type}`,
-            score: 0.96,
-            note: 'context_resolve',
-          },
-        ])
-        candidates.set(plan.id, plan)
-      }
-    }
-
     for (const hit of searchHits) {
       const candidate = this.fromSearchHit(hit)
       if (!candidate) continue

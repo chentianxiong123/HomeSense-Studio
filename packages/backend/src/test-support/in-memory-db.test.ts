@@ -10,6 +10,11 @@ describe('test-support · createInMemoryDb', () => {
       .all() as Array<{ name: string }>
 
     const names = tables.map((t) => t.name)
+    expect(names).not.toContain('devices')
+    expect(names).not.toContain('device_features')
+    expect(names).not.toContain('entities')
+    expect(names).not.toContain('entity_states')
+    expect(names).not.toContain('state_history')
     expect(names).toContain('memory_entities')
     expect(names).toContain('memory_triples')
     expect(names).toContain('memory_attributes')

@@ -1,12 +1,12 @@
 import type { FastifyInstance } from 'fastify'
 import { cliBridge } from '../cli-bridge/index.js'
-import { getDb } from '../../db/index.js'
+import { loadAdbConnections, upsertAdbConnection, removeAdbConnection } from './adb-connections-store.js'
 
 export async function deviceRoutes(app: FastifyInstance) {
   app.get('/api/devices', async () => {
     const result = await cliBridge.run('mi-cli', 'discover')
     if (result.status === 'success' && result.data) {
-      const data = result.data as { devices?: unknown[] }
+      const data = result.data as { devices?: Array<Record<string, unknown>> }
       return { devices: data.devices ?? [], duration_ms: result.duration_ms }
     }
     return { devices: [], error: (result as any).error, message: (result as any).message }
@@ -122,14 +122,9 @@ export async function deviceRoutes(app: FastifyInstance) {
 
   app.get('/api/devices/:did', async (request) => {
     const { did } = request.params as { did: string }
-    const db = getDb()
-    const device = db.prepare('SELECT * FROM devices WHERE did = ?').get(did)
-    if (!device) {
-      return { status: 'error', error: 'DEVICE_NOT_FOUND' }
-    }
-    const features = db.prepare('SELECT * FROM device_features WHERE device_did = ?').all(did)
-    const entities = db.prepare('SELECT * FROM entities WHERE device_did = ?').all(did)
-    return { device, features, entities }
+    const result = await cliBridge.run('mi-cli', 'device_info', { did })
+    if (result.status === 'success') return { device: result.data }
+    return { status: 'error', error: 'DEVICE_NOT_FOUND' }
   })
 
   // ── 对照 hass-xiaomi-miot async_get_properties_for_mapping ──
@@ -191,4 +186,105 @@ export async function deviceRoutes(app: FastifyInstance) {
 
     return { status: 'error', error: 'INVALID_PARAMS', message: 'Need siid+piid+value or siid+aiid+params' }
   })
-}
+
+  // ── ADB device proxy ──
+  app.get('/api/devices/adb/list', async () => {
+    const result = await cliBridge.run('adb-cli', 'list_devices')
+    const liveMap = new Map<string, string>()
+
+    if (result.status === 'success') {
+      const data = result.data as { devices?: Array<Record<string, unknown>>; count?: number }
+      for (const d of data.devices ?? []) {
+        const addr = (d.device_id || d.address || '') as string
+        const status = (d.status || '') as string
+        if (addr) liveMap.set(addr, status)
+      }
+    }
+
+    const persisted = loadAdbConnections()
+    const devices = persisted.map(p => ({
+      address: p.address,
+      name: p.name,
+      model: p.model,
+      status: liveMap.get(p.address) || 'disconnected',
+    }))
+
+    return { devices, duration_ms: result.duration_ms }
+  })
+
+  app.post('/api/devices/adb/connect', async (request) => {
+    let { address, name, model } = request.body as { address: string; name?: string; model?: string }
+    if (!address) return { status: 'error', error: 'INVALID_PARAMS', message: 'Missing address' }
+    if (!address.includes(':')) address = `${address}:5555`
+    const result = await cliBridge.run('adb-cli', 'connect', { device: address, max_attempts: 3 })
+
+    if (result.status === 'success') {
+      upsertAdbConnection({
+        address,
+        name: name || address,
+        model: model || '',
+        first_seen: new Date().toISOString(),
+        last_seen: new Date().toISOString(),
+      })
+    }
+
+    return result
+  })
+
+  app.post('/api/devices/adb/disconnect', async (request) => {
+    const { address } = request.body as { address: string }
+    if (!address) return { status: 'error', error: 'INVALID_PARAMS', message: 'Missing address' }
+    const result = await cliBridge.run('adb-cli', 'disconnect', { device: address })
+    return result
+  })
+
+  app.get('/api/devices/adb/info', async (request) => {
+    const query = request.query as { address: string }
+    if (!query.address) return { status: 'error', error: 'INVALID_PARAMS', message: 'Missing address' }
+    const [displayResult, appResult] = await Promise.all([
+      cliBridge.run('adb-cli', 'get_display_size', { device: query.address }),
+      cliBridge.run('adb-cli', 'get_current_app', { device: query.address }),
+    ])
+    return {
+      display: displayResult.status === 'success' ? displayResult.data : null,
+      currentApp: appResult.status === 'success' ? appResult.data : null,
+    }
+  })
+
+  app.post('/api/devices/adb/screenshot', async (request) => {
+    const { address } = request.body as { address: string }
+    if (!address) return { status: 'error', error: 'INVALID_PARAMS', message: 'Missing address' }
+    return cliBridge.run('adb-cli', 'screenshot', { device: address })
+  })
+
+  app.post('/api/devices/adb/launch', async (request) => {
+    const { address, package: pkg, package_name } = request.body as { address: string; package?: string; package_name?: string }
+    if (!address) return { status: 'error', error: 'INVALID_PARAMS', message: 'Missing address' }
+    return cliBridge.run('adb-cli', 'launch_app', { device: address, package: pkg, package_name })
+  })
+
+  app.get('/api/devices/adb/app', async (request) => {
+    const query = request.query as { address: string }
+    if (!query.address) return { status: 'error', error: 'INVALID_PARAMS', message: 'Missing address' }
+    return cliBridge.run('adb-cli', 'get_current_app', { device: query.address })
+  })
+
+  app.post('/api/devices/adb/tap', async (request) => {
+    const { address, x, y } = request.body as { address: string; x: number; y: number }
+    if (!address) return { status: 'error', error: 'INVALID_PARAMS', message: 'Missing address' }
+    return cliBridge.run('adb-cli', 'tap', { device: address, x, y })
+  })
+
+  app.post('/api/devices/adb/input', async (request) => {
+    const { address, text } = request.body as { address: string; text: string }
+    if (!address) return { status: 'error', error: 'INVALID_PARAMS', message: 'Missing address' }
+    return cliBridge.run('adb-cli', 'input_text', { device: address, text })
+  })
+
+  app.post('/api/devices/adb/press_key', async (request) => {
+    const { address, key } = request.body as { address: string; key: string }
+    if (!address) return { status: 'error', error: 'INVALID_PARAMS', message: 'Missing address' }
+    return cliBridge.run('adb-cli', 'press_key', { device: address, key })
+  })
+
+  }

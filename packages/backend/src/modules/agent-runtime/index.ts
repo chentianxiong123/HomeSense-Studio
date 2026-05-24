@@ -6,6 +6,7 @@ import { llmService, type LLMChatResult, type ModelSlotName } from '../llm-provi
 import { approvalRegistry as defaultApprovalRegistry, isHighRiskCliCall, type ApprovalRecord } from '../approval/index.js'
 import { memoryKernel as defaultMemoryKernel } from '../memory-kernel/index.js'
 import { selfEnhancementService as defaultSelfEnhancement } from '../self-enhancement/index.js'
+import { compensationService as defaultCompensationService, type CompensationTask } from '../compensation/index.js'
 import type { TaskFailure } from '../self-enhancement/index.js'
 import type { AgentEvent, AgentStreamContext, MemoryHit } from './events.js'
 import type { HistoryItem } from '../conversation/index.js'
@@ -17,6 +18,10 @@ interface ApprovalRegistryInstance {
 
 interface SelfEnhancementInstance {
   processFailureAndEnhance(failure: TaskFailure): void
+}
+
+interface CompensationServiceInstance {
+  createTask(type: string, params: Record<string, unknown>, maxRetries?: number): CompensationTask
 }
 
 interface MemoryKernelInstance {
@@ -88,6 +93,7 @@ class AgentRuntime {
     private readonly approvalRegistry: ApprovalRegistryInstance = defaultApprovalRegistry,
     private readonly memoryKernel: MemoryKernelInstance = defaultMemoryKernel,
     private readonly selfEnhancement: SelfEnhancementInstance = defaultSelfEnhancement,
+    private readonly compensationService: CompensationServiceInstance = defaultCompensationService,
   ) {}
 
   async *processMessageStream(
@@ -190,6 +196,13 @@ class AgentRuntime {
             error: failedStep.error ?? 'unknown plan step error',
             trace: planResult.results.map((r) => ({ step: `step ${r.order}:${r.tool}.${r.action}`, result: r.status, duration_ms: 0 })),
           })
+          this.compensationService.createTask('agent_plan_step', {
+            message,
+            failed_step_order: failedStep.order,
+            failed_tool: failedStep.tool,
+            failed_action: failedStep.action,
+            error: failedStep.error,
+          }, 2)
         }
         const successCount = planResult.results.filter((result) => result.status === 'success').length
         const finalStep = planResult.results[planResult.results.length - 1]
@@ -509,22 +522,17 @@ class AgentRuntime {
     yield { type: 'turn.start', turn_id: turnId, message, timestamp: start }
 
     const db = getDb()
-    const devices = db
-      .prepare('SELECT did, name, model, connection_type FROM devices ORDER BY last_seen DESC LIMIT 20')
-      .all() as Array<{ did: string; name: string; model: string; connection_type: string }>
-    const entities = db
-      .prepare('SELECT entity_id, device_did, domain, capability, name FROM entities WHERE enabled = 1 LIMIT 50')
-      .all() as Array<{ entity_id: string; device_did: string; domain: string; capability: string; name: string }>
+    const userDevices = db
+      .prepare('SELECT d.name, d.device_type, d.mi_did, d.adb_ip, r.name AS room_name FROM user_devices d LEFT JOIN rooms r ON r.id = d.room_id ORDER BY d.name')
+      .all() as Array<{ name: string; device_type: string; mi_did: string | null; adb_ip: string; room_name: string | null }>
 
     const systemPrompt = [
       'You are the HomeSense control agent.',
       'You can control smart home devices and answer questions.',
-      'Use the mi-cli tool when the user asks to control devices.',
+      'Use the mi-cli tool when the user asks to control mi-bound devices, or adb-cli for ADB-connected devices.',
       'If the user is just chatting or asking questions, respond conversationally without calling tools.',
       'Known devices:',
-      ...devices.map((d) => `- ${d.name} (${d.model}, ${d.connection_type})`),
-      'Known entities:',
-      ...entities.map((e) => `- ${e.entity_id}: ${e.name} [${e.domain}.${e.capability}]`),
+      ...userDevices.map((d) => `- ${d.name} (${d.device_type})${d.room_name ? ` in ${d.room_name}` : ''}${d.mi_did ? ', mi-bound' : ''}${d.adb_ip ? ', ADB-accessible' : ''}`),
     ].join('\n')
 
     const messages: Array<{
@@ -828,17 +836,14 @@ class AgentRuntime {
     name?: string
   }> {
     const db = getDb()
-    const devices = db
-      .prepare('SELECT did, name, model, connection_type FROM devices ORDER BY last_seen DESC LIMIT 20')
-      .all() as Array<{ did: string; name: string; model: string; connection_type: string }>
-    const entities = db
-      .prepare('SELECT entity_id, device_did, domain, capability, name FROM entities WHERE enabled = 1 LIMIT 50')
-      .all() as Array<{ entity_id: string; device_did: string; domain: string; capability: string; name: string }>
+    const userDevices = db
+      .prepare('SELECT d.name, d.device_type, d.mi_did, d.adb_ip, r.name AS room_name FROM user_devices d LEFT JOIN rooms r ON r.id = d.room_id ORDER BY d.name')
+      .all() as Array<{ name: string; device_type: string; mi_did: string | null; adb_ip: string; room_name: string | null }>
 
     const systemPrompt = [
       'You are the HomeSense control agent.',
       'Prefer deterministic device control and tool calls over free-form guesses.',
-      'Do not invent devices, apps, services, or platforms that are not explicitly present in the known devices, known entities, recalled memory, or compiled candidate plans.',
+      'Do not invent devices, apps, services, or platforms that are not explicitly present in the known devices, recalled memory, or compiled candidate plans.',
       'Executor names and CLI names are implementation details, not end-user app names. Never present them as user-facing applications unless the source data explicitly says so.',
       `Channel: ${params.context.channel ?? 'web'}`,
       `User: ${params.context.user_id ?? 'local'}`,
@@ -855,9 +860,7 @@ class AgentRuntime {
       params.memoryHits.length > 0 ? 'Recalled memory:' : '',
       ...params.memoryHits.slice(0, 8).map((hit) => `- [${hit.type}] ${hit.name}${hit.snippet ? ` | ${hit.snippet}` : ''}`),
       'Known devices:',
-      ...devices.map((device) => `- ${device.name} (${device.model}, ${device.connection_type})`),
-      'Known entities:',
-      ...entities.map((entity) => `- ${entity.entity_id}: ${entity.name} [${entity.domain}.${entity.capability}]`),
+      ...userDevices.map((d) => `- ${d.name} (${d.device_type})${d.room_name ? ` in ${d.room_name}` : ''}${d.mi_did ? ', mi-bound' : ''}${d.adb_ip ? ', ADB-accessible' : ''}`),
     ]
       .filter(Boolean)
       .join('\n')

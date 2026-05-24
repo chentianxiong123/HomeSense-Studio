@@ -13,6 +13,11 @@ import { executorGateway } from './modules/executor-gateway/index.js'
 import { ruleEngine } from './modules/rule-engine/index.js'
 import { workflowSeedService } from './modules/workflow/seed.js'
 
+export interface EventBusInstance {
+  fire(eventType: string, data?: unknown): void | Promise<void>
+  on(eventType: string, handler: (...args: unknown[]) => void): () => void
+}
+
 export interface Container {
   db: ReturnType<typeof getDb>
   eventBus: typeof eventBus

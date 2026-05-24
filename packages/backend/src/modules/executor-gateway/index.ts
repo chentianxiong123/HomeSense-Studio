@@ -324,7 +324,7 @@ class ExecutorGatewayService {
           tool: step.tool,
           action: step.action,
           executor: null,
-          status: 'skipped',
+          status: 'error',
           error: 'No executor mapping available yet',
         })
         continue

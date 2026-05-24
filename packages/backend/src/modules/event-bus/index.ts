@@ -6,7 +6,6 @@ export const HeartEvent = {
   COMPENSATION_TASK_FAILED: 'compensation_task_failed',
   COMPENSATION_TASK_SUCCEEDED: 'compensation_task_succeeded',
   COMPENSATION_RETRY: 'compensation_retry',
-  // device-state-poller
   STATE_CHANGED: 'state_changed',
   // devtest
   DEVTEST_SMOKE_STARTED: 'devtest_smoke_started',

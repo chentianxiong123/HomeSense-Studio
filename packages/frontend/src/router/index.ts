@@ -4,7 +4,10 @@ import StudioView from '@/views/StudioView.vue'
 import AssetDetailView from '@/views/AssetDetailView.vue'
 import SettingsRouteView from '@/views/SettingsRouteView.vue'
 import DevicesView from '@/views/DevicesView.vue'
+import DeviceDetailView from '@/views/DeviceDetailView.vue'
 import IntegrationsView from '@/views/IntegrationsView.vue'
+import MiCliDetailView from '@/views/MiCliDetailView.vue'
+import AdbCliDetailView from '@/views/AdbCliDetailView.vue'
 import MiTestView from '@/views/MiTestView.vue'
 import StudioHomeView from '@/views/StudioHomeView.vue'
 import WorkflowOverviewView from '@/views/WorkflowOverviewView.vue'
@@ -24,7 +27,10 @@ export const router = createRouter({
     { path: '/chat', name: 'chat', component: ChatView },
     { path: '/studio', name: 'studio-home', component: StudioHomeView },
     { path: '/devices', name: 'devices', component: DevicesView },
+    { path: '/devices/:id', name: 'device-detail', component: DeviceDetailView },
     { path: '/integrations', name: 'integrations', component: IntegrationsView },
+    { path: '/integrations/mi-cli', name: 'integrations-mi-cli', component: MiCliDetailView },
+    { path: '/integrations/adb-cli', name: 'integrations-adb-cli', component: AdbCliDetailView },
     { path: '/mi-test', name: 'mi-test', component: MiTestView },
     { path: '/mi', redirect: '/integrations' },
     { path: '/studio/workflows/:id/overview', name: 'studio-workflow-overview', component: WorkflowOverviewView },
