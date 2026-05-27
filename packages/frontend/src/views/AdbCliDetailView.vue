@@ -308,7 +308,7 @@ function isOnline(d: AdbDevice): boolean {
   color: var(--text-primary);
   border: 1px solid rgba(229, 231, 235, 0.8);
   border-radius: 12px;
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 800;
   cursor: pointer;
   transition: all 0.3s;
@@ -332,7 +332,7 @@ function isOnline(d: AdbDevice): boolean {
 .eyebrow {
   display: inline-block;
   color: #10b981;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.15em;
@@ -402,7 +402,7 @@ h1 {
 }
 
 .card-desc {
-  font-size: 12px;
+  font-size: 16px;
   color: var(--text-tertiary);
   font-weight: 600;
   margin: 4px 0 0;
@@ -425,7 +425,7 @@ h1 {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.6);
   padding: 0 18px;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 800;
   color: var(--text-primary);
   outline: none;
@@ -499,7 +499,7 @@ h1 {
 
 .conn-meta {
   display: block;
-  font-size: 12px;
+  font-size: 16px;
   color: var(--text-tertiary);
   font-weight: 600;
   margin-top: 4px;
@@ -523,7 +523,7 @@ h1 {
   padding: 6px 14px;
   height: 32px;
   border-radius: 8px;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 800;
   cursor: pointer;
   border: 1px solid;
@@ -561,7 +561,7 @@ h1 {
   color: #fff;
   border: none;
   border-radius: 12px;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 900;
   cursor: pointer;
   box-shadow: 0 8px 24px rgba(16, 185, 129, 0.2);
@@ -590,7 +590,7 @@ h1 {
   color: var(--text-primary);
   border: 1px solid rgba(229, 231, 235, 0.6);
   border-radius: 12px;
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 800;
   cursor: pointer;
   transition: all 0.3s;
@@ -629,7 +629,7 @@ h1 {
   gap: 12px;
   padding: 16px 22px;
   border-radius: 14px;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   backdrop-filter: blur(16px);
 }
@@ -655,7 +655,7 @@ h1 {
   color: var(--text-tertiary);
 }
 .empty-icon { font-size: 32px; opacity: 0.3; }
-.empty-result p { font-size: 13px; font-weight: 600; margin: 0; }
+.empty-result p { font-size: 15px; font-weight: 600; margin: 0; }
 
 /* ── Transition ── */
 .fade-enter-active, .fade-leave-active {

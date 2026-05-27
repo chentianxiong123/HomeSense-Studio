@@ -79,7 +79,7 @@ const isStale = computed(() => {
 }
 
 .state-text {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;

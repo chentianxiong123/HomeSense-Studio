@@ -99,7 +99,8 @@ const summaryRows = computed(() => [
   <StudioDetailLayout
     :title="title"
     :description="label('浅资产页保留结构化细节，用于承接 skill、manifest、plan、agent 的统一浏览。', 'Structured shallow-asset page for skills, manifests, plans, and agents.')"
-    :back-label="label('返回资产中枢', 'Back to Asset Hub')"
+    :back-label="label('返回资产中心', 'Back to Assets')"
+    back-route="/assets"
     :tabs="tabs"
     :loading="loading"
     :loading-label="label('加载资产详情中…', 'Loading asset detail…')"
@@ -180,7 +181,7 @@ const summaryRows = computed(() => [
 .eyebrow {
   display: inline-block;
   color: #10b981;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.15em;
@@ -218,7 +219,7 @@ const summaryRows = computed(() => [
   display: block;
   margin-bottom: 14px;
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.2em;
@@ -243,7 +244,7 @@ const summaryRows = computed(() => [
   border-radius: 24px;
   overflow: auto;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.8;
   border: 1px solid rgba(255, 255, 255, 0.1);
 }

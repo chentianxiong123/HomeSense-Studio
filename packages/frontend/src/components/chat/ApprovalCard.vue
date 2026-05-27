@@ -51,7 +51,7 @@ function stringify(value: unknown): string {
 
 .approval-head { display: flex; align-items: center; gap: 10px; }
 .approval-kind {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -60,7 +60,7 @@ function stringify(value: unknown): string {
   padding: 2px 8px;
   border-radius: 4px;
 }
-.approval-reason { font-size: 14px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.01em; }
+.approval-reason { font-size: 16px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.01em; }
 .approval-payload {
   margin: 0;
   padding: 12px;
@@ -68,7 +68,7 @@ function stringify(value: unknown): string {
   background: rgba(255, 255, 255, 0.8);
   border: 1px solid rgba(229, 231, 235, 0.5);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 11px;
+  font-size: 15px;
   max-height: 250px;
   overflow: auto;
   white-space: pre-wrap;
@@ -79,7 +79,7 @@ function stringify(value: unknown): string {
 .btn {
   padding: 8px 20px;
   border-radius: 10px;
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 700;
   cursor: pointer;
   border: 1px solid transparent;
@@ -91,7 +91,7 @@ function stringify(value: unknown): string {
 .btn.deny:hover { background: rgba(254, 242, 242, 1); transform: translateY(-1px); }
 
 .approval-resolved {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.1em;

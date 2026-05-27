@@ -23,17 +23,18 @@ export class FakeLlmService {
     this.chatResponse = content
   }
 
-  getModelSlot(slot: string) {
+  getDefaultModel(category: string) {
     return {
-      provider_type: 'openai',
-      api_base: 'http://fake',
-      model_name: `fake-${slot}`,
-      dimensions: this.embedDimensions,
+      id: 1,
+      provider_id: 1,
+      model_name: `fake-${category}`,
+      category,
+      is_default: true,
       enabled: true,
     }
   }
 
-  async embed(opts: { slot?: string; input: string | string[] }) {
+  async embed(opts: { model_id?: number; input: string | string[] }) {
     this.embedCalls.push(opts)
     const inputs = Array.isArray(opts.input) ? opts.input : [opts.input]
     return {

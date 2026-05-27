@@ -86,7 +86,7 @@ watchEffect(async () => {
 }
 
 .eyebrow {
-  font-size: 9px;
+  font-size: 13px;
   color: var(--text-tertiary);
   text-transform: uppercase;
   font-weight: 800;
@@ -104,7 +104,7 @@ watchEffect(async () => {
 .status-badge {
   padding: 4px 12px;
   border-radius: 99px;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -125,7 +125,7 @@ watchEffect(async () => {
 
 .description {
   margin: 0 0 20px;
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.6;
   color: var(--text-secondary);
   font-weight: 500;
@@ -159,7 +159,7 @@ watchEffect(async () => {
   border: 1px solid rgba(229, 231, 235, 1);
   border-radius: 50%;
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 800;
   box-shadow: var(--shadow-sm);
 }
@@ -173,14 +173,14 @@ watchEffect(async () => {
 }
 
 .step-title {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 800;
   color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
 .step-meta {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -190,7 +190,7 @@ watchEffect(async () => {
 .empty {
   padding: 32px;
   text-align: center;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--text-tertiary);
   background: rgba(248, 250, 252, 0.4);

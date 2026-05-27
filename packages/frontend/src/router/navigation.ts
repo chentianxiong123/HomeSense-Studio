@@ -4,15 +4,16 @@ export const LAST_ROUTE_STORAGE_KEY = 'homesense-studio.last-route'
 const ROUTE_PATTERNS = [
   /^\/chat$/,
   /^\/studio$/,
+  /^\/assets$/,
   /^\/devices$/,
   /^\/integrations$/,
   /^\/mi$/,
   /^\/settings$/,
   /^\/studio\/workflows\/[^/]+\/(overview|editor|runs)$/,
-  /^\/studio\/skills\/[^/]+\/(overview|prompt)$/,
-  /^\/studio\/manifests\/[^/]+\/overview$/,
-  /^\/studio\/plans\/[^/]+\/overview$/,
-  /^\/studio\/agents\/[^/]+\/overview$/,
+  /^\/assets\/skills\/[^/]+\/(overview|prompt)$/,
+  /^\/assets\/manifests\/[^/]+\/overview$/,
+  /^\/assets\/plans\/[^/]+\/overview$/,
+  /^\/assets\/agents\/[^/]+\/overview$/,
 ]
 
 export function normalizeRememberedRoute(value: string | null | undefined): string {

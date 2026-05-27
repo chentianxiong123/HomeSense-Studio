@@ -317,7 +317,7 @@ const approvalStatus = computed(() => ({
   border: 1px solid rgba(217, 217, 217, 0.3);
   background: rgba(255, 255, 255, 0.5);
   border-radius: 8px;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
   color: var(--text-secondary);
@@ -333,7 +333,7 @@ const approvalStatus = computed(() => ({
   background: rgba(255, 255, 255, 0.5);
   border-radius: 8px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -342,7 +342,7 @@ const approvalStatus = computed(() => ({
 }
 .mini:hover { background: #fff; color: var(--text-primary); border-color: var(--text-tertiary); }
 .error {
-  font-size: 12px;
+  font-size: 16px;
   color: #b4322a;
   background: rgba(253, 245, 245, 0.8);
   margin: 10px 20px;
@@ -351,15 +351,15 @@ const approvalStatus = computed(() => ({
   border: 1px solid #fecdd3;
 }
 .section { padding: 20px; overflow-y: auto; flex: 1; }
-.empty { color: var(--text-tertiary); text-align: center; padding: 48px 0; font-size: 13px; font-weight: 500; }
-.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; }
+.empty { color: var(--text-tertiary); text-align: center; padding: 48px 0; font-size: 15px; font-weight: 500; }
+.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 16px; }
 .tbl th, .tbl td {
   padding: 10px 12px;
   text-align: left;
   border-bottom: 1px solid rgba(244, 245, 247, 0.6);
 }
-.tbl th { font-size: 10px; font-weight: 800; text-transform: uppercase; color: var(--text-tertiary); letter-spacing: 0.1em; }
-.mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; color: var(--text-primary); }
+.tbl th { font-size: 14px; font-weight: 800; text-transform: uppercase; color: var(--text-tertiary); letter-spacing: 0.1em; }
+.mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 15px; color: var(--text-primary); }
 .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .list li {
   padding: 14px 16px;
@@ -371,9 +371,9 @@ const approvalStatus = computed(() => ({
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
 }
 .list li:hover { background: rgba(255, 255, 255, 0.9); border-color: rgba(16, 185, 129, 0.3); transform: translateX(4px); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.04); }
-.item-title { font-size: 13px; color: var(--text-primary); font-weight: 700; }
-.item-meta { font-size: 10px; color: var(--text-tertiary); margin-top: 4px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; }
-.item-body { font-size: 12px; color: var(--text-secondary); margin-top: 6px; line-height: 1.5; }
+.item-title { font-size: 15px; color: var(--text-primary); font-weight: 700; }
+.item-meta { font-size: 14px; color: var(--text-tertiary); margin-top: 4px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; }
+.item-body { font-size: 16px; color: var(--text-secondary); margin-top: 6px; line-height: 1.5; }
 .status-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -393,9 +393,9 @@ const approvalStatus = computed(() => ({
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
 }
 .status-grid > div:hover { transform: translateY(-4px); background: rgba(255, 255, 255, 0.9); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.06); border-color: rgba(16, 185, 129, 0.25); }
-.k { font-size: 9px; color: var(--text-tertiary); font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; }
+.k { font-size: 13px; color: var(--text-tertiary); font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; }
 .v { font-size: 18px; font-weight: 800; color: var(--text-primary); letter-spacing: -0.02em; }
-.sub-head { margin: 24px 0 10px; font-size: 10px; font-weight: 800; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.1em; }
+.sub-head { margin: 24px 0 10px; font-size: 14px; font-weight: 800; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.1em; }
 
 .devtest-head {
   display: flex;
@@ -404,14 +404,14 @@ const approvalStatus = computed(() => ({
   margin-bottom: 16px;
 }
 .devtest-head > div:first-child { flex: 1; }
-.devtest-hint { font-size: 11px; color: var(--text-secondary); line-height: 1.6; margin-top: 6px; }
+.devtest-hint { font-size: 15px; color: var(--text-secondary); line-height: 1.6; margin-top: 6px; }
 .run-btn {
   padding: 10px 18px;
   background: var(--primary-color);
   color: #fff;
   border: none;
   border-radius: 10px;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   cursor: pointer;
   flex-shrink: 0;
@@ -425,7 +425,7 @@ const approvalStatus = computed(() => ({
   padding: 12px 16px;
   border-radius: 10px;
   font-weight: 800;
-  font-size: 11px;
+  font-size: 15px;
   margin-bottom: 16px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -450,10 +450,10 @@ const approvalStatus = computed(() => ({
 .smoke-step.skipped { opacity: 0.6; }
 
 .smoke-step-head { display: flex; align-items: center; gap: 10px; }
-.smoke-order { font-family: ui-monospace, monospace; font-size: 10px; font-weight: 700; color: var(--text-tertiary); }
-.smoke-label { flex: 1; font-size: 13px; font-weight: 700; color: var(--text-primary); }
+.smoke-order { font-family: ui-monospace, monospace; font-size: 14px; font-weight: 700; color: var(--text-tertiary); }
+.smoke-label { flex: 1; font-size: 15px; font-weight: 700; color: var(--text-primary); }
 .smoke-status {
-  font-size: 9px;
+  font-size: 13px;
   padding: 2px 8px;
   border-radius: 999px;
   text-transform: uppercase;
@@ -463,24 +463,24 @@ const approvalStatus = computed(() => ({
 .smoke-status.success { background: #d1fae5; color: #065f46; }
 .smoke-status.error { background: #fecaca; color: #991b1b; }
 .smoke-status.skipped { background: #e5e7eb; color: #6b7280; }
-.smoke-dur { font-size: 10px; color: var(--text-tertiary); font-weight: 600; }
+.smoke-dur { font-size: 14px; color: var(--text-tertiary); font-weight: 600; }
 
-.smoke-meta { margin-top: 6px; font-size: 11px; color: var(--text-secondary); }
+.smoke-meta { margin-top: 6px; font-size: 15px; color: var(--text-secondary); }
 .smoke-meta code { font-family: ui-monospace, monospace; background: rgba(241, 243, 245, 0.8); padding: 1px 5px; border-radius: 4px; color: var(--text-primary); }
-.smoke-err { margin-top: 6px; font-size: 11px; color: #b4322a; font-weight: 500; }
+.smoke-err { margin-top: 6px; font-size: 15px; color: #b4322a; font-weight: 500; }
 .smoke-pre {
   margin: 10px 0 0;
   padding: 12px;
   background: #1e293b;
   border-radius: 8px;
   font-family: ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 15px;
   color: #e2e8f0;
   max-height: 240px;
   overflow: auto;
   white-space: pre-wrap;
 }
-.smoke-plan { list-style: decimal; padding-left: 24px; font-size: 12px; color: var(--text-secondary); }
+.smoke-plan { list-style: decimal; padding-left: 24px; font-size: 16px; color: var(--text-secondary); }
 .smoke-plan li { margin-bottom: 6px; }
 .smoke-plan code { font-family: ui-monospace, monospace; background: rgba(241, 243, 245, 0.8); padding: 1px 5px; border-radius: 4px; color: var(--text-primary); }
 </style>

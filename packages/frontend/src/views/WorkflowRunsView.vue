@@ -49,7 +49,7 @@ const tabs = computed(() => buildWorkflowDetailTabs(workflowId.value, label))
   <StudioDetailLayout
     :title="workflow?.name || label('运行记录', 'Workflow Runs')"
     :description="label('查看工作流最近的执行记录、触发来源和返回结果。', 'Inspect recent workflow executions, trigger source, and returned results.')"
-    :back-label="label('返回资产中枢', 'Back to Asset Hub')"
+    :back-label="label('返回 Studio', 'Back to Studio')"
     :tabs="tabs"
     :loading="loading"
     :loading-label="label('加载运行记录中…', 'Loading runs…')"
@@ -122,7 +122,7 @@ const tabs = computed(() => buildWorkflowDetailTabs(workflowId.value, label))
   align-items: center;
   gap: 40px;
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.2em;
@@ -140,7 +140,7 @@ const tabs = computed(() => buildWorkflowDetailTabs(workflowId.value, label))
   padding: 6px 18px;
   border-radius: 99px;
   background: rgba(255, 255, 255, 0.6);
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.12em;
@@ -158,7 +158,7 @@ pre {
   border-radius: 24px;
   overflow: auto;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.8;
 }
 

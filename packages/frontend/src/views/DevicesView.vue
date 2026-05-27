@@ -604,7 +604,7 @@ async function saveIp(device: UserDevice) {
 .eyebrow {
   display: inline-block;
   color: #10b981;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.2em;
@@ -645,7 +645,7 @@ h1 {
   border: 1px solid rgba(229, 231, 235, 0.8);
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.8);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -683,7 +683,7 @@ h1 {
   border-color: rgba(239, 68, 68, 0.15);
   background: rgba(254, 242, 242, 0.8);
   color: #ef4444;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 900;
   display: flex;
   align-items: center;
@@ -792,7 +792,7 @@ h1 {
   display: inline-block;
   padding: 3px 10px;
   border-radius: 99px;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -813,7 +813,7 @@ h1 {
   padding: 4px 12px;
   background: rgba(0, 0, 0, 0.03);
   border-radius: 8px;
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 800;
   color: var(--text-tertiary);
 }
@@ -825,7 +825,7 @@ h1 {
 }
 
 .info-line {
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--text-tertiary);
   opacity: 0.6;
@@ -842,14 +842,14 @@ h1 {
 }
 
 .ip-label {
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 800;
   color: var(--text-tertiary);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
 .ip-value {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
@@ -867,7 +867,7 @@ h1 {
   padding: 4px 10px;
   border: 1.5px solid #10b981;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 15px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-weight: 700;
   outline: none;
@@ -969,7 +969,7 @@ h1 {
 
 .form-row label {
   display: block;
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 800;
   color: var(--text-secondary);
   margin-bottom: 6px;
@@ -982,7 +982,7 @@ h1 {
   padding: 10px 14px;
   border: 1px solid rgba(229, 231, 235, 0.8);
   border-radius: 12px;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   outline: none;
   background: #fff;
@@ -1005,7 +1005,7 @@ h1 {
 .dialog-btn {
   padding: 10px 24px;
   border-radius: 12px;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 800;
   cursor: pointer;
   border: 1px solid rgba(229, 231, 235, 0.8);
@@ -1072,7 +1072,7 @@ h1 {
   border: 1px solid rgba(229, 231, 235, 0.8);
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.8);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -1112,7 +1112,7 @@ h1 {
   padding: 32px 0;
   color: var(--text-tertiary);
   font-weight: 700;
-  font-size: 14px;
+  font-size: 16px;
   opacity: 0.5;
 }
 

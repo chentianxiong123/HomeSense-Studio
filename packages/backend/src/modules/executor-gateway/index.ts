@@ -3,7 +3,6 @@ import { agentAdapterRegistry as defaultAgentAdapterRegistry, type AgentCliAdapt
 import { a2aClient as defaultA2aClient, type A2ASendParams } from '../a2a-client/index.js'
 import { serviceRegistry as defaultServiceRegistry } from '../service-registry/index.js'
 import { planLibrary as defaultPlanLibrary, type CompiledPlanDefinition, type PlanStepDefinition } from '../plan-library/index.js'
-import { workflowRuntime as defaultWorkflowRuntime } from '../workflow/run-workflow.js'
 import { memoryKernel as defaultMemoryKernel } from '../memory-kernel/index.js'
 
 interface ServiceRegistryInstance {
@@ -73,6 +72,7 @@ interface RegisteredExecutor {
 
 class ExecutorGatewayService {
   private registry = new Map<string, RegisteredExecutor>()
+  private workflowRuntime: WorkflowRuntimeInstance | null = null
 
   constructor(
     private readonly cliBridge: CLIBridge = defaultCliBridge,
@@ -80,12 +80,13 @@ class ExecutorGatewayService {
     private readonly a2aClient: A2AClientInstance = defaultA2aClient,
     private readonly serviceRegistry: ServiceRegistryInstance = defaultServiceRegistry,
     private readonly planLibrary: PlanLibraryInstance = defaultPlanLibrary,
-    private readonly workflowRuntime: WorkflowRuntimeInstance = defaultWorkflowRuntime,
     private readonly memoryKernel: MemoryKernelInstance = defaultMemoryKernel,
   ) {}
 
-  initialize(): void {
+  async initialize(): Promise<void> {
     this.registry.clear()
+    const { workflowRuntime } = await import('../workflow/run-workflow.js')
+    this.workflowRuntime = workflowRuntime
 
     this.register({
       name: 'cli.invoke',
@@ -152,7 +153,7 @@ class ExecutorGatewayService {
         throw new Error('workflow_id must be a number')
       }
       const inputs = (params.inputs as Record<string, unknown>) ?? {}
-      return this.workflowRuntime.runWorkflow(workflowId, inputs)
+      return this.workflowRuntime!.runWorkflow(workflowId, inputs)
     })
 
     this.register({

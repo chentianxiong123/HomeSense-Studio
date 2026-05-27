@@ -186,7 +186,7 @@ onUnmounted(() => {
 
 .user-id {
   display: block;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 900;
   color: var(--text-tertiary);
   margin-top: 6px;
@@ -202,7 +202,7 @@ onUnmounted(() => {
 .eyebrow {
   display: inline-block;
   color: #10b981;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.15em;
@@ -276,7 +276,7 @@ onUnmounted(() => {
 }
 
 .polling-overlay span {
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 900;
   color: #10b981;
   text-transform: uppercase;
@@ -299,7 +299,7 @@ onUnmounted(() => {
   border-radius: 14px;
   text-decoration: none;
   font-weight: 900;
-  font-size: 14px;
+  font-size: 16px;
   box-shadow: 0 8px 24px rgba(16, 185, 129, 0.25);
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -315,7 +315,7 @@ onUnmounted(() => {
   border: none;
   box-shadow: none;
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.15em;

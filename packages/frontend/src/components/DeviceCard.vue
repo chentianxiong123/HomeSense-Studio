@@ -121,7 +121,7 @@ const statusText = computed(() => {
 }
 
 .status-text {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--text-tertiary);
   text-transform: uppercase;

@@ -2,9 +2,9 @@
   "adb": {
     "device_id": "virtual-android-tv",
     "connected": true,
-    "connection_attempts": 28,
+    "connection_attempts": 59,
     "active_package": "com.xiaodianshi.tv.yst",
-    "last_launch_at": "2026-05-05T09:42:58.507Z",
+    "last_launch_at": "2026-05-20T07:43:47.433Z",
     "packages": [
       "com.xiaodianshi.tv.yst",
       "tv.danmaku.bili",

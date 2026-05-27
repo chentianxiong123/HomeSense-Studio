@@ -82,12 +82,12 @@ describe('buildAssetRecords', () => {
     expect(assets.find((asset) => asset.kind === 'skill')).toMatchObject({
       id: 'skill:adb.launch',
       badge: 'Skill',
-      route: '/studio/skills/adb.launch/overview',
+      route: '/assets/skills/adb.launch/overview',
     })
     expect(assets.find((asset) => asset.kind === 'manifest')).toMatchObject({
       id: 'manifest:cli.mi_adb',
       badge: 'CLI',
-      route: '/studio/manifests/cli.mi_adb/overview',
+      route: '/assets/manifests/cli.mi_adb/overview',
     })
   })
 })
@@ -116,7 +116,7 @@ describe('filterAssetsByKind', () => {
       description: '',
       status: 'ready',
       updatedAt: '2026-05-01T00:00:00.000Z',
-      route: '/studio/plans/x/overview',
+      route: '/assets/plans/x/overview',
       searchText: 'b',
       accent: '#2563eb',
     },

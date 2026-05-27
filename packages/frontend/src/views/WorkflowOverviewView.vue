@@ -61,7 +61,7 @@ const tabs = computed(() => buildWorkflowDetailTabs(workflowId.value, label))
   <StudioDetailLayout
     :title="workflow?.name || label('工作流详情', 'Workflow Detail')"
     :description="workflow?.description || label('查看工作流编译结果、节点图和运行入口。', 'Inspect workflow graph, metadata, and execution entry.')"
-    :back-label="label('返回资产中枢', 'Back to Asset Hub')"
+    :back-label="label('返回 Studio', 'Back to Studio')"
     :tabs="tabs"
     :loading="loading"
     :loading-label="label('加载工作流中…', 'Loading workflow…')"
@@ -126,7 +126,7 @@ const tabs = computed(() => buildWorkflowDetailTabs(workflowId.value, label))
 
 .panel h3 {
   margin: 0 0 32px;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 900;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -152,7 +152,7 @@ const tabs = computed(() => buildWorkflowDetailTabs(workflowId.value, label))
   display: block;
   margin-bottom: 14px;
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.2em;
@@ -171,7 +171,7 @@ const tabs = computed(() => buildWorkflowDetailTabs(workflowId.value, label))
   padding: 4px 14px;
   border-radius: 99px;
   background: rgba(0, 0, 0, 0.05);
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.1em;

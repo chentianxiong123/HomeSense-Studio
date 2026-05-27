@@ -116,25 +116,44 @@ export interface Conversation {
 export interface LLMProvider {
   id: number
   name: string
-  provider_type: 'openai' | 'deepseek' | 'ollama' | 'custom'
   api_base: string
   api_key: string
-  model_name: string
   enabled: boolean
-  is_default: boolean
   extra_config: Record<string, unknown>
 }
 
-export interface LLMModelSlot {
-  slot_name: 'planner' | 'fast' | 'vision' | 'embedding' | 'rerank' | 'local'
-  provider_type: 'openai' | 'deepseek' | 'ollama' | 'custom' | 'disabled'
-  api_base: string
-  api_key: string
+export interface LLMProviderConfig extends LLMProvider {}
+
+export interface LLMModel {
+  id: number
+  provider_id: number
   model_name: string
+  category: 'chat' | 'embedding' | 'rerank'
+  is_default: boolean
   enabled: boolean
-  dimensions: number | null
-  capabilities: string[]
-  extra_config: Record<string, unknown>
+}
+
+export interface LLMUsageEntry {
+  id: number
+  model_id: number | null
+  provider_id: number | null
+  provider_name: string
+  model_name: string
+  category: string
+  input_tokens: number
+  output_tokens: number
+  created_at: string
+}
+
+export interface LLMUsageTotals {
+  total_input: number
+  total_output: number
+  total_success: number
+  total_fail: number
+  daily: Array<{ date: string; provider_name: string; model_name: string; category: string; success_count: number; fail_count: number; input_tokens: number; output_tokens: number }>
+  by_provider: Array<{ provider_name: string; success: number; fail: number; input: number; output: number }>
+  by_model: Array<{ model_name: string; success: number; fail: number; input: number; output: number }>
+  by_category: Array<{ category: string; success: number; fail: number; input: number; output: number }>
 }
 
 export interface UserDevice {
@@ -226,14 +245,14 @@ export const api = {
     miCandidates: () => request<{ devices: MiDeviceCandidate[] }>('/api/user-devices/mi-candidates'),
     ping: () => request<{ online: Record<number, boolean> }>('/api/user-devices/ping-all'),
     capabilities: (id: number, refresh?: boolean) =>
-      request<{ status: string; data?: { did: string; name: string; device_type: string; room: string; capabilities: Array<{ name: string; kind: string; type?: string; value_resolution?: string[] }> }; error?: string; message?: string }>(`/api/user-devices/${id}/capabilities${refresh ? '?refresh=true' : ''}`),
+      request<{ status: string; data?: { did: string; name: string; device_type: string; room: string; capabilities: Array<{ name: string; kind: string; type?: string; source?: string; output?: Record<string, { type: string; description: string }> | null }> }; error?: string; message?: string }>(`/api/user-devices/${id}/capabilities${refresh ? '?refresh=true' : ''}`),
     executeCapability: (id: number, capability: string, params?: string) =>
-      request<{ status: string; data?: { capability: string; key_id: string; result: unknown }; error?: string; message?: string }>(`/api/user-devices/${id}/capabilities/execute`, {
+      request<{ status: string; data?: { capability: string; kind?: string; output?: unknown }; error?: string; message?: string }>(`/api/user-devices/${id}/capabilities/execute`, {
         method: 'POST',
         body: JSON.stringify({ capability, ...(params !== undefined ? { params } : {}) }),
       }),
     capabilityHistory: (id: number) =>
-      request<{ history: Array<{ time: string; deviceId: string; capability: string; params: string; status: string }> }>(`/api/user-devices/${id}/capabilities/history`),
+      request<{ history: Array<{ time: string; deviceId: string; capability: string; params: string; status: string; result?: string }> }>(`/api/user-devices/${id}/capabilities/history`),
     irKeys: (id: number) =>
       request<{ status: string; data?: { controller_id: string; name: string; keys: Array<{ key_id: string; name: string; type?: string }> }; error?: string; message?: string }>(`/api/user-devices/${id}/ir-keys`),
     irPress: (id: number, keyId: string) =>
@@ -280,33 +299,73 @@ export const api = {
       request<{ conversations: Conversation[] } | { messages: ConversationMessage[] }>(
         conversationId ? `/api/chat/history?conversation_id=${conversationId}` : '/api/chat/history',
       ),
-    messages: (id: number) =>
-      request<{ messages: ConversationMessage[] }>(`/api/chat/${id}`),
-  },
+    messages: (id: number, cursor?: number, limit?: number) => {
+      const params = new URLSearchParams()
+      if (cursor) params.set('cursor', String(cursor))
+      if (limit) params.set('limit', String(limit))
+      const qs = params.toString()
+      return request<{ messages: ConversationMessage[]; hasMore?: boolean }>(`/api/chat/${id}${qs ? '?' + qs : ''}`)
+    },
+},
   llm: {
-    listProviders: () => request<{ providers: LLMProvider[] }>('/api/llm/providers'),
-    listSlots: () => request<{ slots: LLMModelSlot[] }>('/api/llm/slots'),
-    getSlot: (slot: LLMModelSlot['slot_name']) =>
-      request<{ slot: LLMModelSlot | null }>(`/api/llm/slots/${slot}`),
-    updateSlot: (slot: LLMModelSlot['slot_name'], body: Partial<LLMModelSlot>) =>
-      request<{ status: string; data: LLMModelSlot }>(`/api/llm/slots/${slot}`, {
+    listProviders: () =>
+      request<{ providers: LLMProviderConfig[] }>('/api/llm/providers'),
+    listModels: (providerId: number, category?: string) =>
+      request<{ models: LLMModel[] }>(`/api/llm/providers/${providerId}/models${category ? `?category=${category}` : ''}`),
+    createProvider: (body: Omit<LLMProviderConfig, 'id'>) =>
+      request<{ id: number }>('/api/llm/providers', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    updateProvider: (id: number, body: Partial<LLMProviderConfig>) =>
+      request<{ status: string }>(`/api/llm/providers/${id}`, {
         method: 'PUT',
         body: JSON.stringify(body),
       }),
-    addProvider: (provider: Partial<LLMProvider>) =>
-      request<{ id: number }>('/api/llm/providers', {
-        method: 'POST',
-        body: JSON.stringify(provider),
-      }),
-    updateProvider: (id: number, provider: Partial<LLMProvider>) =>
-      request<{ status: string }>(`/api/llm/providers/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(provider),
-      }),
     deleteProvider: (id: number) =>
       request<{ status: string }>(`/api/llm/providers/${id}`, { method: 'DELETE' }),
-    setDefault: (id: number) =>
-      request<{ status: string }>(`/api/llm/providers/${id}/default`, { method: 'POST' }),
+    addProvider: (body: Omit<LLMProviderConfig, 'id'>) =>
+      request<{ id: number }>('/api/llm/providers', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    createModel: (providerId: number, body: { model_name: string; category?: string; is_default?: boolean; enabled?: boolean }) =>
+      request<{ id: number }>(`/api/llm/providers/${providerId}/models`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    queryProviderModels: (providerId: number, body?: { api_base?: string; api_key?: string }) =>
+      request<{ models: string[]; status?: string; error?: string; message?: string }>(`/api/llm/providers/${providerId}/models/query`, {
+        method: 'POST',
+        body: JSON.stringify(body ?? {}),
+      }),
+    updateModel: (id: number, body: Partial<LLMModel>) =>
+      request<{ status: string }>(`/api/llm/models/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    deleteModel: (id: number) =>
+      request<{ status: string }>(`/api/llm/models/${id}`, { method: 'DELETE' }),
+    setDefaultModel: (id: number) =>
+      request<{ status: string }>(`/api/llm/models/${id}/default`, { method: 'POST' }),
+    usage: (params?: { provider_id?: number; model_id?: number; model_name?: string; category?: string; from?: string; to?: string; limit?: number; offset?: number }) => {
+      const qs = new URLSearchParams()
+      if (params) {
+        for (const [k, v] of Object.entries(params)) {
+          if (v != null && v !== '') qs.set(k, String(v))
+        }
+      }
+      const query = qs.toString()
+      return request<{ entries: LLMUsageEntry[]; total: number }>(`/api/llm/usage${query ? `?${query}` : ''}`)
+    },
+    usageTotals: () =>
+      request<LLMUsageTotals>('/api/llm/usage/totals'),
+    chatModels: () =>
+      request<{ models: Array<{ id: number; provider_name: string; model_name: string; is_default: boolean }> }>('/api/llm/chat-models'),
+    defaultModel: (category?: string) =>
+      request<{ provider_name: string; model_name: string; category: string }>(`/api/llm/default-model${category ? `?category=${category}` : ''}`),
+    selectModel: (id: number) =>
+      request<{ status: string }>(`/api/llm/models/${id}/set-default`, { method: 'POST' }),
   },
   health: () => request<{ status: string; timestamp: string }>('/api/health'),
   services: {
@@ -437,7 +496,7 @@ export const api = {
       }>('/api/memory/status'),
     memoryCompiled: () =>
       request<{ items: Array<Record<string, unknown>> }>('/api/memory/compiled'),
-    workflowRuns: (workflowId: number) =>
+workflowRuns: (workflowId: number) =>
       request<{ runs: Array<Record<string, unknown>> }>(`/api/workflows/${workflowId}/runs`),
   },
 }

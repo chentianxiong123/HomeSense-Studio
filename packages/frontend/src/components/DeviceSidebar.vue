@@ -99,7 +99,7 @@ function getDomainIcon(domain: string): string {
 
 .sidebar-header h4 {
   margin: 0;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 800;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -112,7 +112,7 @@ function getDomainIcon(domain: string): string {
   color: white;
   border: none;
   border-radius: 8px;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 700;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(16, 163, 127, 0.2);
@@ -132,7 +132,7 @@ function getDomainIcon(domain: string): string {
 .error-msg {
   padding: 10px 20px;
   color: #dc2626;
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 500;
   background: rgba(254, 242, 242, 0.8);
   border-bottom: 1px solid rgba(239, 68, 68, 0.1);
@@ -142,7 +142,7 @@ function getDomainIcon(domain: string): string {
   padding: 48px 20px;
   text-align: center;
   color: var(--text-tertiary);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
 }
 
@@ -190,7 +190,7 @@ function getDomainIcon(domain: string): string {
 }
 
 .device-name {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
   white-space: nowrap;
@@ -200,7 +200,7 @@ function getDomainIcon(domain: string): string {
 }
 
 .device-meta {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-tertiary);
   margin-top: 4px;
@@ -221,7 +221,7 @@ function getDomainIcon(domain: string): string {
 }
 
 .entity-badge {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 700;
   padding: 2px 8px;
   background: rgba(241, 245, 249, 0.8);
@@ -231,7 +231,7 @@ function getDomainIcon(domain: string): string {
 }
 
 .entity-more {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   color: var(--text-tertiary);
   padding: 2px 4px;

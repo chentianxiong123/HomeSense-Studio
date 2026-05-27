@@ -12,8 +12,8 @@ interface EventBusInstance {
 }
 
 interface LLMServiceInstance {
-  getModelSlot(slot: string): { provider_type: string; api_base: string; model_name: string; dimensions?: number | null; enabled: boolean } | undefined
-  embed(opts: { slot?: string; input: string | string[] }): Promise<{ data: Array<{ index: number; embedding: number[] }> }>
+  embed(opts: { model_id?: number; input: string | string[] }): Promise<{ data: Array<{ index: number; embedding: number[] }> }>
+  getDefaultModel(category: string): { id: number; provider_id: number; model_name: string; category: string; is_default: boolean; enabled: boolean }
 }
 
 interface SkillsServiceInstance {
@@ -151,28 +151,32 @@ export class MemoryKernelService {
   }
 
   ensureCanonicalEmbeddingProfile(): EmbeddingProfile | null {
-    const slot = this.llmService.getModelSlot('embedding')
     const profileName = process.env.MODEL_PROFILE || 'default'
     const existing = this.getCanonicalEmbeddingProfile()
+    let model: { id: number; provider_id: number; model_name: string; category: string; is_default: boolean; enabled: boolean } | null = null
+    let provider: { api_base: string; name: string } | null = null
+    try {
+      model = this.llmService.getDefaultModel('embedding')
+      const db = this.getDb()
+      provider = db.prepare('SELECT api_base, name FROM llm_providers WHERE id = ?').get(model.provider_id) as { api_base: string; name: string } | undefined ?? null
+    } catch {}
 
-    if (!slot || !slot.enabled || !slot.model_name) {
+    if (!model || !provider) {
       return existing
     }
 
     if (existing) {
-      const changed = existing.provider_type !== slot.provider_type
-        || existing.api_base !== slot.api_base
-        || existing.model_name !== slot.model_name
-        || existing.dimensions !== (slot.dimensions ?? null)
+      const changed = existing.model_name !== model.model_name
+        || existing.api_base !== provider.api_base
 
       if (changed) {
         this.repo.updateCanonicalEmbeddingProfile({
           profileName: existing.profile_name,
           slotName: 'embedding',
-          providerType: slot.provider_type,
-          apiBase: slot.api_base,
-          modelName: slot.model_name,
-          dimensions: slot.dimensions ?? null,
+          providerType: 'openai',
+          apiBase: provider.api_base,
+          modelName: model.model_name,
+          dimensions: null,
         })
       }
 
@@ -182,10 +186,10 @@ export class MemoryKernelService {
     this.repo.upsertCanonicalEmbeddingProfile({
       profileName,
       slotName: 'embedding',
-      providerType: slot.provider_type,
-      apiBase: slot.api_base,
-      modelName: slot.model_name,
-      dimensions: slot.dimensions ?? null,
+      providerType: 'openai',
+      apiBase: provider.api_base,
+      modelName: model.model_name,
+      dimensions: null,
       notes: 'Canonical embedding profile. Rebuild required before changing embedding model.',
     })
 
@@ -203,30 +207,24 @@ export class MemoryKernelService {
 
   getStatus(): MemoryKernelStatus {
     const canonical = this.getCanonicalEmbeddingProfile()
-    const slot = this.llmService.getModelSlot('embedding')
+    let currentEmbeddingModel: { model_name: string; api_base: string } | null = null
+    try {
+      const m = this.llmService.getDefaultModel('embedding')
+      const db = this.getDb()
+      const p = db.prepare('SELECT api_base FROM llm_providers WHERE id = ?').get(m.provider_id) as { api_base: string } | undefined
+      if (p) currentEmbeddingModel = { model_name: m.model_name, api_base: p.api_base }
+    } catch {}
     const memoryEntityCount = this.repo.countEntities()
     const compiledKnowledgeCount = this.repo.countCompiledKnowledge()
 
     return {
       canonical_profile: canonical,
-      current_embedding_slot: slot
-        ? {
-            provider_type: slot.provider_type,
-            api_base: slot.api_base,
-            model_name: slot.model_name,
-            dimensions: slot.dimensions ?? null,
-            enabled: slot.enabled,
-          }
+      current_embedding_slot: currentEmbeddingModel
+        ? { provider_type: 'openai', api_base: currentEmbeddingModel.api_base, model_name: currentEmbeddingModel.model_name, dimensions: null, enabled: true }
         : null,
       embedding_locked: canonical !== null,
       slot_matches_canonical: canonical
-        ? Boolean(
-            slot
-            && slot.enabled
-            && slot.model_name === canonical.model_name
-            && slot.provider_type === canonical.provider_type
-            && (slot.dimensions ?? null) === canonical.dimensions,
-          )
+        ? Boolean(currentEmbeddingModel && currentEmbeddingModel.model_name === canonical.model_name)
         : false,
       memory_entity_count: memoryEntityCount,
       compiled_knowledge_count: compiledKnowledgeCount,
@@ -491,7 +489,6 @@ export class MemoryKernelService {
     if (!canonical) return []
 
     const queryEmbedding = await this.llmService.embed({
-      slot: 'embedding',
       input: query,
     })
     const vector = queryEmbedding.data[0]?.embedding ?? []
@@ -560,7 +557,6 @@ export class MemoryKernelService {
       const sliceRows = rows.slice(offset, offset + batchSize)
       const sliceTexts = texts.slice(offset, offset + batchSize)
       const result = await this.llmService.embed({
-        slot: 'embedding',
         input: sliceTexts,
       })
 

@@ -767,7 +767,7 @@ function formatJsonConfigValue(value: any): string {
 
 .eyebrow {
   display: block;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.18em;
@@ -790,7 +790,7 @@ function formatJsonConfigValue(value: any): string {
   border: 1px solid rgba(239, 68, 68, 0.2);
   background: rgba(254, 242, 242, 0.6);
   color: #ef4444;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -824,7 +824,7 @@ function formatJsonConfigValue(value: any): string {
 
 .section-head h5 {
   margin: 0;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.18em;
@@ -857,14 +857,14 @@ function formatJsonConfigValue(value: any): string {
 }
 
 .card-label {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 900;
   color: var(--text-primary);
   letter-spacing: -0.01em;
 }
 
 .type-badge {
-  font-size: 9px;
+  font-size: 13px;
   padding: 4px 12px;
   border-radius: 99px;
   background: rgba(241, 245, 249, 0.8);
@@ -886,7 +886,7 @@ function formatJsonConfigValue(value: any): string {
 }
 
 .node-description {
-  font-size: 12px;
+  font-size: 16px;
   line-height: 1.7;
   color: var(--text-secondary);
   margin-bottom: 20px;
@@ -901,7 +901,7 @@ function formatJsonConfigValue(value: any): string {
 }
 
 .subsection-title {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.12em;
@@ -923,14 +923,14 @@ function formatJsonConfigValue(value: any): string {
 }
 
 .row-key {
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 800;
   color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
 .row-type {
-  font-size: 10px;
+  font-size: 14px;
   color: var(--primary-color);
   background: rgba(16, 163, 127, 0.08);
   padding: 3px 10px;
@@ -941,7 +941,7 @@ function formatJsonConfigValue(value: any): string {
 }
 
 .row-help {
-  font-size: 10px;
+  font-size: 14px;
   color: var(--text-tertiary);
   margin: 4px 0 0;
   line-height: 1.4;
@@ -955,7 +955,7 @@ function formatJsonConfigValue(value: any): string {
 
 .form-group label {
   display: block;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.14em;
@@ -969,7 +969,7 @@ function formatJsonConfigValue(value: any): string {
   background: rgba(248, 250, 252, 0.55);
   border: 1px solid rgba(229, 231, 235, 0.6);
   border-radius: 16px;
-  font-size: 14px;
+  font-size: 16px;
   color: var(--text-primary);
   outline: none;
   transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
@@ -987,7 +987,7 @@ function formatJsonConfigValue(value: any): string {
 .styled-textarea {
   resize: vertical;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
+  font-size: 16px;
   line-height: 1.6;
 }
 
@@ -1008,7 +1008,7 @@ function formatJsonConfigValue(value: any): string {
 }
 
 .styled-checkbox span {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 800;
   color: var(--text-secondary);
 }
@@ -1019,7 +1019,7 @@ function formatJsonConfigValue(value: any): string {
 }
 
 .type-hint {
-  font-size: 9px;
+  font-size: 13px;
   color: var(--text-tertiary);
   background: rgba(0,0,0,0.05);
   padding: 3px 8px;
@@ -1030,7 +1030,7 @@ function formatJsonConfigValue(value: any): string {
 }
 
 .hint-text {
-  font-size: 11px;
+  font-size: 15px;
   color: var(--text-tertiary);
   margin-top: 12px;
   font-weight: 700;
@@ -1040,7 +1040,7 @@ function formatJsonConfigValue(value: any): string {
 
 /* Trace Styles */
 .status-chip {
-  font-size: 9px;
+  font-size: 13px;
   padding: 4px 14px;
   border-radius: 99px;
   font-weight: 900;
@@ -1056,7 +1056,7 @@ function formatJsonConfigValue(value: any): string {
 .trace-meta {
   display: flex;
   gap: 16px;
-  font-size: 10px;
+  font-size: 14px;
   color: var(--text-tertiary);
   margin-bottom: 16px;
   font-weight: 900;
@@ -1073,7 +1073,7 @@ function formatJsonConfigValue(value: any): string {
   background: rgba(239, 68, 68, 0.08);
   border: 1px solid rgba(239, 68, 68, 0.2);
   color: #b91c1c;
-  font-size: 12px;
+  font-size: 16px;
   line-height: 1.6;
   margin-bottom: 16px;
   border-radius: 14px;
@@ -1102,7 +1102,7 @@ function formatJsonConfigValue(value: any): string {
 
 .styled-details summary {
   padding: 14px 18px;
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 900;
   color: var(--text-secondary);
   cursor: pointer;
@@ -1121,7 +1121,7 @@ function formatJsonConfigValue(value: any): string {
   background: #1e293b;
   color: #e2e8f0;
   border-radius: 0 0 16px 16px;
-  font-size: 12px;
+  font-size: 16px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   overflow-x: auto;
   margin: 0;
@@ -1130,7 +1130,7 @@ function formatJsonConfigValue(value: any): string {
 }
 
 .compact-json {
-  font-size: 11px;
+  font-size: 15px;
   padding: 16px;
   border-radius: 14px;
   border-top: none;
@@ -1167,14 +1167,14 @@ function formatJsonConfigValue(value: any): string {
 }
 
 .var-name {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 900;
   color: var(--primary-color);
   letter-spacing: -0.01em;
 }
 
 .var-source {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -1202,7 +1202,7 @@ function formatJsonConfigValue(value: any): string {
 }
 
 .binding-path {
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 900;
   color: var(--text-primary);
   font-family: ui-monospace, monospace;
@@ -1242,7 +1242,7 @@ function formatJsonConfigValue(value: any): string {
   padding: 10px 14px;
   border: 1px solid rgba(229, 231, 235, 0.6);
   border-radius: 12px;
-  font-size: 12px;
+  font-size: 16px;
   background: rgba(255, 255, 255, 0.6);
   color: var(--primary-color);
   font-family: ui-monospace, monospace;
@@ -1258,7 +1258,7 @@ function formatJsonConfigValue(value: any): string {
 }
 
 .binding-source-label {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -1267,7 +1267,7 @@ function formatJsonConfigValue(value: any): string {
 
 /* Executor Specific */
 .cap-tag, .stat-tag, .trait {
-  font-size: 9px;
+  font-size: 13px;
   padding: 4px 12px;
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.04);
@@ -1298,7 +1298,7 @@ function formatJsonConfigValue(value: any): string {
 }
 
 .eyebrow-mini {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   text-transform: uppercase;
   color: var(--text-tertiary);
@@ -1311,7 +1311,7 @@ function formatJsonConfigValue(value: any): string {
   border: 1px solid var(--primary-color);
   background: transparent;
   color: var(--primary-color);
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 900;
   cursor: pointer;
   text-transform: uppercase;
@@ -1327,7 +1327,7 @@ function formatJsonConfigValue(value: any): string {
 }
 
 .executor-description, .agent-desc {
-  font-size: 12px;
+  font-size: 16px;
   color: var(--text-secondary);
   line-height: 1.7;
   margin-bottom: 16px;
@@ -1346,7 +1346,7 @@ function formatJsonConfigValue(value: any): string {
 }
 
 .schema-name {
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 900;
   color: var(--text-primary);
   margin-bottom: 6px;
@@ -1354,7 +1354,7 @@ function formatJsonConfigValue(value: any): string {
 }
 
 .schema-desc {
-  font-size: 11px;
+  font-size: 15px;
   color: var(--text-secondary);
   margin-bottom: 12px;
   line-height: 1.5;

@@ -43,7 +43,7 @@ const recent = computed(() => props.items.slice(-3))
   gap: 12px;
   padding: 10px 16px;
   border-radius: 12px;
-  font-size: 13px;
+  font-size: 15px;
   background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(12px);
   border: 1px solid rgba(229, 231, 235, 0.5);
@@ -76,7 +76,7 @@ const recent = computed(() => props.items.slice(-3))
 .btw-chip.kind-workflow_completed::before { background: #f59e0b; }
 
 .btw-kind {
-  font-size: 9px;
+  font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   font-weight: 800;
@@ -107,7 +107,7 @@ const recent = computed(() => props.items.slice(-3))
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  font-size: 14px;
+  font-size: 16px;
   cursor: pointer;
   line-height: 1;
   transition: all 0.2s ease;

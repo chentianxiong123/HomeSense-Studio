@@ -94,7 +94,7 @@ function goTo(route: string) {
 .eyebrow {
   display: inline-block;
   color: #10b981;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.15em;
@@ -161,7 +161,7 @@ h1 {
 }
 
 .cli-subtitle {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--text-tertiary);
   font-weight: 700;
   line-height: 1.6;

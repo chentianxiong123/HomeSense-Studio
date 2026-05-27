@@ -18,8 +18,8 @@ describe('buildSkillDetailTabs', () => {
     const tabs = buildSkillDetailTabs('cli/adb.launch', (zh, en) => `${zh}|${en}`)
 
     expect(tabs).toEqual([
-      { route: '/studio/skills/cli%2Fadb.launch/overview', label: '概览|Overview' },
-      { route: '/studio/skills/cli%2Fadb.launch/prompt', label: '完整提示词|Prompt' },
+      { route: '/assets/skills/cli%2Fadb.launch/overview', label: '概览|Overview' },
+      { route: '/assets/skills/cli%2Fadb.launch/prompt', label: '完整提示词|Prompt' },
     ])
   })
 })

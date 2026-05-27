@@ -108,7 +108,7 @@ function levelLabel(level: 1 | 2 | 3) {
   gap: 10px;
 }
 .route-level {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   color: #2563eb;
   background: rgba(37, 99, 235, 0.1);
@@ -118,7 +118,7 @@ function levelLabel(level: 1 | 2 | 3) {
   letter-spacing: 0.05em;
 }
 .route-intent {
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
   background: rgba(0, 0, 0, 0.05);
@@ -130,7 +130,7 @@ function levelLabel(level: 1 | 2 | 3) {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -157,7 +157,7 @@ function levelLabel(level: 1 | 2 | 3) {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 800;
   color: var(--text-primary);
   letter-spacing: -0.01em;
@@ -168,7 +168,7 @@ function levelLabel(level: 1 | 2 | 3) {
   gap: 8px;
 }
 .candidate-kind {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   color: #7c3aed;
   background: rgba(124, 58, 237, 0.1);
@@ -178,14 +178,14 @@ function levelLabel(level: 1 | 2 | 3) {
   letter-spacing: 0.05em;
 }
 .candidate-confidence {
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 800;
   font-family: ui-monospace, monospace;
   color: #059669;
 }
 .candidate-goal {
   margin-top: 6px;
-  font-size: 12px;
+  font-size: 16px;
   color: var(--text-secondary);
   line-height: 1.6;
   font-weight: 500;
@@ -203,7 +203,7 @@ function levelLabel(level: 1 | 2 | 3) {
   margin-top: 8px;
 }
 .tag {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--text-secondary);
   background: rgba(0, 0, 0, 0.04);
@@ -211,7 +211,7 @@ function levelLabel(level: 1 | 2 | 3) {
   padding: 2px 8px;
 }
 .evidence-chip {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-tertiary);
   background: rgba(248, 250, 252, 0.8);
@@ -225,7 +225,7 @@ function levelLabel(level: 1 | 2 | 3) {
 }
 .aux-block h4 {
   margin: 0 0 8px;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -237,7 +237,7 @@ function levelLabel(level: 1 | 2 | 3) {
   gap: 6px;
 }
 .aux-chip {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-secondary);
   background: rgba(248, 250, 252, 0.8);
@@ -255,7 +255,7 @@ function levelLabel(level: 1 | 2 | 3) {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--text-secondary);
 }

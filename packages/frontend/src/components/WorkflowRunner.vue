@@ -361,7 +361,7 @@ function compactRows(rows: Array<[string, string]>): Array<{ label: string; valu
 
 .runner-header h4 {
   margin: 0;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 800;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -371,7 +371,7 @@ function compactRows(rows: Array<[string, string]>): Array<{ label: string; valu
 .status-tag {
   padding: 4px 12px;
   border-radius: 99px;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -494,14 +494,14 @@ function compactRows(rows: Array<[string, string]>): Array<{ label: string; valu
 }
 
 .step-name {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 800;
   color: var(--text-primary);
   letter-spacing: -0.01em;
 }
 
 .step-type {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -510,14 +510,14 @@ function compactRows(rows: Array<[string, string]>): Array<{ label: string; valu
 }
 
 .step-duration {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--text-tertiary);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
 .step-error {
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 600;
   color: #ef4444;
   background: rgba(254, 242, 242, 0.6);
@@ -528,7 +528,7 @@ function compactRows(rows: Array<[string, string]>): Array<{ label: string; valu
 }
 
 .step-status {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -546,7 +546,7 @@ function compactRows(rows: Array<[string, string]>): Array<{ label: string; valu
 
 .summary-title {
   margin-bottom: 10px;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -559,7 +559,7 @@ function compactRows(rows: Array<[string, string]>): Array<{ label: string; valu
   grid-template-columns: 80px minmax(0, 1fr);
   gap: 16px;
   margin-top: 8px;
-  font-size: 11px;
+  font-size: 15px;
 }
 
 .summary-label {
@@ -583,7 +583,7 @@ function compactRows(rows: Array<[string, string]>): Array<{ label: string; valu
 
 .empty {
   color: var(--text-tertiary);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   text-align: center;
   padding: 48px 0;

@@ -410,7 +410,7 @@ function sourceTags(d: UserDevice): string[] {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.8);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 800;
   cursor: pointer;
   margin-bottom: 24px;
@@ -439,7 +439,7 @@ function sourceTags(d: UserDevice): string[] {
 .eyebrow {
   display: inline-block;
   color: #10b981;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.2em;
@@ -466,7 +466,7 @@ h1 {
   display: inline-block;
   padding: 3px 10px;
   border-radius: 99px;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -487,14 +487,14 @@ h1 {
   padding: 6px 14px;
   background: rgba(0, 0, 0, 0.03);
   border-radius: 10px;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text-tertiary);
 }
 
 .meta-chip.monospace {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
+  font-size: 16px;
 }
 
 .error-line {
@@ -502,7 +502,7 @@ h1 {
   border-color: rgba(239, 68, 68, 0.15);
   background: rgba(254, 242, 242, 0.8);
   color: #ef4444;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 900;
   box-shadow: 0 8px 24px rgba(239, 68, 68, 0.08);
 }
@@ -548,7 +548,7 @@ h1 {
   border: 1px solid rgba(229, 231, 235, 0.8);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.8);
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 800;
   color: var(--text-secondary);
   cursor: pointer;
@@ -567,7 +567,7 @@ h1 {
   padding: 48px 0;
   color: var(--text-tertiary);
   font-weight: 700;
-  font-size: 14px;
+  font-size: 16px;
   opacity: 0.6;
 }
 
@@ -589,7 +589,7 @@ h1 {
 
 .cap-group-title {
   margin: 0 0 16px;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -679,7 +679,7 @@ h1 {
 }
 
 .cap-card-type {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -701,7 +701,7 @@ h1 {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.7);
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.15s;
@@ -735,7 +735,7 @@ h1 {
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.7);
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.2s;
@@ -751,7 +751,7 @@ h1 {
 .exec-feedback {
   padding: 12px 20px;
   border-radius: 12px;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   animation: fadeIn 0.2s ease;
 }
@@ -791,7 +791,7 @@ h1 {
   padding: 8px 12px;
   border: 1px solid rgba(99, 102, 241, 0.2);
   border-radius: 10px;
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 600;
   background: rgba(255, 255, 255, 0.8);
   color: var(--text-primary);
@@ -873,13 +873,13 @@ h1 {
 }
 
 .history-cap {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
 }
 
 .history-time {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--text-tertiary);
   opacity: 0.5;
@@ -894,7 +894,7 @@ h1 {
 }
 
 .history-params {
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--text-tertiary);
 }
@@ -903,12 +903,12 @@ h1 {
   background: rgba(99, 102, 241, 0.08);
   padding: 2px 8px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: 15px;
   color: #6366f1;
 }
 
 .history-result {
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 700;
 }
 

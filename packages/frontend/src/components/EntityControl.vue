@@ -150,7 +150,7 @@ function getSliderValue(): number {
 }
 
 .entity-name {
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 800;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -236,7 +236,7 @@ input:checked + .slider:before {
 .range-slider::-webkit-slider-thumb:hover { transform: scale(1.1); box-shadow: 0 4px 8px rgba(0,0,0,0.15); }
 
 .range-value {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
   min-width: 44px;
@@ -252,7 +252,7 @@ input:checked + .slider:before {
 }
 
 .unknown-value {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--text-tertiary);
   text-transform: uppercase;

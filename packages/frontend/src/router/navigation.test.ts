@@ -14,7 +14,7 @@ describe('normalizeRememberedRoute', () => {
     expect(normalizeRememberedRoute('/devices')).toBe('/devices')
     expect(normalizeRememberedRoute('/integrations')).toBe('/integrations')
     expect(normalizeRememberedRoute('/studio/workflows/9/editor')).toBe('/studio/workflows/9/editor')
-    expect(normalizeRememberedRoute('/studio/manifests/cli.mi_adb/overview')).toBe('/studio/manifests/cli.mi_adb/overview')
+    expect(normalizeRememberedRoute('/assets/manifests/cli.mi_adb/overview')).toBe('/assets/manifests/cli.mi_adb/overview')
   })
 })
 

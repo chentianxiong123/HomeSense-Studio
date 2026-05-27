@@ -10,6 +10,8 @@ const { locale, setLocale, t } = useLocale()
 const navItems = computed(() => [
   { key: 'chat', label: t('app.chat'), route: '/chat' },
   { key: 'studio', label: t('app.studio'), route: '/studio' },
+  { key: 'assets', label: locale.value === 'zh' ? '资产' : 'Assets', route: '/assets' },
+  { key: 'providers', label: locale.value === 'zh' ? '供应商' : 'Providers', route: '/providers' },
   { key: 'devices', label: locale.value === 'zh' ? '设备' : 'Devices', route: '/devices' },
   { key: 'integrations', label: locale.value === 'zh' ? '集成' : 'Integrations', route: '/integrations' },
 ])
@@ -138,7 +140,7 @@ html, body, #app {
   background: transparent;
   color: var(--text-tertiary);
   cursor: pointer;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 900;
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   text-transform: uppercase;
@@ -192,7 +194,7 @@ html, body, #app {
   background: transparent;
   color: var(--text-tertiary);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 900;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   text-transform: uppercase;
@@ -219,7 +221,7 @@ html, body, #app {
   background: rgba(255, 255, 255, 0.8);
   color: var(--text-primary);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 900;
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   text-transform: uppercase;

@@ -50,7 +50,17 @@ export interface MemoryHit {
   snippet?: string
 }
 
-import type { HistoryItem } from '../conversation/index.js'
+export interface HistoryItem {
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  content: string
+  tool_calls?: Array<{
+    id: string
+    type: 'function'
+    function: { name: string; arguments: string }
+  }>
+  tool_call_id?: string
+  name?: string
+}
 
 export interface AgentStreamContext {
   conversation_id: number

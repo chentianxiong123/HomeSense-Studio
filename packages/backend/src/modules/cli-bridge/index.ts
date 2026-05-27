@@ -215,6 +215,9 @@ const CLI_SCHEMAS: Record<string, Record<string, z.ZodSchema>> = {
     ensure_connected: z.object({ device: z.string(), dev: z.string().optional(), initial_wait_seconds: z.number().optional(), max_attempts: z.number().optional(), backoff_seconds: z.number().optional() }),
     wake: z.object({ device: z.string().optional(), dev: z.string().optional() }).optional(),
     wakeup: z.object({ device: z.string().optional(), dev: z.string().optional() }).optional(),
+    volume_up: z.object({ device: z.string().optional(), dev: z.string().optional() }).optional(),
+    volume_down: z.object({ device: z.string().optional(), dev: z.string().optional() }).optional(),
+    power: z.object({ device: z.string().optional(), dev: z.string().optional() }).optional(),
   },
 }
 

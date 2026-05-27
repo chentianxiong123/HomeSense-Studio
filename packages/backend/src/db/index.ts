@@ -137,11 +137,19 @@ function createTables(db: Database.Database) {
     )`,
     `CREATE TABLE IF NOT EXISTS llm_providers (
       id INTEGER NOT NULL, name TEXT NOT NULL,
-      provider_type TEXT NOT NULL CHECK (provider_type IN ('openai','deepseek','ollama','mimo','custom')),
-      api_base TEXT NOT NULL DEFAULT '', api_key TEXT NOT NULL DEFAULT '', model_name TEXT NOT NULL DEFAULT '',
+      api_base TEXT NOT NULL DEFAULT '', api_key TEXT NOT NULL DEFAULT '',
       enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
-      is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0,1)),
       extra_config TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (id AUTOINCREMENT)
+    )`,
+    `CREATE TABLE IF NOT EXISTS llm_models (
+      id INTEGER NOT NULL,
+      provider_id INTEGER NOT NULL,
+      model_name TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'chat' CHECK (category IN ('chat', 'embedding', 'rerank')),
+      is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0,1)),
+      enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
       created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (id AUTOINCREMENT)
     )`,
@@ -264,8 +272,12 @@ function runMigrations(db: Database.Database) {
   ensureColumns(db, 'conversation_messages', [
     { name: 'tool_call_id', sql: "ALTER TABLE conversation_messages ADD COLUMN tool_call_id TEXT NULL" },
   ])
+  ensureColumns(db, 'llm_providers', [
+    { name: 'category', sql: "ALTER TABLE llm_providers ADD COLUMN category TEXT NOT NULL DEFAULT 'chat' CHECK (category IN ('chat', 'embedding', 'rerank'))" },
+  ])
   migrateWorkflowNodesTable(db)
   migrateLlmSlotsCheckConstraint(db)
+  migrateLlmProvidersToNewSchema(db)
   migrateDropDeprecatedTables(db)
   migrateDeviceCapabilities(db)
   migrateDeviceApps(db)
@@ -449,6 +461,47 @@ function migrateLlmSlotsCheckConstraint(db: Database.Database) {
   }
 }
 
+function migrateLlmProvidersToNewSchema(db: Database.Database) {
+  const existingCols = db.prepare("PRAGMA table_info('llm_providers')").all() as Array<{ name: string }>
+  const hasProviderType = existingCols.some(c => c.name === 'provider_type')
+  if (!hasProviderType) return // already migrated
+
+  // Create new providers table
+  db.exec(`ALTER TABLE llm_providers RENAME TO llm_providers_old`)
+  db.exec(`CREATE TABLE IF NOT EXISTS llm_providers (
+    id INTEGER NOT NULL, name TEXT NOT NULL,
+    api_base TEXT NOT NULL DEFAULT '', api_key TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+    extra_config TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (id AUTOINCREMENT)
+  )`)
+  db.exec(`INSERT INTO llm_providers (id, name, api_base, api_key, enabled, extra_config, created_at, updated_at)
+    SELECT id, name, api_base, api_key, enabled, extra_config, created_at, updated_at FROM llm_providers_old`)
+
+  // Create llm_models table
+  db.exec(`CREATE TABLE IF NOT EXISTS llm_models (
+    id INTEGER NOT NULL,
+    provider_id INTEGER NOT NULL,
+    model_name TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'chat' CHECK (category IN ('chat', 'embedding', 'rerank')),
+    is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0,1)),
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (id AUTOINCREMENT)
+  )`)
+
+  // Migrate old rows: each old provider -> new provider + model
+  const oldRows = db.prepare('SELECT id, model_name, is_default, category FROM llm_providers_old WHERE model_name != \'\'').all() as Array<{ id: number; model_name: string; is_default: number; category: string }>
+  for (const row of oldRows) {
+    db.prepare(
+      'INSERT INTO llm_models (provider_id, model_name, category, is_default, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, 1, datetime(\'now\'), datetime(\'now\'))'
+    ).run(row.id, row.model_name, row.category, row.is_default)
+  }
+
+  db.exec(`DROP TABLE llm_providers_old`)
+}
+
 function createIndexes(db: Database.Database) {
   const indexes = [
     'CREATE INDEX IF NOT EXISTS idx_user_devices_mi_did ON user_devices(mi_did)',
@@ -479,6 +532,8 @@ function createIndexes(db: Database.Database) {
     'CREATE INDEX IF NOT EXISTS idx_conversation_messages_conv_id ON conversation_messages(conversation_id)',
     'CREATE INDEX IF NOT EXISTS idx_conversation_messages_created_at ON conversation_messages(created_at)',
     'CREATE INDEX IF NOT EXISTS idx_llm_providers_enabled ON llm_providers(enabled)',
+    'CREATE INDEX IF NOT EXISTS idx_llm_models_provider_id ON llm_models(provider_id)',
+    'CREATE INDEX IF NOT EXISTS idx_llm_models_category ON llm_models(category)',
     'CREATE INDEX IF NOT EXISTS idx_llm_model_slots_enabled ON llm_model_slots(enabled)',
     'CREATE INDEX IF NOT EXISTS idx_compensation_tasks_state ON compensation_tasks(state)',
     'CREATE INDEX IF NOT EXISTS idx_compensation_tasks_next_retry ON compensation_tasks(next_retry_at)',

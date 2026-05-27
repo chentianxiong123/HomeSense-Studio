@@ -443,6 +443,18 @@ def handle_enter(params: dict) -> dict:
     return handle_press_key({**params, "key": "enter"})
 
 
+def handle_volume_up(params: dict) -> dict:
+    return handle_press_key({**params, "key": "volume_up"})
+
+
+def handle_volume_down(params: dict) -> dict:
+    return handle_press_key({**params, "key": "volume_down"})
+
+
+def handle_power(params: dict) -> dict:
+    return handle_press_key({**params, "key": "power"})
+
+
 def handle_launch_app(params: dict) -> dict:
     package = params.get("package") or params.get("package_name")
     if not package:

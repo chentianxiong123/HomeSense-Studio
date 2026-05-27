@@ -144,7 +144,7 @@ export function buildAssetRecords(payload: StudioAssetPayload): AssetRecord[] {
       description: skill.description || '',
       status: skill.enabled ? 'enabled' : 'disabled',
       updatedAt: '',
-      route: `/studio/skills/${encodeURIComponent(skill.name)}/overview`,
+      route: `/assets/skills/${encodeURIComponent(skill.name)}/overview`,
       searchText: `${skill.name} ${skill.description} ${skill.context_mode} ${skill.source}`.toLowerCase(),
       accent: ASSET_ACCENTS.skill,
       meta: {
@@ -162,7 +162,7 @@ export function buildAssetRecords(payload: StudioAssetPayload): AssetRecord[] {
       description: manifest.description || '',
       status: manifest.status,
       updatedAt: '',
-      route: `/studio/manifests/${encodeURIComponent(manifest.id)}/overview`,
+      route: `/assets/manifests/${encodeURIComponent(manifest.id)}/overview`,
       searchText: `${manifest.display_name} ${manifest.description} ${manifest.kind} ${manifest.capabilities.join(' ')}`.toLowerCase(),
       accent: ASSET_ACCENTS.manifest,
       meta: {
@@ -180,7 +180,7 @@ export function buildAssetRecords(payload: StudioAssetPayload): AssetRecord[] {
       description: plan.description || '',
       status: 'ready',
       updatedAt: '',
-      route: `/studio/plans/${encodeURIComponent(plan.id)}/overview`,
+      route: `/assets/plans/${encodeURIComponent(plan.id)}/overview`,
       searchText: `${plan.name} ${plan.description} ${plan.intent} ${plan.input} ${plan.source}`.toLowerCase(),
       accent: ASSET_ACCENTS.plan,
       meta: {
@@ -198,7 +198,7 @@ export function buildAssetRecords(payload: StudioAssetPayload): AssetRecord[] {
       description: `${agent.memory_scope} -> ${agent.default_channel}`,
       status: agent.status,
       updatedAt: '',
-      route: `/studio/agents/${encodeURIComponent(agent.slug)}/overview`,
+      route: `/assets/agents/${encodeURIComponent(agent.slug)}/overview`,
       searchText: `${agent.name} ${agent.slug} ${agent.profile} ${agent.surface} ${agent.memory_scope}`.toLowerCase(),
       accent: ASSET_ACCENTS.agent,
       meta: {

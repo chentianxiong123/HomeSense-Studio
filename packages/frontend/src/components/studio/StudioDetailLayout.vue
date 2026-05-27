@@ -108,7 +108,7 @@ const router = useRouter()
 .eyebrow {
   display: inline-block;
   color: #10b981;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.2em;
@@ -148,7 +148,7 @@ const router = useRouter()
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.8);
   color: #10b981;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.15em;
@@ -183,7 +183,7 @@ const router = useRouter()
   border-radius: 16px;
   background: transparent;
   color: var(--text-tertiary);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 900;
   cursor: pointer;
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);

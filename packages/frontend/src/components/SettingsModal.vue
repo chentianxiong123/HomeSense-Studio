@@ -398,7 +398,7 @@ onMounted(async () => {
 .eyebrow {
   display: inline-block;
   color: #10b981;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.15em;
@@ -417,7 +417,7 @@ h2 {
 }
 
 h3 {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.2em;
@@ -465,7 +465,7 @@ h3 {
   border-radius: 14px;
   background: rgba(0, 0, 0, 0.04);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 900;
   color: var(--text-tertiary);
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
@@ -507,7 +507,7 @@ button {
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.8);
   padding: 0 24px;
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 900;
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
@@ -583,14 +583,14 @@ button.large {
   color: #10b981;
   padding: 4px 12px;
   border-radius: 8px;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.15em;
 }
 
 .provider-detail {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 900;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -610,7 +610,7 @@ code {
   letter-spacing: 0;
   opacity: 1;
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 15px;
 }
 
 .provider-actions {
@@ -621,7 +621,7 @@ code {
 .action-btn {
   min-height: 36px;
   padding: 0 16px;
-  font-size: 10px;
+  font-size: 14px;
   border-radius: 10px;
 }
 
@@ -652,7 +652,7 @@ code {
   border: none;
   box-shadow: none;
   color: #10b981;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 900;
   text-transform: none;
   letter-spacing: 0;
@@ -683,7 +683,7 @@ code {
 
 .form-group label {
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.2em;
@@ -698,7 +698,7 @@ input, select {
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.8);
   padding: 0 20px;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--text-primary);
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
@@ -723,7 +723,7 @@ input:focus, select:focus {
   gap: 12px;
   cursor: pointer;
   text-transform: none !important;
-  font-size: 13px !important;
+  font-size: 15px !important;
   font-weight: 900 !important;
   opacity: 1 !important;
   letter-spacing: 0 !important;

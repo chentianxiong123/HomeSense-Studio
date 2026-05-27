@@ -145,7 +145,7 @@ loadApps()
 }
 
 .count {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: #6366f1;
   background: rgba(99, 102, 241, 0.1);
@@ -167,7 +167,7 @@ loadApps()
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.8);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.2s;
@@ -214,7 +214,7 @@ loadApps()
   border: none;
   outline: none;
   background: transparent;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -230,7 +230,7 @@ loadApps()
   border: 1px solid rgba(239, 68, 68, 0.2);
   border-radius: 10px;
   color: #ef4444;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   margin-bottom: 12px;
 }
@@ -240,7 +240,7 @@ loadApps()
   padding: 48px 0;
   color: var(--text-tertiary);
   font-weight: 700;
-  font-size: 14px;
+  font-size: 16px;
   opacity: 0.6;
 }
 
@@ -298,7 +298,7 @@ loadApps()
 }
 
 .app-name {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
   max-width: 100%;
@@ -308,7 +308,7 @@ loadApps()
 }
 
 .app-pkg {
-  font-size: 10px;
+  font-size: 14px;
   color: var(--text-tertiary);
   opacity: 0.6;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;

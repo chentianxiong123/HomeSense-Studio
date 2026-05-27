@@ -242,7 +242,7 @@ defineExpose({ refresh })
   display: flex;
   flex-direction: column;
   gap: 8px;
-  font-size: 12px;
+  font-size: 16px;
 }
 .manifest-explorer.sidebar { padding: 0; }
 .manifest-explorer.panel {
@@ -262,7 +262,7 @@ defineExpose({ refresh })
 }
 
 .head-title {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.12em;
@@ -276,7 +276,7 @@ defineExpose({ refresh })
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.6);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text-secondary);
   display: flex;
@@ -300,7 +300,7 @@ defineExpose({ refresh })
 }
 
 .summary-chip {
-  font-size: 9px;
+  font-size: 13px;
   padding: 2px 8px;
   border-radius: 999px;
   border: 1px solid rgba(217, 217, 217, 0.3);
@@ -314,7 +314,7 @@ defineExpose({ refresh })
 
 .filter-btn {
   padding: 4px 10px;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 700;
   border: 1px solid rgba(217, 217, 217, 0.3);
   border-radius: 8px;
@@ -338,7 +338,7 @@ defineExpose({ refresh })
 }
 
 .error-row {
-  font-size: 11px;
+  font-size: 15px;
   color: #b4322a;
   padding: 10px;
   border-radius: 8px;
@@ -349,7 +349,7 @@ defineExpose({ refresh })
 
 .kind-group { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
 .kind-head {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -380,9 +380,9 @@ defineExpose({ refresh })
 .manifest-card.disabled { opacity: 0.4; }
 
 .card-head { display: flex; align-items: center; gap: 10px; }
-.card-name { font-size: 13px; font-weight: 800; color: var(--text-primary); flex: 1 1 auto; overflow-wrap: anywhere; letter-spacing: -0.01em; }
+.card-name { font-size: 15px; font-weight: 800; color: var(--text-primary); flex: 1 1 auto; overflow-wrap: anywhere; letter-spacing: -0.01em; }
 .card-status {
-  font-size: 9px;
+  font-size: 13px;
   padding: 2px 8px;
   border-radius: 999px;
   text-transform: uppercase;
@@ -392,12 +392,12 @@ defineExpose({ refresh })
 
 .card-id {
   font-family: ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 14px;
   color: var(--text-tertiary);
   font-weight: 500;
   overflow-wrap: anywhere;
 }
-.card-desc { font-size: 11px; color: var(--text-secondary); line-height: 1.5; font-weight: 500; }
+.card-desc { font-size: 15px; color: var(--text-secondary); line-height: 1.5; font-weight: 500; }
 
 .card-caps, .card-actions {
   display: flex;
@@ -406,7 +406,7 @@ defineExpose({ refresh })
   align-items: center;
 }
 .cap-chip {
-  font-size: 9px;
+  font-size: 13px;
   padding: 2px 8px;
   border-radius: 6px;
   background: rgba(241, 243, 245, 0.8);
@@ -416,7 +416,7 @@ defineExpose({ refresh })
   letter-spacing: 0.02em;
 }
 .actions-label {
-  font-size: 9px;
+  font-size: 13px;
   color: var(--text-tertiary);
   margin-right: 4px;
   font-weight: 800;
@@ -425,7 +425,7 @@ defineExpose({ refresh })
 }
 .action-chip {
   font-family: ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 14px;
   padding: 2px 6px;
   border-radius: 6px;
   background: rgba(238, 242, 255, 0.8);
@@ -434,7 +434,7 @@ defineExpose({ refresh })
 }
 .action-chip.more { background: rgba(241, 243, 245, 0.8); color: var(--text-tertiary); }
 
-.card-meta { font-size: 10px; color: var(--text-tertiary); font-weight: 500; }
+.card-meta { font-size: 14px; color: var(--text-tertiary); font-weight: 500; }
 .card-meta code {
   font-family: ui-monospace, monospace;
   background: rgba(241, 245, 249, 0.8);
@@ -444,7 +444,7 @@ defineExpose({ refresh })
   font-weight: 700;
 }
 
-.empty { font-size: 12px; color: var(--text-tertiary); padding: 48px 24px; text-align: center; font-weight: 500; }
+.empty { font-size: 16px; color: var(--text-tertiary); padding: 48px 24px; text-align: center; font-weight: 500; }
 
 .card-run {
   margin-left: auto;
@@ -453,7 +453,7 @@ defineExpose({ refresh })
   border: none;
   background: var(--primary-color);
   color: #fff;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 800;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(16, 163, 127, 0.2);
@@ -511,7 +511,7 @@ defineExpose({ refresh })
 
 .run-id {
   font-family: ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 15px;
   color: var(--text-tertiary);
   background: rgba(241, 245, 249, 0.8);
   padding: 4px 8px;
@@ -520,7 +520,7 @@ defineExpose({ refresh })
 }
 .run-body {
   font-family: ui-monospace, monospace;
-  font-size: 12px;
+  font-size: 16px;
   padding: 12px;
   border: 1px solid var(--border-color);
   border-radius: 10px;
@@ -537,7 +537,7 @@ defineExpose({ refresh })
   border-radius: 8px;
   background: #fff;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
 }
 .run-submit {
@@ -547,14 +547,14 @@ defineExpose({ refresh })
   background: var(--primary-color);
   color: #fff;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   box-shadow: 0 4px 12px rgba(16, 163, 127, 0.2);
 }
 .run-submit:hover:not(:disabled) { background: var(--primary-hover); transform: translateY(-1px); }
 .run-submit:disabled, .run-cancel:disabled { opacity: 0.5; cursor: not-allowed; }
 .run-error {
-  font-size: 12px;
+  font-size: 16px;
   color: #be123c;
   background: rgba(255, 241, 242, 0.8);
   border: 1px solid #fecdd3;
@@ -568,7 +568,7 @@ defineExpose({ refresh })
   background: #1e293b;
   color: #e2e8f0;
   font-family: ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 15px;
   max-height: 320px;
   overflow: auto;
   white-space: pre-wrap;

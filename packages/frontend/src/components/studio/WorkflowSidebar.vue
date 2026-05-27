@@ -182,7 +182,7 @@ function onDragStart(event: DragEvent, type: string, label: string) {
 
 .sidebar-section h4 {
   margin: 0;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 900;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -221,7 +221,7 @@ function onDragStart(event: DragEvent, type: string, label: string) {
 
 .workflow-metric-label {
   display: block;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   text-transform: uppercase;
   color: var(--text-tertiary);
@@ -242,7 +242,7 @@ function onDragStart(event: DragEvent, type: string, label: string) {
   color: white;
   border: none;
   border-radius: 12px;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -261,7 +261,7 @@ function onDragStart(event: DragEvent, type: string, label: string) {
   background: rgba(255, 255, 255, 0.6);
   border: 1px solid rgba(217, 217, 217, 0.5);
   border-radius: 12px;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -291,7 +291,7 @@ function onDragStart(event: DragEvent, type: string, label: string) {
 }
 
 .group-label {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 900;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -299,7 +299,7 @@ function onDragStart(event: DragEvent, type: string, label: string) {
 }
 
 .group-summary {
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text-secondary);
   margin-top: 4px;
@@ -342,14 +342,14 @@ function onDragStart(event: DragEvent, type: string, label: string) {
 }
 
 .wf-name {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 900;
   color: var(--text-primary);
   letter-spacing: -0.01em;
 }
 
 .workflow-badge {
-  font-size: 9px;
+  font-size: 13px;
   padding: 4px 12px;
   background: rgba(241, 245, 249, 0.8);
   border-radius: 99px;
@@ -368,7 +368,7 @@ function onDragStart(event: DragEvent, type: string, label: string) {
 }
 
 .workflow-eyebrow {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -376,7 +376,7 @@ function onDragStart(event: DragEvent, type: string, label: string) {
 }
 
 .published-badge {
-  font-size: 9px;
+  font-size: 13px;
   color: #10b981;
   font-weight: 900;
   text-transform: uppercase;
@@ -384,7 +384,7 @@ function onDragStart(event: DragEvent, type: string, label: string) {
 }
 
 .workflow-desc {
-  font-size: 12px;
+  font-size: 16px;
   color: var(--text-secondary);
   display: block;
   line-height: 1.6;
@@ -430,7 +430,7 @@ function onDragStart(event: DragEvent, type: string, label: string) {
 }
 
 .nt-label {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 900;
   color: var(--text-primary);
   display: block;
@@ -438,7 +438,7 @@ function onDragStart(event: DragEvent, type: string, label: string) {
 }
 
 .nt-desc {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--text-tertiary);
   margin-top: 3px;
@@ -469,14 +469,14 @@ function onDragStart(event: DragEvent, type: string, label: string) {
 
 .plan-name {
   display: block;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 900;
   color: var(--text-primary);
   letter-spacing: -0.01em;
 }
 
 .plan-input {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--text-tertiary);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
@@ -488,7 +488,7 @@ function onDragStart(event: DragEvent, type: string, label: string) {
 .empty {
   padding: 48px 0;
   text-align: center;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text-tertiary);
   opacity: 0.55;

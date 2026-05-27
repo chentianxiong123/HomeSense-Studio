@@ -2,14 +2,13 @@ import { getDb } from '../../db/index.js'
 import { cliBridge as defaultCliBridge, type CLIBridge } from '../cli-bridge/index.js'
 import { executorGateway as defaultExecutorGateway } from '../executor-gateway/index.js'
 import { intentRouter as defaultIntentRouter, type RoutedCandidatePlan, type RoutedObservation } from '../intent-router/index.js'
-import { llmService, type LLMChatResult, type ModelSlotName } from '../llm-provider/service.js'
+import { llmService, type LLMChatResult } from '../llm-provider/service.js'
 import { approvalRegistry as defaultApprovalRegistry, isHighRiskCliCall, type ApprovalRecord } from '../approval/index.js'
 import { memoryKernel as defaultMemoryKernel } from '../memory-kernel/index.js'
 import { selfEnhancementService as defaultSelfEnhancement } from '../self-enhancement/index.js'
 import { compensationService as defaultCompensationService, type CompensationTask } from '../compensation/index.js'
 import type { TaskFailure } from '../self-enhancement/index.js'
-import type { AgentEvent, AgentStreamContext, MemoryHit } from './events.js'
-import type { HistoryItem } from '../conversation/index.js'
+import type { AgentEvent, AgentStreamContext, HistoryItem, MemoryHit } from './events.js'
 
 interface ApprovalRegistryInstance {
   create(turnId: string, reason: string, payload: unknown): ApprovalRecord
@@ -275,7 +274,6 @@ class AgentRuntime {
       yield { type: 'memory.recall', turn_id: turnId, query: routingMessage, hits }
     }
 
-    const slot: ModelSlotName = route.route_level === 2 ? 'fast' : 'planner'
     yield* this.llmInferStream(
       turnId,
       routingMessage,
@@ -284,7 +282,6 @@ class AgentRuntime {
       targetDeviceId,
       hits,
       route.candidate_plans,
-      slot,
       route.normalized_intent,
       route.allow_tool_calls,
     )
@@ -304,7 +301,6 @@ class AgentRuntime {
     targetDeviceId: string | undefined,
     memoryHits: MemoryHit[],
     candidatePlans: RoutedCandidatePlan[],
-    slot: ModelSlotName,
     normalizedIntent: string,
     allowToolCalls: boolean,
   ): AsyncGenerator<AgentEvent, void, void> {
@@ -331,7 +327,6 @@ class AgentRuntime {
         let accToolCalls: LLMChatResult['tool_calls'] = []
 
         for await (const delta of llmService.chatStream({
-          slot,
           messages: messages as Array<{ role: string; content: string }>,
           tools,
         })) {
@@ -563,7 +558,6 @@ class AgentRuntime {
         let accToolCalls: LLMChatResult['tool_calls'] = []
 
         for await (const delta of llmService.chatStream({
-          slot: 'planner',
           messages: messages as Array<{ role: string; content: string }>,
           tools: this.buildLLMTools(),
         })) {
@@ -774,7 +768,6 @@ class AgentRuntime {
       targetDeviceId,
       hits,
       route.candidate_plans,
-      route.route_level === 2 ? 'fast' : 'planner',
       route.normalized_intent,
       route.reason,
       route.allow_tool_calls,
@@ -913,7 +906,6 @@ class AgentRuntime {
     targetDeviceId: string | undefined,
     memoryHits: MemoryHit[],
     candidatePlans: RoutedCandidatePlan[],
-    slot: ModelSlotName,
     normalizedIntent: string,
     routeReason: string,
     allowToolCalls: boolean,
@@ -932,7 +924,7 @@ class AgentRuntime {
     let toolCallCount = 0
 
     try {
-      const result = await llmService.chat({ slot, messages, tools })
+      const result = await llmService.chat({ messages, tools })
 
       if (result.tool_calls && result.tool_calls.length > 0) {
         const actionResults: Array<{ success: boolean; data?: unknown; error?: string }> = []

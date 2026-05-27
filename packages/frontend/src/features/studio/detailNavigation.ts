@@ -20,7 +20,7 @@ export function buildSkillDetailTabs(
 ): StudioDetailTab[] {
   const name = encodeURIComponent(skillName)
   return [
-    { route: `/studio/skills/${name}/overview`, label: label('概览', 'Overview') },
-    { route: `/studio/skills/${name}/prompt`, label: label('完整提示词', 'Prompt') },
+    { route: `/assets/skills/${name}/overview`, label: label('概览', 'Overview') },
+    { route: `/assets/skills/${name}/prompt`, label: label('完整提示词', 'Prompt') },
   ]
 }

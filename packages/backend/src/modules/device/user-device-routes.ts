@@ -74,8 +74,14 @@ function getAdbCapabilities(deviceType: string): AdbCapDef[] {
 }
 
 /** Lightweight shape returned in the capabilities cache for frontend/LLM. */
-function getAdbCapabilitiesForCache(deviceType: string): Array<{ name: string; kind: string; type?: string; source: string }> {
-  return getAdbCapabilities(deviceType).map(c => ({ name: c.name, kind: c.kind, type: c.input ? 'string' : undefined, source: c.source }))
+function getAdbCapabilitiesForCache(deviceType: string): Array<{ name: string; kind: string; type?: string; source: string; output?: Record<string, { type: string; description: string }> | null }> {
+  return getAdbCapabilities(deviceType).map(c => ({
+    name: c.name,
+    kind: c.kind,
+    type: c.input ? 'string' : undefined,
+    source: c.source,
+    output: c.output,
+  }))
 }
 
 function adbDeviceCacheKey(deviceId: number, adbIp: string): string {

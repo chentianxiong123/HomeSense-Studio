@@ -95,11 +95,11 @@ describe('buildAssetActionLinks', () => {
       ...workflowAsset,
       id: 'skill:adb.launch',
       kind: 'skill',
-      route: '/studio/skills/adb.launch/overview',
+      route: '/assets/skills/adb.launch/overview',
     } as AssetRecord
 
     expect(buildAssetActionLinks(skill, label)).toEqual([
-      { label: '进入详情|Open Detail', route: '/studio/skills/adb.launch/overview' },
+      { label: '进入详情|Open Detail', route: '/assets/skills/adb.launch/overview' },
     ])
   })
 })

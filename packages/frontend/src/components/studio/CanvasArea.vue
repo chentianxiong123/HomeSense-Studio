@@ -260,7 +260,7 @@ function handleNodeDragStop(event: any) { emit('node-drag-stop', event) }
 }
 
 .workflow-route-hint {
-  font-size: 9px;
+  font-size: 13px;
   color: var(--text-tertiary);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-weight: 800;
@@ -275,7 +275,7 @@ function handleNodeDragStop(event: any) { emit('node-drag-stop', event) }
 }
 
 .toolbar-chip {
-  font-size: 9px;
+  font-size: 13px;
   padding: 4px 14px;
   border-radius: 99px;
   font-weight: 900;
@@ -308,7 +308,7 @@ function handleNodeDragStop(event: any) { emit('node-drag-stop', event) }
 }
 
 .toolbar-summary-label {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -335,7 +335,7 @@ function handleNodeDragStop(event: any) { emit('node-drag-stop', event) }
   border-radius: 12px;
   border: 1px solid rgba(217, 217, 217, 0.6);
   background: rgba(255, 255, 255, 0.8);
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 800;
   color: var(--text-primary);
   cursor: pointer;
@@ -433,7 +433,7 @@ function handleNodeDragStop(event: any) { emit('node-drag-stop', event) }
 
 .panel-card-head h4 {
   margin: 0;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 900;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -442,7 +442,7 @@ function handleNodeDragStop(event: any) { emit('node-drag-stop', event) }
 }
 
 .runtime-status {
-  font-size: 9px;
+  font-size: 13px;
   padding: 4px 14px;
   border-radius: 99px;
   background: rgba(16, 185, 129, 0.1);
@@ -455,7 +455,7 @@ function handleNodeDragStop(event: any) { emit('node-drag-stop', event) }
 
 .run-inputs label {
   display: block;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 900;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -471,7 +471,7 @@ function handleNodeDragStop(event: any) { emit('node-drag-stop', event) }
   border: 1px solid rgba(229, 231, 235, 0.8);
   border-radius: 18px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--text-primary);
   resize: vertical;
   outline: none;
@@ -489,7 +489,7 @@ function handleNodeDragStop(event: any) { emit('node-drag-stop', event) }
 
 .input-error {
   color: #ef4444;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 800;
   margin-top: 12px;
   padding-left: 8px;
@@ -509,7 +509,7 @@ function handleNodeDragStop(event: any) { emit('node-drag-stop', event) }
 }
 
 .preview-status {
-  font-size: 9px;
+  font-size: 13px;
   padding: 4px 14px;
   border-radius: 99px;
   font-weight: 900;
@@ -578,7 +578,7 @@ function handleNodeDragStop(event: any) { emit('node-drag-stop', event) }
 .risk-chip.none { background: rgba(100, 116, 139, 0.1); color: #64748b; }
 
 .preview-summary {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--text-secondary);
   line-height: 1.6;
   font-weight: 600;
@@ -590,7 +590,7 @@ function handleNodeDragStop(event: any) { emit('node-drag-stop', event) }
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  font-size: 9px;
+  font-size: 13px;
   color: var(--text-tertiary);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-weight: 800;
@@ -610,7 +610,7 @@ function handleNodeDragStop(event: any) { emit('node-drag-stop', event) }
   background: #1e293b;
   color: #e2e8f0;
   border-radius: 16px;
-  font-size: 12px;
+  font-size: 16px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   overflow-x: auto;
   line-height: 1.7;
@@ -622,7 +622,7 @@ function handleNodeDragStop(event: any) { emit('node-drag-stop', event) }
   background: #1e293b;
   color: #e2e8f0;
   border-radius: 20px;
-  font-size: 12px;
+  font-size: 16px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   overflow-x: auto;
   line-height: 1.7;
@@ -691,7 +691,7 @@ function handleNodeDragStop(event: any) { emit('node-drag-stop', event) }
 .empty-panel {
   text-align: center;
   padding: 80px 0;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 900;
   color: var(--text-tertiary);
   text-transform: uppercase;

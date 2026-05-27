@@ -10,7 +10,6 @@ import { deviceRoutes } from './modules/device/routes.js'
 import { userDeviceRoutes } from './modules/device/user-device-routes.js'
 import { roomRoutes } from './modules/device/room-routes.js'
 import { chatRoutes } from './modules/chat/routes.js'
-import { chatStreamRoutes } from './modules/chat/stream.js'
 import { workflowRoutes } from './modules/workflow/routes.js'
 import { workflowSeedService } from './modules/workflow/seed.js'
 import { llmProviderRoutes } from './modules/llm-provider/routes.js'
@@ -62,9 +61,8 @@ export async function buildApp() {
 
   agentInstanceService.ensureDefaults()
   agentAdapterRegistry.initialize()
-  llmService.seedSlotsFromEnv()
   memoryKernel.initialize()
-  executorGateway.initialize()
+  await executorGateway.initialize()
   channelRegistry.register()
   assertWorkflowNodeRegistryIntegrity()
   workflowSeedService.ensureDefaults()
@@ -145,7 +143,6 @@ export async function buildApp() {
   app.register(userDeviceRoutes)
   app.register(roomRoutes)
   app.register(chatRoutes)
-  app.register(chatStreamRoutes)
   app.register(workflowRoutes)
   app.register(llmProviderRoutes)
   app.register(memoryRoutes)

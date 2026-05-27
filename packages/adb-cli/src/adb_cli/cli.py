@@ -24,6 +24,9 @@ from adb_cli.adb import (
     handle_back,
     handle_home,
     handle_enter,
+    handle_volume_up,
+    handle_volume_down,
+    handle_power,
 )
 
 ACTION_MAP = {
@@ -63,6 +66,9 @@ ACTION_MAP = {
     # Convenience aliases
     "wake": handle_press_key,
     "wakeup": handle_press_key,
+    "volume_up": handle_volume_up,
+    "volume_down": handle_volume_down,
+    "power": handle_power,
     "ui_tree": handle_get_ui_elements,
 }
 

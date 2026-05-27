@@ -36,7 +36,7 @@ const { t } = useLocale()
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
 }
 .plan-timeline-head {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -56,7 +56,7 @@ const { t } = useLocale()
   grid-template-columns: 24px minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
-  font-size: 12px;
+  font-size: 16px;
   padding: 8px 12px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.8);
@@ -71,7 +71,7 @@ const { t } = useLocale()
 .plan-step-index {
   font-weight: 800;
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 14px;
   width: 20px;
   height: 20px;
   display: flex;
@@ -89,14 +89,14 @@ const { t } = useLocale()
   overflow-wrap: anywhere;
 }
 .plan-step-error {
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 500;
   color: #dc2626;
   margin-top: 4px;
   overflow-wrap: anywhere;
 }
 .plan-step-status {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;

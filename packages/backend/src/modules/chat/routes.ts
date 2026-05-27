@@ -1,92 +1,174 @@
-import type { FastifyInstance } from 'fastify'
-import { agentRuntime } from '../agent-runtime/index.js'
-import { conversationService } from '../conversation/index.js'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import { chatService } from './service.js'
+import { reactGraph, ChatReActState } from './graph.js'
+import { llmService } from '../llm-provider/service.js'
 
-export async function chatRoutes(app: FastifyInstance) {
-  app.post('/api/chat', async (request) => {
-    const body = request.body as {
-      message: string
-      conversation_id?: number
-      channel?: string
-      user_id?: string
-      agent_instance_id?: number
-      working_context?: Record<string, unknown>
-    }
-    const message = body.message
-    if (!message) {
-      return { status: 'error', error: 'INVALID_PARAMS', message: 'Missing message parameter' }
-    }
-
-    const started = conversationService.createOrAttach({
-      conversation_id: body.conversation_id,
-      channel: body.channel,
-      user_id: body.user_id,
-      agent_instance_id: body.agent_instance_id,
-      surface: 'chat',
-      working_context: body.working_context,
-    })
-    const conversationId = started.conversation_id
-
-    conversationService.appendMessage(conversationId, 'user', message)
-    const contextRecord = conversationService.getContext(conversationId, 20)
-
-    const response = await agentRuntime.processMessage(message, {
-      conversation_id: conversationId,
-      history: contextRecord.history.slice(0, -1),
-      channel: contextRecord.session.channel,
-      user_id: contextRecord.session.user_id,
-      agent_instance_id: contextRecord.session.agent_instance_id,
-      working_context: parseJson(contextRecord.session.working_context_json, {}),
-      summary: contextRecord.session.summary,
-    })
-
-    conversationService.appendMessage(conversationId, 'assistant', response.content)
-    const nextWorkingContext = {
-      ...parseJson(contextRecord.session.working_context_json, {} as Record<string, unknown>),
-      last_completed_message: response.metadata.completed_message ?? message,
-      last_target_device_id: response.metadata.target_device_id ?? null,
-      last_normalized_intent: response.metadata.normalized_intent ?? null,
-      last_route_reason: response.metadata.route_reason ?? null,
-      last_candidate_plan_ids: response.metadata.candidate_plan_ids ?? [],
-      preferred_tv_device_id: response.metadata.target_device_id ?? parseJson(contextRecord.session.working_context_json, {} as Record<string, unknown>).preferred_tv_device_id ?? null,
-    }
-    conversationService.updateSession(conversationId, {
-      working_context: nextWorkingContext,
-      last_intent: message,
-      last_plan_id: response.metadata.matched_plan_id ?? null,
-      summary: response.content.slice(0, 240),
-    })
-
-    return {
-      status: 'success',
-      data: {
-        conversation_id: conversationId,
-        session: conversationService.getSession(conversationId),
-        ...response,
-      },
-    }
-  })
-
-  app.get('/api/chat/history', async (request) => {
-    const query = request.query as { conversation_id?: string }
-
-    if (query.conversation_id) {
-      return { messages: conversationService.getMessages(Number(query.conversation_id)) }
-    }
-
-    return { conversations: conversationService.listConversations(20) }
-  })
-
-  app.get('/api/chat/:id', async (request) => {
-    const { id } = request.params as { id: string }
-    return { messages: conversationService.getMessages(Number(id)) }
-  })
+interface StreamBody {
+  messages: Array<{ role: string; content: string }>
 }
 
-function parseJson<T>(raw: string, fallback: T): T {
-  try {
-    return JSON.parse(raw) as T
-  } catch {
-    return fallback
+function stripThinkTags(content: string): string {
+  return content.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/<think>[\s\S]*/g, '').trim()
+}
+
+async function handleStreamPost(request: FastifyRequest, reply: FastifyReply) {
+  const body = request.body as StreamBody
+
+  if (!body.messages || body.messages.length === 0) {
+    reply.code(400)
+    return { status: 'error', error: 'INVALID_PARAMS', message: 'messages are required' }
   }
+
+  const lastUserMsg = body.messages[body.messages.length - 1]
+  try { chatService.ensureConversation(1) } catch {}
+  chatService.addConversationMessage(1, lastUserMsg.role, lastUserMsg.content)
+
+  const origin = request.headers['origin'] || '*'
+  reply.raw.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'X-Accel-Buffering': 'no',
+    'Content-Encoding': 'identity',
+    Connection: 'keep-alive',
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  })
+
+  const flush = () => {
+    if (typeof (reply.raw as any).flush === 'function') (reply.raw as any).flush()
+  }
+
+  try {
+    // Check if this is a tool-trigger message
+    const isToolTrigger = lastUserMsg.content.includes('调用工具') || lastUserMsg.content.toLowerCase().includes('tool')
+
+    if (isToolTrigger) {
+      // ── LangGraph ReAct Loop ──
+      const initialInput: string = lastUserMsg.content
+      const history = body.messages.slice(0, -1)
+
+      const initialState = ChatReActState.create({
+        messages: history,
+        input: initialInput,
+        conversationId: 1,
+        currentToolCall: undefined,
+        isComplete: false,
+        finalResponse: '',
+        error: undefined,
+      })
+
+      // Run the graph
+      const finalState: typeof ChatReActState.State = await reactGraph.invoke(initialState)
+
+      // Emit thinking + final content from each assistant message
+      for (const msg of finalState.messages) {
+        if (msg.role === 'assistant') {
+          // If it has tool_calls, emit as tool_start events
+          if (msg.tool_calls && msg.tool_calls.length > 0) {
+            const thinkingContent = msg.content || ''
+            if (thinkingContent) {
+              reply.raw.write(`data: ${JSON.stringify({ content: ` thinking\n${thinkingContent}\n response`, done: false })}\n\n`)
+              flush()
+            }
+            for (const tc of msg.tool_calls) {
+              let args = {}
+              try { args = JSON.parse(tc.function.arguments) } catch {}
+              reply.raw.write(`data: ${JSON.stringify({ type: 'tool_start', call_id: tc.id, name: tc.function.name, args })}\n\n`)
+              flush()
+            }
+          } else {
+            // Plain assistant content
+            reply.raw.write(`data: ${JSON.stringify({ content: ` response\n\n${msg.content}`, done: false })}\n\n`)
+            flush()
+          }
+        } else if (msg.role === 'tool') {
+          // Emit tool_end events from tool messages
+          const historyToolCall = finalState.messages.find(
+            (m: any) => m.role === 'assistant' && m.tool_calls?.length > 0
+          )
+          const callId = historyToolCall?.tool_calls?.[0]?.id || 'unknown'
+
+          let parsed = { error: 'unknown' }
+          try { parsed = JSON.parse(msg.content) } catch {}
+
+          reply.raw.write(`data: ${JSON.stringify({
+            type: 'tool_end',
+            call_id: callId,
+            status: parsed.error ? 'error' : 'success',
+            result: parsed.error ? undefined : parsed,
+            error: parsed.error,
+          })}\n\n`)
+          flush()
+        }
+      }
+
+      // Save to DB
+      for (const msg of finalState.messages) {
+        if (msg.role === 'assistant') {
+          const toolCallsJson = msg.tool_calls?.length
+            ? JSON.stringify(msg.tool_calls)
+            : null
+          chatService.addConversationMessage(1, 'assistant', msg.content || '', toolCallsJson)
+        } else if (msg.role === 'tool') {
+          chatService.addConversationMessage(1, 'tool', msg.content, null, null, msg.tool_call_id)
+        }
+      }
+
+      // Emit done
+      const finalText = finalState.finalResponse || finalState.messages
+        .filter((m: any) => m.role === 'assistant' && !m.tool_calls?.length)
+        .map((m: any) => m.content)
+        .join('\n') || ''
+
+      if (finalText) {
+        reply.raw.write(`data: ${JSON.stringify({ content: finalText, done: false })}\n\n`)
+        flush()
+      }
+
+      reply.raw.write(`data: ${JSON.stringify({ content: '', done: true })}\n\n`)
+      flush()
+    } else {
+      // ── Plain LLM stream (no tool calls) ──
+      const stream = llmService.chatStream({ messages: body.messages })
+      let accumulated = ''
+
+      for await (const delta of stream) {
+        if (delta.delta) {
+          accumulated += delta.delta
+          reply.raw.write(`data: ${JSON.stringify({ content: delta.delta, done: false })}\n\n`)
+          flush()
+        }
+      }
+
+      const storedContent = accumulated
+        .replace(/ thinking[\s\S]*?<\/think>/g, '')
+        .replace(/ thinking[\s\S]*/g, '')
+        .trim()
+      chatService.addConversationMessage(1, 'assistant', storedContent)
+      reply.raw.write(`data: ${JSON.stringify({ content: '', done: true })}\n\n`)
+      flush()
+    }
+  } catch (err) {
+    const errMsg = (err as Error).message
+    reply.raw.write(`data: ${JSON.stringify({ error: errMsg, done: true })}\n\n`)
+    flush()
+  }
+
+  reply.raw.end()
+}
+
+export async function chatRoutes(app: FastifyInstance) {
+  app.post('/api/chat/stream', handleStreamPost)
+
+  app.get('/api/chat/messages', async (request) => {
+    const query = request.query as { cursor?: string; limit?: string }
+    const limit = query.limit ? Math.min(Math.max(Number(query.limit), 1), 100) : 30
+    const cursor = query.cursor ? Number(query.cursor) : undefined
+    try {
+      return chatService.getConversationMessages(1, cursor, limit)
+    } catch {
+      return { messages: [], hasMore: false }
+    }
+  })
 }

@@ -62,7 +62,7 @@ function stringify(value: unknown): string {
   background: rgba(255, 255, 255, 0.6);
   backdrop-filter: blur(12px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
-  font-size: 12px;
+  font-size: 16px;
   overflow: hidden;
   transition: all 0.3s ease;
 }
@@ -84,7 +84,7 @@ function stringify(value: unknown): string {
   text-align: left;
 }
 .tool-kind {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -102,7 +102,7 @@ function stringify(value: unknown): string {
   letter-spacing: -0.01em;
 }
 .tool-status {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   padding: 2px 8px;
   border-radius: 999px;
@@ -113,12 +113,12 @@ function stringify(value: unknown): string {
 .tool-status.success { background: rgba(16, 185, 129, 0.1); color: #059669; }
 .tool-status.error { background: rgba(220, 38, 38, 0.1); color: #dc2626; }
 
-.tool-duration { font-size: 10px; font-weight: 600; color: var(--text-tertiary); }
-.tool-toggle { font-size: 10px; color: var(--text-tertiary); font-weight: 800; }
+.tool-duration { font-size: 14px; font-weight: 600; color: var(--text-tertiary); }
+.tool-toggle { font-size: 14px; color: var(--text-tertiary); font-weight: 800; }
 
 .tool-body { padding: 4px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
 .tool-section-label {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -133,7 +133,7 @@ function stringify(value: unknown): string {
   background: rgba(241, 245, 249, 0.5);
   color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 11px;
+  font-size: 15px;
   max-height: 300px;
   overflow: auto;
   white-space: pre-wrap;

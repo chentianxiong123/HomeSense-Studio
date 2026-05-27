@@ -317,7 +317,7 @@ async function doDiscover() {
 .eyebrow {
   display: inline-block;
   color: #10b981;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.15em;
@@ -339,7 +339,7 @@ h1 {
 }
 
 h3 {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.15em;
@@ -369,7 +369,7 @@ input {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.8);
   padding: 0 24px;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 800;
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
@@ -433,7 +433,7 @@ button.large {
   background: rgba(0, 0, 0, 0.05);
   padding: 4px 14px;
   border-radius: 99px;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 800;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -465,7 +465,7 @@ button.large {
 .input-group label {
   display: block;
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.15em;
@@ -487,7 +487,7 @@ button.large {
 .alert {
   padding: 24px;
   border-radius: 20px;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   line-height: 1.6;
   margin-bottom: 32px;
@@ -523,7 +523,7 @@ button.large {
 .meta-grid label {
   display: block;
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.15em;
@@ -546,7 +546,7 @@ button.large {
   background: rgba(254, 242, 242, 0.8);
   backdrop-filter: blur(16px);
   color: #ef4444;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -582,7 +582,7 @@ th {
   text-align: left;
   background: rgba(0, 0, 0, 0.02);
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.15em;
@@ -591,7 +591,7 @@ th {
 td {
   padding: 20px 24px;
   border-top: 1px solid rgba(229, 231, 235, 0.4);
-  font-size: 14px;
+  font-size: 16px;
   color: var(--text-secondary);
 }
 
@@ -609,7 +609,7 @@ code {
   background: rgba(0, 0, 0, 0.04);
   padding: 2px 6px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 16px;
 }
 
 .type-pill {
@@ -617,7 +617,7 @@ code {
   padding: 2px 10px;
   background: rgba(0, 0, 0, 0.05);
   border-radius: 6px;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -629,7 +629,7 @@ pre {
   background: #1e293b;
   border: 1px solid rgba(255, 255, 255, 0.1);
   overflow: auto;
-  font-size: 13px;
+  font-size: 15px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   color: #e2e8f0;
   line-height: 1.7;

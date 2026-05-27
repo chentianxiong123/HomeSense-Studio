@@ -25,7 +25,7 @@ const { t } = useLocale()
   padding: 4px 0;
 }
 .memory-chip-label {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -41,7 +41,7 @@ const { t } = useLocale()
   background: rgba(124, 58, 237, 0.08);
   backdrop-filter: blur(8px);
   color: #6d28d9;
-  font-size: 11px;
+  font-size: 15px;
   border: 1px solid rgba(124, 58, 237, 0.15);
   transition: all 0.2s ease;
   cursor: default;

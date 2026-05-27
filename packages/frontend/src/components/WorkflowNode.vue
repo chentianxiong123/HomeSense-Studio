@@ -153,7 +153,7 @@ const visibleConfig = computed(() =>
   background: rgba(255, 255, 255, 0.25);
   backdrop-filter: blur(8px);
   border-radius: 8px;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 800;
   box-shadow: 0 4px 8px rgba(0,0,0,0.1);
   border: 1px solid rgba(255, 255, 255, 0.2);
@@ -162,7 +162,7 @@ const visibleConfig = computed(() =>
 .node-label {
   flex: 1;
   min-width: 0;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 800;
   white-space: nowrap;
   overflow: hidden;
@@ -175,7 +175,7 @@ const visibleConfig = computed(() =>
   padding: 3px 10px;
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.15);
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   text-transform: uppercase;
   white-space: nowrap;
@@ -239,7 +239,7 @@ const visibleConfig = computed(() =>
 .config-value {
   color: var(--text-secondary);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;

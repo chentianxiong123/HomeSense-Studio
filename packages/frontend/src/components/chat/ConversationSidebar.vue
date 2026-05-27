@@ -95,7 +95,7 @@ defineExpose({ refresh })
   border-bottom: 1px solid rgba(236, 239, 242, 0.5);
 }
 .title {
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.12em;
@@ -104,7 +104,7 @@ defineExpose({ refresh })
 .actions { display: flex; gap: 8px; }
 .mini {
   padding: 5px 12px;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 700;
   border: 1px solid rgba(229, 231, 235, 0.8);
   border-radius: 8px;
@@ -128,7 +128,7 @@ defineExpose({ refresh })
   background: var(--primary-hover);
 }
 .error {
-  font-size: 11px;
+  font-size: 15px;
   color: #dc2626;
   background: rgba(254, 242, 242, 0.8);
   padding: 10px 16px;
@@ -137,7 +137,7 @@ defineExpose({ refresh })
   font-weight: 500;
 }
 .empty {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--text-tertiary);
   text-align: center;
   padding: 48px 20px;
@@ -173,7 +173,7 @@ defineExpose({ refresh })
 .item-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
 .item-id {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 800;
   color: var(--primary-color);
   background: rgba(16, 185, 129, 0.1);
@@ -181,13 +181,13 @@ defineExpose({ refresh })
   border-radius: 4px;
 }
 .item-time {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-tertiary);
   text-transform: uppercase;
 }
 .item-summary {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
   line-height: 1.5;
@@ -200,7 +200,7 @@ defineExpose({ refresh })
 }
 .item-plan {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--text-tertiary);
   margin-top: 6px;
@@ -211,6 +211,6 @@ defineExpose({ refresh })
 }
 .item-plan::before {
   content: "📋";
-  font-size: 10px;
+  font-size: 14px;
 }
 </style>

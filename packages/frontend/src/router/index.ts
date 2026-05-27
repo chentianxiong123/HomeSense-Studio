@@ -5,10 +5,12 @@ import AssetDetailView from '@/views/AssetDetailView.vue'
 import SettingsRouteView from '@/views/SettingsRouteView.vue'
 import DevicesView from '@/views/DevicesView.vue'
 import DeviceDetailView from '@/views/DeviceDetailView.vue'
+import LLMView from '@/views/LLMView.vue'
 import IntegrationsView from '@/views/IntegrationsView.vue'
 import MiCliDetailView from '@/views/MiCliDetailView.vue'
 import AdbCliDetailView from '@/views/AdbCliDetailView.vue'
 import MiTestView from '@/views/MiTestView.vue'
+import AssetsView from '@/views/AssetsView.vue'
 import StudioHomeView from '@/views/StudioHomeView.vue'
 import WorkflowOverviewView from '@/views/WorkflowOverviewView.vue'
 import WorkflowRunsView from '@/views/WorkflowRunsView.vue'
@@ -26,7 +28,9 @@ export const router = createRouter({
     },
     { path: '/chat', name: 'chat', component: ChatView },
     { path: '/studio', name: 'studio-home', component: StudioHomeView },
+    { path: '/assets', name: 'assets-home', component: AssetsView },
     { path: '/devices', name: 'devices', component: DevicesView },
+    { path: '/providers', name: 'llm-models', component: LLMView },
     { path: '/devices/:id', name: 'device-detail', component: DeviceDetailView },
     { path: '/integrations', name: 'integrations', component: IntegrationsView },
     { path: '/integrations/mi-cli', name: 'integrations-mi-cli', component: MiCliDetailView },
@@ -37,35 +41,40 @@ export const router = createRouter({
     { path: '/studio/workflows/:id/editor', name: 'studio-workflow-editor', component: StudioView },
     { path: '/studio/workflows/:id/runs', name: 'studio-workflow-runs', component: WorkflowRunsView },
     {
-      path: '/studio/skills/:name/overview',
-      name: 'studio-skill-overview',
+      path: '/assets/skills/:name/overview',
+      name: 'asset-skill-overview',
       component: AssetDetailView,
       meta: { assetKind: 'skill', assetTab: 'overview' },
     },
     {
-      path: '/studio/skills/:name/prompt',
-      name: 'studio-skill-prompt',
+      path: '/assets/skills/:name/prompt',
+      name: 'asset-skill-prompt',
       component: AssetDetailView,
       meta: { assetKind: 'skill', assetTab: 'prompt' },
     },
     {
-      path: '/studio/manifests/:id/overview',
-      name: 'studio-manifest-overview',
+      path: '/assets/manifests/:id/overview',
+      name: 'asset-manifest-overview',
       component: AssetDetailView,
       meta: { assetKind: 'manifest', assetTab: 'overview' },
     },
     {
-      path: '/studio/plans/:id/overview',
-      name: 'studio-plan-overview',
+      path: '/assets/plans/:id/overview',
+      name: 'asset-plan-overview',
       component: AssetDetailView,
       meta: { assetKind: 'plan', assetTab: 'overview' },
     },
     {
-      path: '/studio/agents/:target/overview',
-      name: 'studio-agent-overview',
+      path: '/assets/agents/:target/overview',
+      name: 'asset-agent-overview',
       component: AssetDetailView,
       meta: { assetKind: 'agent', assetTab: 'overview' },
     },
+    // Redirect old /studio/ asset routes for backwards compatibility
+    { path: '/studio/skills/:name/:tab', redirect: (to) => `/assets/skills/${to.params.name}/${to.params.tab}` },
+    { path: '/studio/manifests/:id/:tab', redirect: (to) => `/assets/manifests/${to.params.id}/${to.params.tab}` },
+    { path: '/studio/plans/:id/:tab', redirect: (to) => `/assets/plans/${to.params.id}/${to.params.tab}` },
+    { path: '/studio/agents/:target/:tab', redirect: (to) => `/assets/agents/${to.params.target}/${to.params.tab}` },
     { path: '/settings', name: 'settings', component: SettingsRouteView },
   ],
 })

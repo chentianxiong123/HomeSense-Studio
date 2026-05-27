@@ -340,7 +340,7 @@ function safeJson(value: unknown) {
 .eyebrow {
   display: inline-block;
   color: #10b981;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.15em;
@@ -368,7 +368,7 @@ h2 {
 }
 
 h3 {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.15em;
@@ -401,7 +401,7 @@ button {
   padding: 0 24px;
   color: var(--text-primary);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 800;
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   text-transform: uppercase;
@@ -458,7 +458,7 @@ button:disabled {
 .input-row label {
   display: block;
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.15em;
@@ -481,7 +481,7 @@ button:disabled {
   display: block;
   margin-top: 12px;
   color: var(--text-tertiary);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
 }
 
@@ -493,7 +493,7 @@ button:disabled {
   background: rgba(254, 242, 242, 0.8);
   backdrop-filter: blur(16px);
   color: #ef4444;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -545,7 +545,7 @@ button:disabled {
 }
 
 .qr-line span {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.12em;
@@ -569,7 +569,7 @@ pre {
   border-radius: 20px;
   background: #1e293b;
   color: #e2e8f0;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.7;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -588,7 +588,7 @@ input {
   border-radius: 12px;
   padding: 0 20px;
   background: rgba(255, 255, 255, 0.8);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
   outline: none;
@@ -642,7 +642,7 @@ input:focus {
 
 .list-item strong {
   display: block;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 800;
   color: var(--text-primary);
   letter-spacing: -0.01em;
@@ -652,7 +652,7 @@ input:focus {
   display: block;
   margin-top: 6px;
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -664,7 +664,7 @@ input:focus {
   align-items: center;
   justify-content: center;
   color: var(--text-tertiary);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -724,7 +724,7 @@ input:focus {
 
 .step-row strong {
   display: block;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 800;
   color: var(--text-primary);
 }
@@ -732,7 +732,7 @@ input:focus {
 .step-row small {
   display: block;
   margin-top: 4px;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -743,7 +743,7 @@ input:focus {
   display: block;
   margin-top: 8px;
   color: #f59e0b;
-  font-size: 12px;
+  font-size: 16px;
   font-style: normal;
   font-weight: 600;
   line-height: 1.5;

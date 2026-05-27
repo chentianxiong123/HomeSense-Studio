@@ -55,10 +55,10 @@ function stringify(value: unknown): string {
 .a2a-card.success { border-color: rgba(16, 185, 129, 0.2); background: rgba(240, 253, 244, 0.6); }
 .a2a-card.error { border-color: rgba(220, 38, 38, 0.2); background: rgba(254, 242, 242, 0.6); }
 
-.a2a-head { display: flex; align-items: center; gap: 10px; font-size: 11px; }
+.a2a-head { display: flex; align-items: center; gap: 10px; font-size: 15px; }
 .a2a-kind {
   font-weight: 800;
-  font-size: 9px;
+  font-size: 13px;
   color: var(--text-tertiary);
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -72,7 +72,7 @@ function stringify(value: unknown): string {
   color: #0d9488;
 }
 .a2a-status {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 800;
   padding: 2px 8px;
   border-radius: 999px;
@@ -84,14 +84,14 @@ function stringify(value: unknown): string {
 .a2a-status.success { background: rgba(16, 185, 129, 0.1); color: #059669; }
 .a2a-status.error { background: rgba(220, 38, 38, 0.1); color: #dc2626; }
 
-.a2a-task { font-size: 13px; font-weight: 700; color: var(--text-primary); overflow-wrap: anywhere; letter-spacing: -0.01em; line-height: 1.5; }
+.a2a-task { font-size: 15px; font-weight: 700; color: var(--text-primary); overflow-wrap: anywhere; letter-spacing: -0.01em; line-height: 1.5; }
 .a2a-result {
   margin: 0;
   padding: 10px 12px;
   border-radius: 8px;
   background: rgba(241, 245, 249, 0.5);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 11px;
+  font-size: 15px;
   max-height: 200px;
   overflow: auto;
   white-space: pre-wrap;
@@ -99,5 +99,5 @@ function stringify(value: unknown): string {
   border: 1px solid rgba(229, 231, 235, 0.5);
   color: var(--text-primary);
 }
-.a2a-error { font-size: 11px; font-weight: 500; color: #dc2626; background: rgba(254, 242, 242, 0.8); padding: 8px 12px; border-radius: 8px; }
+.a2a-error { font-size: 15px; font-weight: 500; color: #dc2626; background: rgba(254, 242, 242, 0.8); padding: 8px 12px; border-radius: 8px; }
 </style>
