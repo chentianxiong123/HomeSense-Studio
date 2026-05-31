@@ -34,6 +34,7 @@ export const HeartEvent = {
   SKILL_REGISTERED: 'skill_registered',
   // system-tools
   TIMER_FIRED: 'timer_fired',
+  OUTCOME_REPORTED: 'outcome_reported',
   // workflow
   WORKFLOW_NODE_STARTED: 'workflow_node_started',
   WORKFLOW_NODE_FAILED: 'workflow_node_failed',

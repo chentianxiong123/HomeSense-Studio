@@ -1,5 +1,6 @@
 import { eventBus, HeartEvent } from '../event-bus/index.js'
 import { memoryKernel } from '../memory-kernel/index.js'
+import { memoryAssetsService } from '../memory-assets/index.js'
 import type { ExecutorInvokeResult } from '../executor-gateway/index.js'
 
 export const SYSTEM_AGENT_TOOL_DEFINITIONS = [
@@ -45,6 +46,55 @@ export const SYSTEM_AGENT_TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'confirm_outcome',
+      description: 'Ask the user whether the last device action succeeded. Use this after executing a device capability or workflow when the system cannot verify success automatically (e.g. TV screen changed, music started playing). The user response feeds back into the experience path success/failure count.',
+      parameters: {
+        type: 'object',
+        properties: {
+          question: { type: 'string', description: 'Short confirmation question to ask the user, e.g. "电视画面切换到B站了吗？"' },
+          experience_path_id: { type: 'string', description: 'The memory item ID of the experience path to update with the outcome.' },
+          context: {
+            type: 'object',
+            description: 'Execution context for the feedback record.',
+            properties: {
+              intent: { type: 'string' },
+              device_id: { type: 'integer' },
+              capability: { type: 'string' },
+              steps_executed: { type: 'integer' },
+            },
+          },
+        },
+        required: ['question'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'report_outcome',
+      description: 'Record the outcome of a previously asked confirmation. Call this after the user responds to a confirm_outcome question. Updates the experience path success/failure counters and writes an observation to memory.',
+      parameters: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean', description: 'Whether the action succeeded according to the user.' },
+          experience_path_id: { type: 'string', description: 'The memory item ID to update.' },
+          note: { type: 'string', description: 'Optional note about what happened (e.g. user said "no, it opened the wrong app").' },
+          context: {
+            type: 'object',
+            properties: {
+              intent: { type: 'string' },
+              device_id: { type: 'integer' },
+              capability: { type: 'string' },
+            },
+          },
+        },
+        required: ['success'],
+      },
+    },
+  },
 ]
 
 const SYSTEM_TOOL_NAMES = new Set(SYSTEM_AGENT_TOOL_DEFINITIONS.map((t) => t.function.name))
@@ -63,6 +113,10 @@ export async function executeSystemAgentTool(
         return executeSetTimer(args)
       case 'remember':
         return executeRemember(args)
+      case 'confirm_outcome':
+        return executeConfirmOutcome(args)
+      case 'report_outcome':
+        return executeReportOutcome(args)
       default:
         return { status: 'error', executor: name, error: `Unknown system tool: ${name}` }
     }
@@ -135,6 +189,72 @@ function executeRemember(args: Record<string, unknown>): ExecutorInvokeResult {
       wing,
       room,
       stored: true,
+    },
+  }
+}
+
+function executeConfirmOutcome(args: Record<string, unknown>): ExecutorInvokeResult {
+  const question = String(args.question ?? '').trim()
+  if (!question) {
+    return { status: 'error', executor: 'confirm_outcome', error: 'question is required' }
+  }
+
+  const confirmationId = `confirm_${Date.now()}`
+
+  return {
+    status: 'success',
+    executor: 'confirm_outcome',
+    data: {
+      confirmation_id: confirmationId,
+      question,
+      experience_path_id: args.experience_path_id ?? null,
+      context: args.context ?? {},
+      awaiting_user_response: true,
+    },
+  }
+}
+
+function executeReportOutcome(args: Record<string, unknown>): ExecutorInvokeResult {
+  const success = Boolean(args.success)
+  const pathId = String(args.experience_path_id ?? '').trim()
+  const note = String(args.note ?? '').trim()
+  const context = (args.context ?? {}) as Record<string, unknown>
+
+  if (pathId) {
+    memoryAssetsService.recordOutcome(pathId, success)
+  }
+
+  const intent = String(context.intent ?? '').trim()
+  const deviceId = context.device_id ? String(context.device_id) : undefined
+  const capability = String(context.capability ?? '').trim()
+
+  if (intent || capability) {
+    memoryKernel.observeOutcome({
+      intent: intent || capability,
+      target_device_id: deviceId,
+      tool: 'device_agent',
+      action: capability || 'unknown',
+      success,
+      error: success ? undefined : note || undefined,
+    })
+  }
+
+  eventBus.fire(HeartEvent.OUTCOME_REPORTED, {
+    success,
+    experience_path_id: pathId || null,
+    note,
+    context,
+    reported_at: new Date().toISOString(),
+  })
+
+  return {
+    status: 'success',
+    executor: 'report_outcome',
+    data: {
+      success,
+      experience_path_id: pathId || null,
+      observation_written: Boolean(intent || capability),
+      path_updated: Boolean(pathId),
     },
   }
 }

@@ -472,6 +472,17 @@ export class MemoryAssetsService {
     return row ? this.fromMemoryItemRow(row) ?? asset : asset
   }
 
+  recordOutcome(pathId: string, success: boolean): void {
+    const id = normalizeMemoryId(pathId) || pathId.replace(/^memory:/, '')
+    const column = success ? 'success_count' : 'failure_count'
+    const db = this.dbProvider()
+    db.prepare(`
+      UPDATE memory_experience_paths
+      SET ${column} = ${column} + 1${success ? ", last_success_at = datetime('now')" : ''}
+      WHERE memory_item_id = ?
+    `).run(id)
+  }
+
   private readExperiencePathRefs(id: string): { skill_refs: MemorySkillRef[]; device_refs: string[] } {
     const row = this.dbProvider().prepare(`
       SELECT skill_refs_json, device_refs_json
