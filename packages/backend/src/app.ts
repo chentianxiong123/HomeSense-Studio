@@ -98,24 +98,26 @@ export async function buildApp() {
   knowledgeCompiler.refreshKnowledge()
   externalIntegrationsService.ensureDefaults()
 
-  // setTimeout(() => {
-  //   if (process.env.ENABLE_STARTUP_EMBEDDING === 'true') {
-  //     memoryKernel.rebuildCompiledKnowledgeEmbeddings()
-  //       .then((result) => {
-  //         app.log.info(
-  //           `[startup] Knowledge embeddings rebuilt: ${result.stored}/${result.processed} ` +
-  //           `(profile=${result.profile_name})`,
-  //         )
-  //       })
-  //       .catch((err: Error) => {
-  //         app.log.warn(`[startup] Knowledge embedding rebuild skipped: ${err.message}`)
-  //       })
-  //   } else {
-  //     app.log.info('[startup] Knowledge embedding rebuild skipped (ENABLE_STARTUP_EMBEDDING != true)')
-  //   }
-  // }, 0)
+  setTimeout(() => {
+    memoryKernel.rebuildCompiledKnowledgeEmbeddings()
+      .then((result) => {
+        app.log.info(
+          `[startup] Knowledge embeddings rebuilt: ${result.stored}/${result.processed} ` +
+          `(profile=${result.profile_name})`,
+        )
+      })
+      .catch((err: Error) => {
+        app.log.warn(`[startup] Knowledge embedding rebuild skipped: ${err.message}`)
+      })
+  }, 0)
 
   cronService.start(60000)
+
+  const embeddingRefreshTimer = setInterval(() => {
+    knowledgeCompiler.refreshKnowledge()
+    memoryKernel.rebuildCompiledKnowledgeEmbeddings()
+      .catch(() => {})
+  }, 10 * 60 * 1000)
 
   const compensationTimer = setInterval(() => {
     compensationService.processPendingTasks()
@@ -263,6 +265,7 @@ export async function buildApp() {
 
   app.addHook('onClose', async () => {
     clearInterval(compensationTimer)
+    clearInterval(embeddingRefreshTimer)
     cronService.stop()
     // deviceStatePoller.stop()
     wsClients.clear()

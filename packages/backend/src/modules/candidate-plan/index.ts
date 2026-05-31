@@ -4,6 +4,7 @@ import { memoryAssetsService as defaultMemoryAssetsService } from '../memory-ass
 import { memoryKernel as defaultMemoryKernel, type SearchResult } from '../memory-kernel/index.js'
 import { planLibrary as defaultPlanLibrary, type CompiledPlanDefinition, type PlanStepDefinition } from '../plan-library/index.js'
 import { rerankService as defaultRerankService } from '../rerank-service/index.js'
+import { buildFingerprintFromCompletion, buildFingerprintFromSteps, fingerprintMatchScore } from '../intent-fingerprint/index.js'
 
 export interface CandidatePlanEvidence {
   source: 'context' | 'plan_library' | 'compiled_knowledge' | 'memory' | 'memory_observation' | 'search'
@@ -53,7 +54,7 @@ export class CandidatePlanService {
     private readonly rerankService = defaultRerankService,
   ) {}
 
-  /** 从所有源收集候选 plan：matchedPlan → context → lexical hits → semantic hits */
+  /** 从所有源收集候选 plan：matchedPlan → fingerprint → context → lexical hits → semantic hits */
   async collectCandidates(params: {
     query: string
     completion?: ContextCompletionResult
@@ -82,6 +83,27 @@ export class CandidatePlanService {
         },
       ])
       candidates.set(exact.id, exact)
+    }
+
+    if (completion) {
+      const queryFp = buildFingerprintFromCompletion(completion, params.query)
+      if (queryFp) {
+        for (const hit of searchHits) {
+          if (hit.source !== 'memory') continue
+          const metadata = hit.metadata as Record<string, unknown> | undefined
+          if (!metadata?.steps || !Array.isArray(metadata.steps)) continue
+          const storedFp = buildFingerprintFromSteps(metadata.steps as Array<{ tool: string; action: string; params?: Record<string, unknown> }>)
+          const matchScore = fingerprintMatchScore(queryFp, storedFp)
+          if (matchScore >= 0.8) {
+            const candidate = this.fromSearchHit(hit)
+            if (candidate) {
+              candidate.confidence = Math.min(0.99, Math.max(candidate.confidence, 0.88 + matchScore * 0.1))
+              candidate.evidence.push({ source: 'context', ref: 'intent_fingerprint', score: matchScore, note: queryFp })
+              candidates.set(candidate.id, candidate)
+            }
+          }
+        }
+      }
     }
 
     for (const hit of searchHits) {

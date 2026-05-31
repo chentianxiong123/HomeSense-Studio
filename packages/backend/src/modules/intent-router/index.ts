@@ -126,6 +126,7 @@ export class IntentRouterService {
       ? [
           ...this.memoryKernel.search(routingMessage).slice(0, 8),
           ...this.memoryAssetsService.searchExperiencePaths(routingMessage, 8),
+          ...await this.safeSemanticSearch(routingMessage, 6),
         ]
       : []
     for (const hit of searchHits.slice(0, 3)) {
@@ -283,6 +284,14 @@ export class IntentRouterService {
     const observationScore = observations[0]?.score ?? 0
     const searchScore = searchHits[0]?.score ?? 0
     return Math.max(0.5, Math.min(0.9, (candidateScore * 0.5) + (observationScore * 0.25) + (searchScore * 0.25)))
+  }
+
+  private async safeSemanticSearch(query: string, limit: number): Promise<SearchResult[]> {
+    try {
+      return await this.memoryKernel.semanticSearch(query, limit)
+    } catch {
+      return []
+    }
   }
 
   private matchSkill(message: string): string | null {

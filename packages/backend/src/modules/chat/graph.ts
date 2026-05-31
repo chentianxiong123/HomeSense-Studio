@@ -21,6 +21,11 @@ import {
   executeWorkflowAgentTool,
   isWorkflowAgentTool,
 } from '../workflow/workflow-agent-tools.js'
+import {
+  SYSTEM_AGENT_TOOL_DEFINITIONS,
+  executeSystemAgentTool,
+  isSystemAgentTool,
+} from '../system-tools/index.js'
 import type { CandidatePlan } from '../candidate-plan/index.js'
 import type { PlanStepDefinition } from '../plan-library/index.js'
 import type { RuleAction } from '../rule-engine/index.js'
@@ -147,6 +152,7 @@ const L2_DIRECT_EXECUTION_THRESHOLD = 0.84
 const CHAT_AGENT_TOOL_DEFINITIONS = [
   ...DEVICE_AGENT_TOOL_DEFINITIONS,
   ...WORKFLOW_AGENT_TOOL_DEFINITIONS,
+  ...SYSTEM_AGENT_TOOL_DEFINITIONS,
 ]
 
 async function lightIntentNode(state: State): Promise<Partial<State>> {
@@ -452,7 +458,7 @@ async function runtimeExecutionNode(state: State): Promise<Partial<State>> {
 
   for (let index = 0; index < steps.length; index += 1) {
     const step = steps[index]
-    const result = await invokeResolvedStepWithApproval(step, turnId)
+    const result = await invokeResolvedStep(step, turnId)
     if (result.status === 'error') {
       failures.push(result.message ?? result.error ?? `${step.executorName}.${step.action} failed`)
     }
@@ -684,6 +690,8 @@ async function toolsExecutionNode(state: State): Promise<Partial<State>> {
       }
     } else if (isWorkflowAgentTool(toolName)) {
       result = await executeWorkflowAgentTool(toolName, args)
+    } else if (isSystemAgentTool(toolName)) {
+      result = await executeSystemAgentTool(toolName, args)
     } else if (toolName.startsWith('mi-cli') || toolName.startsWith('adb')) {
       const cliName = toolName.includes('adb') ? 'adb-cli' : 'mi-cli'
       result = await invokeCliWithApproval({
@@ -916,6 +924,28 @@ function resolveExecutionStep(step: PlanStepDefinition, order: number): Resolved
     }
   }
 
+  if (tool === 'device_agent' && action === 'execute_device_capability') {
+    return {
+      order,
+      tool,
+      action,
+      params: step.params,
+      executorName: 'execute_device_capability',
+      invokeParams: step.params,
+    }
+  }
+
+  if (tool === 'workflow' && action === 'run_workflow') {
+    return {
+      order,
+      tool,
+      action,
+      params: step.params,
+      executorName: 'run_workflow',
+      invokeParams: step.params,
+    }
+  }
+
   return null
 }
 
@@ -1094,15 +1124,17 @@ async function buildInferenceMessages(state: State): Promise<any[]> {
   const maxMessages = policy === 'device_focused'
     ? 8
     : policy === 'light_recent'
-      ? 4
+      ? 2
     : policy === 'recent'
       ? 6
       : 0
-  const recent = maxMessages > 0
-    ? normalizePromptMessages(state.runtimeContext?.recent_messages ?? state.messages).slice(-maxMessages)
+  const allRecent = maxMessages > 0
+    ? normalizePromptMessages(state.runtimeContext?.recent_messages ?? state.messages)
     : []
   const currentTurnKey = new Set(currentTurn.map(messageKey))
-  const recentWithoutCurrentTurn = recent.filter((message) => !currentTurnKey.has(messageKey(message)))
+  const recentWithoutCurrentTurn = allRecent
+    .filter((message) => !currentTurnKey.has(messageKey(message)))
+    .slice(-maxMessages)
 
   return [system, ...recentWithoutCurrentTurn, ...currentTurn]
 }
@@ -1374,6 +1406,29 @@ function ruleActionToStep(action: RuleAction): PlanStepDefinition {
     action: action.action,
     params: action.params,
   }
+}
+
+async function invokeResolvedStep(step: ResolvedExecutionStep, turnId: string): Promise<ExecutorInvokeResult> {
+  if (step.executorName === 'execute_device_capability') {
+    const rehearsal = await executeDeviceAgentTool('rehearse_device_capability', step.invokeParams)
+    if (!isRehearsalPassed(rehearsal)) {
+      return {
+        status: 'error',
+        executor: step.executorName,
+        error: rehearsal.message ?? rehearsal.error ?? 'SANDBOX_REHEARSAL_FAILED',
+        message: rehearsal.status === 'success'
+          ? readRehearsalBlockReason(rehearsal.data)
+          : rehearsal.message ?? rehearsal.error ?? '沙箱演练未通过。',
+      }
+    }
+    return executeDeviceAgentTool('execute_device_capability', step.invokeParams)
+  }
+
+  if (step.executorName === 'run_workflow') {
+    return executeWorkflowAgentTool('run_workflow', step.invokeParams)
+  }
+
+  return invokeResolvedStepWithApproval(step, turnId)
 }
 
 async function invokeResolvedStepWithApproval(step: ResolvedExecutionStep, turnId: string): Promise<ExecutorInvokeResult> {

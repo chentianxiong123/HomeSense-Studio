@@ -1,4 +1,5 @@
 import { normalizeDeviceTypeForSkill } from '../device/device-capability-registry.js'
+import { buildFingerprintFromSteps } from '../intent-fingerprint/index.js'
 import type { MemorySkillRef, RecordExperiencePathInput } from '../memory-assets/index.js'
 import type { RuntimeTraceEvent } from './graph.js'
 
@@ -289,6 +290,7 @@ export function buildRuntimePathCandidate(params: {
   }
 
   const title = buildCandidateTitle(params.intent, decision)
+  const intentFingerprint = buildFingerprintFromSteps(steps)
   return {
     title,
     summary: `Runtime executed a successful device path for: ${params.intent}`,
@@ -306,6 +308,7 @@ export function buildRuntimePathCandidate(params: {
     priority: 0.7,
     metadata: {
       saved_from: 'runtime_path_candidate',
+      intent_fingerprint: intentFingerprint,
       tool_count: executableSnapshots.length,
       executable_tool_names: executableSnapshots.map((snapshot) => snapshot.name),
       ...extractWorkflowMetadata(executableSnapshots),
