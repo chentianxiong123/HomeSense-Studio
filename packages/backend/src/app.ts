@@ -27,7 +27,7 @@ import { executorGatewayRoutes } from './modules/executor-gateway/routes.js'
 import { manifestRegistryRoutes } from './modules/manifest-registry/routes.js'
 import { approvalRoutes } from './modules/approval/routes.js'
 import { agentInstanceRoutes } from './modules/agent-instance/routes.js'
-import { devtestRoutes } from './modules/devtest/routes.js'
+// import { devtestRoutes } from './modules/devtest/routes.js'
 import { intentRouterRoutes } from './modules/intent-router/routes.js'
 import { deviceTypeSkillRoutes } from './modules/device-type-skill/routes.js'
 import { memoryAssetsRoutes } from './modules/memory-assets/routes.js'
@@ -169,7 +169,7 @@ export async function buildApp() {
   app.register(manifestRegistryRoutes)
   app.register(approvalRoutes)
   app.register(agentInstanceRoutes)
-  app.register(devtestRoutes)
+  // app.register(devtestRoutes)
   app.register(intentRouterRoutes)
   app.register(deviceTypeSkillRoutes)
   app.register(memoryAssetsRoutes)
