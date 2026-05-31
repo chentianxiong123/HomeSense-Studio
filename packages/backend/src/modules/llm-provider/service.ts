@@ -626,3 +626,47 @@ class LLMService {
 }
 
 export const llmService = new LLMService()
+
+export function seedDefaultProviders(): void {
+  const db = defaultGetDb()
+
+  const PIE_XIAN_API_BASE = 'https://api.pie-xian.com/v1'
+  const PIE_XIAN_API_KEY = 'sk-Cmr4gcToO4sEhHt00s8lNwU347L1WUG5HC3SLa3V0RGuGRjX'
+
+  const models: Array<{ name: string; model_name: string; category: LLMProviderCategory; is_default: boolean }> = [
+    { name: 'PieXian Vision', model_name: 'doubao-seed-1.6-flash', category: 'vision', is_default: true },
+    { name: 'PieXian Embedding', model_name: 'qwen3-embedding-8b', category: 'embedding', is_default: true },
+    { name: 'PieXian Rerank', model_name: 'qwen3-reranker-8b', category: 'rerank', is_default: true },
+  ]
+
+  for (const entry of models) {
+    const existingProvider = db.prepare(
+      'SELECT id FROM llm_providers WHERE api_base = ? AND category = ? AND enabled = 1',
+    ).get(PIE_XIAN_API_BASE, entry.category) as { id: number } | undefined
+
+    let providerId: number
+    if (existingProvider) {
+      providerId = existingProvider.id
+    } else {
+      const result = db.prepare(
+        `INSERT INTO llm_providers (name, api_base, api_key, category, enabled, extra_config)
+         VALUES (?, ?, ?, ?, 1, '{}')`,
+      ).run(entry.name, PIE_XIAN_API_BASE, PIE_XIAN_API_KEY, entry.category)
+      providerId = Number(result.lastInsertRowid)
+    }
+
+    const existingModel = db.prepare(
+      'SELECT id FROM llm_models WHERE provider_id = ? AND model_name = ? AND category = ?',
+    ).get(providerId, entry.model_name, entry.category) as { id: number } | undefined
+
+    if (!existingModel) {
+      const result = db.prepare(
+        'INSERT INTO llm_models (provider_id, model_name, category, is_default, enabled) VALUES (?, ?, ?, ?, 1)',
+      ).run(providerId, entry.model_name, entry.category, entry.is_default ? 1 : 0)
+      const modelId = Number(result.lastInsertRowid)
+      if (entry.is_default) {
+        db.prepare('UPDATE llm_models SET is_default = 0 WHERE id != ? AND category = ?').run(modelId, entry.category)
+      }
+    }
+  }
+}

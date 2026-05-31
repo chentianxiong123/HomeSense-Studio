@@ -42,7 +42,7 @@ import { experienceService } from './modules/experience/index.js'
 import { cronService } from './modules/cron/index.js'
 import { agentInstanceService } from './modules/agent-instance/index.js'
 import { agentAdapterRegistry } from './modules/agent-adapter/index.js'
-import { llmService } from './modules/llm-provider/service.js'
+import { llmService, seedDefaultProviders } from './modules/llm-provider/service.js'
 import { cliBridge } from './modules/cli-bridge/index.js'
 import { memoryKernel } from './modules/memory-kernel/index.js'
 import { knowledgeCompiler } from './modules/knowledge-compiler/index.js'
@@ -97,6 +97,7 @@ export async function buildApp() {
   experienceService.indexAllExperiences()
   knowledgeCompiler.refreshKnowledge()
   externalIntegrationsService.ensureDefaults()
+  seedDefaultProviders()
 
   setTimeout(() => {
     memoryKernel.rebuildCompiledKnowledgeEmbeddings()

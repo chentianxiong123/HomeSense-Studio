@@ -458,6 +458,23 @@ function migrateAppMap(db: Database.Database) {
     { name: 'embedding_json', sql: "ALTER TABLE app_map_screens ADD COLUMN embedding_json TEXT NOT NULL DEFAULT '[]'" },
   ])
   db.exec('CREATE INDEX IF NOT EXISTS idx_app_map_elements_screen ON app_map_elements(screen_id)')
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS opencv_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      package_name TEXT NOT NULL,
+      element_name TEXT NOT NULL,
+      template_hash TEXT NOT NULL UNIQUE,
+      template_path TEXT NOT NULL,
+      bounds_json TEXT NOT NULL DEFAULT '{}',
+      confidence REAL NOT NULL DEFAULT 0.8,
+      hit_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_matched_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `)
+  db.exec('CREATE INDEX IF NOT EXISTS idx_opencv_templates_package ON opencv_templates(package_name)')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_opencv_templates_element ON opencv_templates(element_name)')
 }
 
 function ensureColumns(

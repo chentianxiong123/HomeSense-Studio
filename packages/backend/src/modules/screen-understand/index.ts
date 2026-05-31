@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import { getDb } from '../../db/index.js'
 import { llmService } from '../llm-provider/service.js'
-import { preprocessScreenshotWithOpenCV } from '../vision-tools/opencv.js'
+import { preprocessScreenshotWithOpenCV, matchTemplatesWithOpenCV, storeTemplate } from '../vision-tools/opencv.js'
 
 export interface AppMapScreen {
   id: number
@@ -81,6 +81,35 @@ class ScreenUnderstandService {
   }): Promise<ScreenUnderstandResult> {
     const cached = this.findCachedScreen(params.package_name, params.element_name)
     if (cached) return cached
+
+    const templateMatches = await matchTemplatesWithOpenCV({
+      packageName: params.package_name,
+      elementName: params.element_name,
+    })
+    if (templateMatches.length > 0) {
+      const screenId = `template:${params.package_name}`
+      const screenDbId = this.ensureScreen({ packageName: params.package_name, screenId })
+      const elements: AppMapElement[] = templateMatches.map((match) => ({
+        id: 0,
+        screen_id: screenDbId,
+        element_name: match.element_name,
+        element_type: 'button',
+        bounds_json: match.bounds,
+        template_path: match.templatePath,
+        confidence: match.confidence,
+        hit_count: 1,
+        source: 'vision' as const,
+        last_seen_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+      }))
+      return {
+        package_name: params.package_name,
+        screen_id: screenId,
+        elements,
+        source: 'cache',
+        cached: true,
+      }
+    }
 
     if (params.ui_tree) {
       const fromTree = this.resolveFromUiTree(params.package_name, params.element_name, params.ui_tree)
@@ -233,6 +262,19 @@ class ScreenUnderstandService {
     })
 
     const stored = parsed.map((element) => this.toVisionElement(screenDbId, element))
+
+    for (const element of parsed) {
+      try {
+        storeTemplate({
+          packageName,
+          elementName: element.name,
+          imageBase64: processed.imageBase64,
+          bounds: element.bounds,
+          confidence: element.confidence,
+        })
+      } catch {}
+    }
+
     return {
       package_name: packageName,
       screen_id: screenId,
