@@ -641,12 +641,16 @@ export function seedDefaultProviders(): void {
 
   for (const entry of models) {
     const existingProvider = db.prepare(
-      'SELECT id FROM llm_providers WHERE api_base = ? AND category = ? AND enabled = 1',
-    ).get(PIE_XIAN_API_BASE, entry.category) as { id: number } | undefined
+      'SELECT id, api_key FROM llm_providers WHERE api_base = ? AND category = ? AND enabled = 1',
+    ).get(PIE_XIAN_API_BASE, entry.category) as { id: number; api_key: string } | undefined
 
     let providerId: number
     if (existingProvider) {
       providerId = existingProvider.id
+      if (existingProvider.api_key !== PIE_XIAN_API_KEY) {
+        db.prepare("UPDATE llm_providers SET api_key = ?, updated_at = datetime('now') WHERE id = ?")
+          .run(PIE_XIAN_API_KEY, providerId)
+      }
     } else {
       const result = db.prepare(
         `INSERT INTO llm_providers (name, api_base, api_key, category, enabled, extra_config)
@@ -659,7 +663,14 @@ export function seedDefaultProviders(): void {
       'SELECT id FROM llm_models WHERE provider_id = ? AND model_name = ? AND category = ?',
     ).get(providerId, entry.model_name, entry.category) as { id: number } | undefined
 
-    if (!existingModel) {
+    if (existingModel) {
+      if (entry.is_default) {
+        db.prepare("UPDATE llm_models SET is_default = 1, enabled = 1, updated_at = datetime('now') WHERE id = ?")
+          .run(existingModel.id)
+        db.prepare('UPDATE llm_models SET is_default = 0 WHERE id != ? AND category = ?')
+          .run(existingModel.id, entry.category)
+      }
+    } else {
       const result = db.prepare(
         'INSERT INTO llm_models (provider_id, model_name, category, is_default, enabled) VALUES (?, ?, ?, ?, 1)',
       ).run(providerId, entry.model_name, entry.category, entry.is_default ? 1 : 0)
