@@ -1,7 +1,7 @@
 import fs from 'fs'
 import { memoryKernel as defaultMemoryKernel } from '../memory-kernel/index.js'
 import { planLibrary as defaultPlanLibrary } from '../plan-library/index.js'
-import { SqlKnowledgeCompilerRepository, type KnowledgeCompilerRepository } from './repository.js'
+import { SqlKnowledgeCompilerRepository, type KnowledgeCompilerRepository, type CompilerExperiencePathRow } from './repository.js'
 
 interface MemoryKernelInstance {
   upsertCompiledKnowledge(params: {
@@ -55,17 +55,20 @@ export class KnowledgeCompilerService {
     experience_notes: number
     compiled_plans: number
     workflow_candidates: number
+    experience_paths: number
   } {
     const entityPages = this.compileEntityPages()
     const experienceNotes = this.compileExperienceNotes()
     const compiledPlans = this.compileExperiencePlans() + this.compileLibraryPlans()
     const workflowCandidates = this.compileWorkflowCandidates()
+    const experiencePaths = this.compileExperiencePaths()
 
     return {
       entity_pages: entityPages,
       experience_notes: experienceNotes,
       compiled_plans: compiledPlans,
       workflow_candidates: workflowCandidates,
+      experience_paths: experiencePaths,
     }
   }
 
@@ -260,6 +263,54 @@ export class KnowledgeCompilerService {
     if (!raw) return ''
     const bodyStart = raw.indexOf('---', raw.indexOf('---') + 3)
     return bodyStart === -1 ? raw.trim() : raw.slice(bodyStart + 3).trim()
+  }
+
+  private compileExperiencePaths(): number {
+    const paths = this.repo.listActiveExperiencePaths(100)
+    let count = 0
+
+    for (const path of paths) {
+      const metadata = safeParse<Record<string, unknown>>(path.metadata_json ?? '{}', {})
+      const steps = safeParse<Array<{ tool: string; action: string; params?: Record<string, unknown> }>>(path.steps_json ?? '[]', [])
+      const successCount = path.success_count ?? 0
+      const failureCount = path.failure_count ?? 0
+      const totalRuns = successCount + failureCount
+      const successRate = totalRuns > 0 ? successCount / totalRuns : 0.5
+      const rankScore = Math.min(0.98, Math.max(0.35, path.confidence * 0.6 + successRate * 0.3 + Math.min(0.1, totalRuns * 0.02)))
+
+      const bodyLines = [
+        `Intent: ${path.intent_pattern || path.title}`,
+        `Summary: ${path.summary || ''}`,
+        `Success: ${successCount}/${totalRuns} (${(successRate * 100).toFixed(0)}%)`,
+        '',
+        'Steps:',
+        ...steps.map((step, index) => `${index + 1}. ${step.tool}.${step.action} ${JSON.stringify(step.params ?? {})}`),
+      ]
+
+      this.memoryKernel.upsertCompiledKnowledge({
+        kind: 'compiled_plan',
+        title: path.title,
+        body: bodyLines.join('\n'),
+        wing: 'runtime_observations',
+        room: '',
+        source_type: 'runtime_path',
+        source_ref: path.id,
+        tags: ['runtime-path', path.intent_pattern || ''].filter(Boolean),
+        metadata: {
+          ...metadata,
+          runtime_path_id: path.id,
+          intent_pattern: path.intent_pattern,
+          steps,
+          success_count: successCount,
+          failure_count: failureCount,
+          success_rate: successRate,
+        },
+        rank_score: rankScore,
+      })
+      count++
+    }
+
+    return count
   }
 }
 

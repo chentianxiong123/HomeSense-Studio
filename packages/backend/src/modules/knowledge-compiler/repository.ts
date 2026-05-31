@@ -30,6 +30,20 @@ export interface CompilerWorkflowRow {
   updated_at: string
 }
 
+export interface CompilerExperiencePathRow {
+  id: string
+  title: string
+  summary: string
+  intent_pattern: string | null
+  steps_json: string | null
+  confidence: number
+  source: string
+  metadata_json: string
+  success_count: number
+  failure_count: number
+  updated_at: string
+}
+
 export interface KnowledgeCompilerRepository {
   listAllEntities(): CompilerEntityRow[]
   listAttributesForEntity(entityId: string): Array<{ key: string; value: string }>
@@ -37,6 +51,7 @@ export interface KnowledgeCompilerRepository {
   listAllExperiencesByImportance(): CompilerExperienceRow[]
   listExperiencesAboveImportance(threshold: number): CompilerExperienceRow[]
   listAllWorkflows(): CompilerWorkflowRow[]
+  listActiveExperiencePaths(limit: number): CompilerExperiencePathRow[]
 }
 
 export class SqlKnowledgeCompilerRepository implements KnowledgeCompilerRepository {
@@ -86,5 +101,19 @@ export class SqlKnowledgeCompilerRepository implements KnowledgeCompilerReposito
     return this.getDb()
       .prepare('SELECT * FROM workflows ORDER BY published DESC, updated_at DESC')
       .all() as CompilerWorkflowRow[]
+  }
+
+  listActiveExperiencePaths(limit: number): CompilerExperiencePathRow[] {
+    return this.getDb()
+      .prepare(`
+        SELECT m.id, m.title, m.summary, m.confidence, m.source, m.metadata_json, m.updated_at,
+               p.intent_pattern, p.steps_json, p.success_count, p.failure_count
+        FROM memory_items m
+        JOIN memory_experience_paths p ON p.memory_item_id = m.id
+        WHERE m.kind = 'experience_path' AND m.status = 'active'
+        ORDER BY p.success_count DESC, m.confidence DESC, m.updated_at DESC
+        LIMIT ?
+      `)
+      .all(limit) as CompilerExperiencePathRow[]
   }
 }

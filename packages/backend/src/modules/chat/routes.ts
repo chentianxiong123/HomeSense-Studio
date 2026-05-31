@@ -8,6 +8,7 @@ import {
   type DeviceCardRow,
 } from '../device/device-card-projection.js'
 import { buildRuntimePathCandidate } from './path-candidate.js'
+import { memoryAssetsService } from '../memory-assets/index.js'
 
 // Plain LLM stream path is frozen/disabled. All messages now go through LangGraph ReAct graph.
 // import { llmService } from '../llm-provider/service.js'
@@ -232,6 +233,9 @@ async function handleStreamPost(request: FastifyRequest, reply: FastifyReply) {
     })
     if (pathCandidate) {
       writeEvent({ type: 'path_candidate', candidate: pathCandidate })
+      try {
+        memoryAssetsService.recordExperiencePath(pathCandidate)
+      } catch {}
     }
 
     // Save to DB
