@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
 import { useLocale } from '@/composables/useLocale'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { externalIntegrationApi, type ExternalIntegrationRecord } from '@/api/externalIntegrations'
 
 const router = useRouter()
@@ -27,6 +27,12 @@ const formKind = ref<'http' | 'cli' | 'local_service' | 'webhook'>('http')
 const formEndpoint = ref('')
 const formDescription = ref('')
 const formCapabilities = ref('')
+
+const speakerStatus = ref<'unknown' | 'logged_in' | 'logged_out' | 'loading'>('loading')
+const speakerUser = ref('')
+const speakerQrUrl = ref('')
+const speakerQrPolling = ref(false)
+let qrPollTimer: ReturnType<typeof setInterval> | null = null
 
 function goTo(route: string) {
   router.push(route)
@@ -79,7 +85,79 @@ async function removeIntegration(id: number) {
   } catch {}
 }
 
-onMounted(loadIntegrations)
+async function checkSpeakerStatus() {
+  speakerStatus.value = 'loading'
+  try {
+    const res = await fetch('/api/auth/status')
+    const data = await res.json()
+    if (data?.status === 'success' && data?.data?.logged_in) {
+      speakerStatus.value = 'logged_in'
+      speakerUser.value = data.data.user_id || data.data.username || ''
+    } else {
+      speakerStatus.value = 'logged_out'
+      speakerUser.value = ''
+    }
+  } catch {
+    speakerStatus.value = 'unknown'
+  }
+}
+
+async function startQrLogin() {
+  speakerQrUrl.value = ''
+  try {
+    const res = await fetch('/api/auth/qr/start', { method: 'POST' })
+    const data = await res.json()
+    speakerQrUrl.value = data?.data?.qr_url || data?.data?.url || ''
+    if (speakerQrUrl.value) {
+      speakerQrPolling.value = true
+      qrPollTimer = setInterval(pollQrStatus, 2000)
+    }
+  } catch {}
+}
+
+async function pollQrStatus() {
+  try {
+    const res = await fetch('/api/auth/qr/status')
+    const data = await res.json()
+    const status = data?.data?.status || data?.status
+    if (status === 'confirmed' || status === 'success' || data?.data?.logged_in) {
+      stopQrPolling()
+      speakerStatus.value = 'logged_in'
+      speakerUser.value = data.data?.user_id || ''
+      speakerQrUrl.value = ''
+    } else if (status === 'expired' || status === 'error') {
+      stopQrPolling()
+      speakerQrUrl.value = ''
+    }
+  } catch {
+    stopQrPolling()
+  }
+}
+
+function stopQrPolling() {
+  speakerQrPolling.value = false
+  if (qrPollTimer) {
+    clearInterval(qrPollTimer)
+    qrPollTimer = null
+  }
+}
+
+async function speakerLogout() {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' })
+    speakerStatus.value = 'logged_out'
+    speakerUser.value = ''
+  } catch {}
+}
+
+onMounted(() => {
+  loadIntegrations()
+  checkSpeakerStatus()
+})
+
+onUnmounted(() => {
+  stopQrPolling()
+})
 </script>
 
 <template>
@@ -109,6 +187,38 @@ onMounted(loadIntegrations)
           <span class="cli-subtitle">{{ card.subtitle }}</span>
           <span class="expand-hint">→</span>
         </button>
+      </div>
+    </section>
+
+    <section class="section-block">
+      <div class="section-header">
+        <h2>{{ label('小米账号 / 音箱', 'Xiaomi Account / Speaker') }}</h2>
+        <small>{{ label('登录后可控制小爱音箱', 'Login to control Xiaomi speakers') }}</small>
+      </div>
+      <div class="speaker-panel glass-panel">
+        <div v-if="speakerStatus === 'loading'" class="speaker-state">
+          {{ label('检查登录状态...', 'Checking login status...') }}
+        </div>
+        <div v-else-if="speakerStatus === 'logged_in'" class="speaker-state logged-in">
+          <span class="speaker-dot online"></span>
+          <span>{{ label('已登录', 'Logged in') }}</span>
+          <span v-if="speakerUser" class="speaker-user">{{ speakerUser }}</span>
+          <button class="speaker-logout-btn" @click="speakerLogout">{{ label('退出', 'Logout') }}</button>
+        </div>
+        <div v-else class="speaker-login-area">
+          <div class="speaker-state logged-out">
+            <span class="speaker-dot offline"></span>
+            <span>{{ label('未登录小米账号', 'Not logged in') }}</span>
+          </div>
+          <div v-if="speakerQrUrl" class="qr-area">
+            <img :src="speakerQrUrl" alt="QR Code" class="qr-image" />
+            <p class="qr-hint">{{ label('使用米家 App 扫码登录', 'Scan with Mi Home app') }}</p>
+            <span v-if="speakerQrPolling" class="qr-polling">{{ label('等待扫码...', 'Waiting for scan...') }}</span>
+          </div>
+          <button v-if="!speakerQrUrl" class="speaker-login-btn" @click="startQrLogin">
+            {{ label('扫码登录小米账号', 'Login with QR Code') }}
+          </button>
+        </div>
       </div>
     </section>
 
@@ -539,5 +649,92 @@ h1 {
   font-size: 12px;
   font-weight: 700;
   color: var(--text-tertiary);
+}
+
+.speaker-panel {
+  padding: 24px;
+}
+.speaker-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+.speaker-state.logged-in { color: #059669; }
+.speaker-state.logged-out { color: var(--text-tertiary); }
+.speaker-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.speaker-dot.online { background: #10b981; }
+.speaker-dot.offline { background: #94a3b8; }
+.speaker-user {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.speaker-login-area {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.speaker-login-btn,
+.speaker-logout-btn {
+  padding: 8px 20px;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.08);
+  color: #2563eb;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.speaker-login-btn:hover,
+.speaker-logout-btn:hover {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: #3b82f6;
+}
+.speaker-logout-btn {
+  margin-left: auto;
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.08);
+  color: #dc2626;
+}
+.speaker-logout-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: #ef4444;
+}
+.qr-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.qr-image {
+  width: 200px;
+  height: 200px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+.qr-hint {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  margin: 0;
+}
+.qr-polling {
+  font-size: 12px;
+  font-weight: 800;
+  color: #2563eb;
+  animation: pulse 1.5s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 </style>
