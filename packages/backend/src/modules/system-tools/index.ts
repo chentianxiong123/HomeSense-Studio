@@ -1,6 +1,7 @@
 import { eventBus, HeartEvent } from '../event-bus/index.js'
 import { memoryKernel } from '../memory-kernel/index.js'
 import { memoryAssetsService } from '../memory-assets/index.js'
+import { executeDeviceAgentTool } from '../device/device-agent-tools.js'
 import type { ExecutorInvokeResult } from '../executor-gateway/index.js'
 
 export const SYSTEM_AGENT_TOOL_DEFINITIONS = [
@@ -95,6 +96,24 @@ export const SYSTEM_AGENT_TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'wait_until',
+      description: 'Wait until a condition is met on a device, polling at intervals. Use this between steps in a multi-step path when the next step depends on a state change (e.g. app launched, screen loaded). Returns success when condition is met or error on timeout.',
+      parameters: {
+        type: 'object',
+        properties: {
+          device_id: { type: 'integer', description: 'Device to check condition on.' },
+          condition: { type: 'string', enum: ['app_foreground', 'ui_element_visible', 'device_online'], description: 'Type of condition to check.' },
+          expected: { type: 'string', description: 'Expected value: package name for app_foreground, element text for ui_element_visible, or "true" for device_online.' },
+          timeout_ms: { type: 'integer', description: 'Maximum wait time in milliseconds. Defaults to 5000.' },
+          poll_interval_ms: { type: 'integer', description: 'Polling interval in milliseconds. Defaults to 800.' },
+        },
+        required: ['device_id', 'condition', 'expected'],
+      },
+    },
+  },
 ]
 
 const SYSTEM_TOOL_NAMES = new Set(SYSTEM_AGENT_TOOL_DEFINITIONS.map((t) => t.function.name))
@@ -117,6 +136,8 @@ export async function executeSystemAgentTool(
         return executeConfirmOutcome(args)
       case 'report_outcome':
         return executeReportOutcome(args)
+      case 'wait_until':
+        return await executeWaitUntil(args)
       default:
         return { status: 'error', executor: name, error: `Unknown system tool: ${name}` }
     }
@@ -257,4 +278,81 @@ function executeReportOutcome(args: Record<string, unknown>): ExecutorInvokeResu
       path_updated: Boolean(pathId),
     },
   }
+}
+
+async function executeWaitUntil(args: Record<string, unknown>): Promise<ExecutorInvokeResult> {
+  const deviceId = Number(args.device_id)
+  if (!Number.isFinite(deviceId)) {
+    return { status: 'error', executor: 'wait_until', error: 'device_id is required' }
+  }
+
+  const condition = String(args.condition ?? '').trim()
+  const expected = String(args.expected ?? '').trim()
+  if (!condition || !expected) {
+    return { status: 'error', executor: 'wait_until', error: 'condition and expected are required' }
+  }
+
+  const timeoutMs = Number(args.timeout_ms) || 5000
+  const pollIntervalMs = Number(args.poll_interval_ms) || 800
+  const startTime = Date.now()
+
+  while (Date.now() - startTime < timeoutMs) {
+    const met = await checkCondition(deviceId, condition, expected)
+    if (met) {
+      return {
+        status: 'success',
+        executor: 'wait_until',
+        data: {
+          condition,
+          expected,
+          met: true,
+          elapsed_ms: Date.now() - startTime,
+        },
+      }
+    }
+    await sleep(pollIntervalMs)
+  }
+
+  return {
+    status: 'error',
+    executor: 'wait_until',
+    error: `Timeout: condition "${condition}" not met within ${timeoutMs}ms`,
+    message: `等待超时：${condition} = "${expected}" 未在 ${timeoutMs}ms 内满足`,
+  }
+}
+
+async function checkCondition(deviceId: number, condition: string, expected: string): Promise<boolean> {
+  try {
+    if (condition === 'app_foreground') {
+      const result = await executeDeviceAgentTool('get_current_app', { device_id: deviceId })
+      if (result.status !== 'success') return false
+      const data = result.data as Record<string, unknown> | undefined
+      const currentApp = String(data?.package ?? data?.current_app ?? data?.foreground_app ?? '').trim()
+      return currentApp.includes(expected)
+    }
+
+    if (condition === 'ui_element_visible') {
+      const result = await executeDeviceAgentTool('get_ui_tree', { device_id: deviceId })
+      if (result.status !== 'success') return false
+      const content = JSON.stringify(result.data ?? '')
+      return content.includes(expected)
+    }
+
+    if (condition === 'device_online') {
+      const result = await executeDeviceAgentTool('list_user_devices', {})
+      if (result.status !== 'success') return false
+      const devices = (result.data as any)?.devices ?? result.data
+      if (!Array.isArray(devices)) return false
+      const device = devices.find((d: any) => d.id === deviceId)
+      return device?.online === true
+    }
+
+    return false
+  } catch {
+    return false
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
