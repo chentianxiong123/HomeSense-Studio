@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { getDb } from '../../db/index.js'
+import { L1_REFLEX_POLICY, shouldAttemptL1Reflex } from './l1-reflex-policy.js'
 
 // ── Preset stopwords ──
 const PRESET_STOPWORDS = [
@@ -270,6 +271,17 @@ export async function commandRoutes(app: FastifyInstance) {
     if (!body.input) return { matched: false }
     const result = matchCommand(body.input)
     return result ?? { matched: false }
+  })
+
+  app.get('/api/command/l1-policy', async () => {
+    return {
+      policy: L1_REFLEX_POLICY,
+    }
+  })
+
+  app.post('/api/command/l1-policy/check', async (request) => {
+    const body = request.body as { input?: string }
+    return shouldAttemptL1Reflex(body.input ?? '')
   })
 
   // ── Stopwords CRUD ──

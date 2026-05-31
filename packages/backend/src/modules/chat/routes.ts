@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { chatService } from './service.js'
-import { reactGraph, ChatReActState } from './graph.js'
 import { buildRuntimeContextWindow } from '../runtime-context/index.js'
+import { getChatAgentKernel, type ChatAgentKernelState } from '../agent-kernel/index.js'
 import { getDb } from '../../db/index.js'
 import {
   buildDeviceCardProjection,
@@ -92,7 +92,7 @@ export function buildGraphMessageSseEvents(messages: any[]): SerializedGraphMess
   for (const msg of messages) {
     if (msg.role === 'assistant') {
       if (msg.tool_calls && msg.tool_calls.length > 0) {
-        const thinkingContent = msg.content || ''
+        const thinkingContent = stripThinkTags(msg.content || '')
         if (thinkingContent) {
           events.push({ content: thinkingContent, done: false })
         }
@@ -110,7 +110,7 @@ export function buildGraphMessageSseEvents(messages: any[]): SerializedGraphMess
           })
         }
       } else {
-        events.push({ content: msg.content || '', done: false })
+        events.push({ content: stripThinkTags(msg.content || ''), done: false })
         emittedPlainAssistant = true
       }
     } else if (msg.role === 'tool') {
@@ -185,31 +185,25 @@ async function handleStreamPost(request: FastifyRequest, reply: FastifyReply) {
       lastActivityAt,
     })
 
-    const initialState: typeof ChatReActState.State = {
+    const kernel = getChatAgentKernel()
+    let finalState: ChatAgentKernelState = {
       messages: inputMessages,
-      input: initialInput,
-      conversationId: 1,
-      currentToolCall: undefined,
-      pendingToolCalls: [],
-      isComplete: false,
       finalResponse: '',
-      runtimeRoute: undefined,
-      l1Command: undefined,
       runtimeTrace: [],
-      runtimeContext,
-      lightIntent: undefined,
-      deviceInventory: [],
-      error: undefined,
+      conversationId: 1,
     }
-
-    let finalState: typeof ChatReActState.State = initialState
     let emittedTraceCount = 0
-    let emittedMessageCount = initialState.messages.length
+    let emittedMessageCount = inputMessages.length
     let emittedPlainAssistant = false
-    const stream = await reactGraph.stream(initialState, { streamMode: 'values' })
+    const stream = await kernel.stream({
+      conversationId: 1,
+      input: initialInput,
+      messages: inputMessages,
+      runtimeContext,
+    })
 
     for await (const state of stream) {
-      finalState = state as unknown as typeof ChatReActState.State
+      finalState = state
       const traces = finalState.runtimeTrace ?? []
       for (const trace of traces.slice(emittedTraceCount)) {
         writeEvent({ type: 'trace', trace })
@@ -222,7 +216,7 @@ async function handleStreamPost(request: FastifyRequest, reply: FastifyReply) {
       emittedMessageCount = messages.length
     }
 
-    const newMessages = finalState.messages.slice(initialState.messages.length)
+    const newMessages = finalState.messages.slice(inputMessages.length)
 
     const pathCandidate = buildRuntimePathCandidate({
       intent: initialInput,
@@ -248,10 +242,10 @@ async function handleStreamPost(request: FastifyRequest, reply: FastifyReply) {
       }
     }
 
-    const finalText = finalState.finalResponse || newMessages
+    const finalText = stripThinkTags(finalState.finalResponse || newMessages
       .filter((m: any) => m.role === 'assistant' && !m.tool_calls?.length)
       .map((m: any) => m.content)
-      .join('\n') || ''
+      .join('\n') || '')
 
     if (finalText && !emittedPlainAssistant) {
       writeEvent({ content: finalText, done: false })
