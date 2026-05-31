@@ -50,9 +50,15 @@ export function buildWorkflowEditorSummaryItems(
     edgeCount: number
     previewExecutable?: boolean
     latestRunStatus?: 'pending' | 'running' | 'succeeded' | 'failed'
+    successCount?: number
+    failureCount?: number
   },
   label: Labeler,
 ): WorkflowEditorSummaryItem[] {
+  const evidenceParts: string[] = []
+  if (Number(input.successCount ?? 0) > 0) evidenceParts.push(label(`成功 ${input.successCount}`, `Success ${input.successCount}`))
+  if (Number(input.failureCount ?? 0) > 0) evidenceParts.push(label(`失败 ${input.failureCount}`, `Failure ${input.failureCount}`))
+
   return [
     { label: label('节点', 'Nodes'), value: String(input.nodeCount) },
     { label: label('连线', 'Edges'), value: String(input.edgeCount) },
@@ -75,6 +81,12 @@ export function buildWorkflowEditorSummaryItems(
             : input.latestRunStatus === 'running'
               ? label('运行中', 'Running')
               : label('等待中', 'Pending'),
+    },
+    {
+      label: label('运行证据', 'Run Evidence'),
+      value: evidenceParts.length > 0
+        ? evidenceParts.join(' · ')
+        : label('尚无记录', 'No evidence yet'),
     },
   ]
 }

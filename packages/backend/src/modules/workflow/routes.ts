@@ -4,6 +4,8 @@ import { workflowRuntime } from './run-workflow.js'
 import { workflowNodeDefinitionRegistry } from './node-definitions.js'
 import { workflowPreviewService } from './preview-workflow.js'
 import { workflowSeedService } from './seed.js'
+import { readWorkflowRunQuality } from './run-quality.js'
+import { canonicalWorkflowGraphSignature, computeWorkflowGraphHash } from './graph-version.js'
 
 export async function workflowRoutes(app: FastifyInstance) {
   app.get('/api/workflows/node-definitions', async () => {
@@ -83,8 +85,7 @@ export async function workflowRoutes(app: FastifyInstance) {
       }
     }
 
-    const graphJson = JSON.stringify({ nodes: body.nodes ?? [], edges: body.edges ?? [] })
-    db.prepare('UPDATE workflows SET graph_json = ? WHERE id = ?').run(graphJson, workflowId)
+    writeWorkflowGraphSnapshot(db, workflowId)
 
     return { status: 'success', data: { id: workflowId } }
   })
@@ -98,7 +99,7 @@ export async function workflowRoutes(app: FastifyInstance) {
     }
     const nodes = db.prepare('SELECT * FROM workflow_nodes WHERE workflow_id = ?').all(Number(id))
     const edges = db.prepare('SELECT * FROM workflow_edges WHERE workflow_id = ?').all(Number(id))
-    return { workflow, nodes, edges }
+    return { workflow, nodes, edges, run_quality: readWorkflowRunQuality(db, Number(id)) }
   })
 
   app.put('/api/workflows/:id', async (request) => {
@@ -108,7 +109,7 @@ export async function workflowRoutes(app: FastifyInstance) {
       description?: string
       trigger_type?: string
       cron_expression?: string
-      published?: boolean
+      published?: boolean | number
       nodes?: Array<{ id?: number; type: string; label: string; config?: Record<string, unknown>; position?: { x: number; y: number } }>
       edges?: Array<{ source_node_id: number; target_node_id: number; source_port?: string; target_port?: string; condition?: Record<string, unknown> }>
     }
@@ -123,8 +124,7 @@ export async function workflowRoutes(app: FastifyInstance) {
     if (body.nodes && !validateNodeTypes(body.nodes)) {
       return { status: 'error', error: 'INVALID_NODE_TYPE', message: 'Unknown workflow node type' }
     }
-
-    if (body.name !== undefined || body.description !== undefined || body.trigger_type !== undefined || body.published !== undefined) {
+    if (body.name !== undefined || body.description !== undefined || body.trigger_type !== undefined || body.cron_expression !== undefined) {
       const updates: string[] = []
       const values: unknown[] = []
 
@@ -132,7 +132,6 @@ export async function workflowRoutes(app: FastifyInstance) {
       if (body.description !== undefined) { updates.push('description = ?'); values.push(body.description) }
       if (body.trigger_type !== undefined) { updates.push('trigger_type = ?'); values.push(body.trigger_type) }
       if (body.cron_expression !== undefined) { updates.push('cron_expression = ?'); values.push(body.cron_expression) }
-      if (body.published !== undefined) { updates.push('published = ?'); values.push(body.published ? 1 : 0) }
 
       if (updates.length > 0) {
         updates.push("updated_at = datetime('now')")
@@ -185,8 +184,24 @@ export async function workflowRoutes(app: FastifyInstance) {
       db.prepare('DELETE FROM workflow_edges WHERE workflow_id = ?').run(workflowId)
     }
 
-    const graphJson = JSON.stringify({ nodes: body.nodes ?? [], edges: body.edges ?? [] })
-    db.prepare('UPDATE workflows SET graph_json = ?, updated_at = datetime(\'now\') WHERE id = ?').run(graphJson, workflowId)
+    if (body.nodes !== undefined || body.edges !== undefined) {
+      writeWorkflowGraphSnapshot(db, workflowId)
+    }
+
+    if (body.published !== undefined) {
+      if (body.published) {
+        const quality = readWorkflowRunQuality(db, workflowId)
+        if (quality.evidence_status !== 'proven') {
+          return {
+            status: 'error',
+            error: 'PUBLISH_EVIDENCE_REQUIRED',
+            message: `Workflow must have a latest successful run for the current graph before publishing to Chat. Current evidence: ${quality.evidence_status}`,
+            run_quality: quality,
+          }
+        }
+      }
+      db.prepare("UPDATE workflows SET published = ?, updated_at = datetime('now') WHERE id = ?").run(body.published ? 1 : 0, workflowId)
+    }
 
     return { status: 'success' }
   })
@@ -245,4 +260,74 @@ function resolveSubmittedNodeRef(
 
 function validateNodeTypes(nodes: Array<{ type: string }>): boolean {
   return nodes.every((node) => workflowNodeDefinitionRegistry.has(node.type))
+}
+
+function writeWorkflowGraphSnapshot(db: ReturnType<typeof getDb>, workflowId: number): boolean {
+  const nodes = db.prepare(`
+    SELECT id, type, label, position_json, config_json
+    FROM workflow_nodes
+    WHERE workflow_id = ?
+    ORDER BY id ASC
+  `).all(workflowId).map((node) => {
+    const row = node as Record<string, unknown>
+    return {
+      id: row.id,
+      type: row.type,
+      label: row.label,
+      position: safeParseObject(row.position_json, { x: 0, y: 0 }),
+      config: safeParseObject(row.config_json, {}),
+    }
+  })
+
+  const edges = db.prepare(`
+    SELECT source_node_id, target_node_id, source_port, target_port, condition_json
+    FROM workflow_edges
+    WHERE workflow_id = ?
+    ORDER BY id ASC
+  `).all(workflowId).map((edge) => {
+    const row = edge as Record<string, unknown>
+    return {
+      source_node_id: row.source_node_id,
+      target_node_id: row.target_node_id,
+      source_port: row.source_port,
+      target_port: row.target_port,
+      condition: safeParseObject(row.condition_json, {}),
+    }
+  })
+
+  const nextGraphJson = JSON.stringify({ nodes, edges })
+  const existing = db.prepare('SELECT graph_json, graph_hash FROM workflows WHERE id = ?').get(workflowId) as {
+    graph_json?: string
+    graph_hash?: string
+  } | undefined
+  const nextGraphHash = computeWorkflowGraphHash(nextGraphJson)
+  const graphChanged = canonicalWorkflowGraphSignature(String(existing?.graph_json ?? '')) !== canonicalWorkflowGraphSignature(nextGraphJson)
+  const hashChanged = String(existing?.graph_hash ?? '') !== nextGraphHash
+
+  if (graphChanged) {
+    db.prepare(`
+      UPDATE workflows
+      SET graph_json = ?, graph_hash = ?, updated_at = datetime('now'), graph_updated_at = datetime('now')
+      WHERE id = ?
+    `).run(nextGraphJson, nextGraphHash, workflowId)
+  } else if (hashChanged) {
+    db.prepare('UPDATE workflows SET graph_json = ?, graph_hash = ? WHERE id = ?').run(nextGraphJson, nextGraphHash, workflowId)
+  } else {
+    db.prepare('UPDATE workflows SET graph_json = ? WHERE id = ?').run(nextGraphJson, workflowId)
+  }
+
+  return graphChanged
+}
+
+function safeParseObject(value: unknown, fallback: Record<string, unknown>): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>
+  if (typeof value !== 'string') return fallback
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : fallback
+  } catch {
+    return fallback
+  }
 }

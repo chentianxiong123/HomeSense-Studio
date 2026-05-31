@@ -16,7 +16,7 @@ export async function compensationRoutes(app: FastifyInstance) {
   })
 
   app.get('/api/compensation/tasks', async () => {
-    const tasks = compensationService.getPendingTasks()
+    const tasks = compensationService.listTasks()
     return { tasks }
   })
 

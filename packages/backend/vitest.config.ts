@@ -4,7 +4,6 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
     exclude: [
-      'src/modules/candidate-plan/index.test.ts',
       'src/modules/context-completer/index.test.ts',
       'src/modules/intent-router/index.test.ts',
       'src/modules/memory-kernel/semantic.test.ts',
@@ -15,4 +14,3 @@ export default defineConfig({
     testTimeout: 10000,
   },
 })
-

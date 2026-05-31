@@ -6,7 +6,7 @@ const EXECUTOR_KIND_LABELS: Record<ExecutorDescriptor['kind'], [string, string]>
   cli: ['CLI', 'CLI'],
   service: ['服务', 'Service'],
   workflow: ['工作流', 'Workflow'],
-  agent: ['智能体', 'Agent'],
+  agent: ['能力适配', 'Capability'],
   plan: ['计划', 'Plan'],
 }
 
@@ -32,7 +32,7 @@ const ADAPTER_TRANSPORT_LABELS: Record<AgentAdapterDescriptor['transport'], [str
   local_cli: ['本地 CLI', 'Local CLI'],
   local_agent: ['本地 Agent', 'Local Agent'],
   remote_bridge: ['远程桥接', 'Remote Bridge'],
-  a2a_http: ['A2A HTTP', 'A2A HTTP'],
+  a2a_http: ['远程 HTTP', 'Remote HTTP'],
 }
 
 const ADAPTER_STATUS_LABELS: Record<AgentAdapterDescriptor['status'], [string, string]> = {
@@ -43,8 +43,8 @@ const ADAPTER_STATUS_LABELS: Record<AgentAdapterDescriptor['status'], [string, s
 
 const ADAPTER_MODE_LABELS: Record<NonNullable<AgentAdapterDescriptor['runtime_status']>['mode'], [string, string]> = {
   local_ready: ['本地就绪', 'Local Ready'],
-  a2a_ready: ['A2A 就绪', 'A2A Ready'],
-  a2a_dry_run: ['A2A 演练', 'A2A Dry Run'],
+  a2a_ready: ['远程就绪', 'Remote Ready'],
+  a2a_dry_run: ['远程演练', 'Remote Dry Run'],
   unbound: ['未绑定', 'Unbound'],
 }
 

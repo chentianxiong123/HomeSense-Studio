@@ -1,8 +1,12 @@
 import Database from 'better-sqlite3'
 import path from 'path'
 import fs from 'fs'
+import { fileURLToPath } from 'url'
+import { computeWorkflowGraphHash } from '../modules/workflow/graph-version.js'
 
-const DB_PATH = process.env.DB_PATH || './data/homesense.db'
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url))
+const DEFAULT_DB_PATH = path.resolve(MODULE_DIR, '../../../../data/homesense.db')
+const DB_PATH = process.env.DB_PATH || DEFAULT_DB_PATH
 
 let db: Database.Database | null = null
 
@@ -47,14 +51,16 @@ function createTables(db: Database.Database) {
     `CREATE TABLE IF NOT EXISTS workflows (
       id INTEGER NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
       graph_json TEXT NOT NULL DEFAULT '{}',
+      graph_hash TEXT NOT NULL DEFAULT '',
       trigger_type TEXT NOT NULL CHECK (trigger_type IN ('manual','cron','chat')) DEFAULT 'manual',
       cron_expression TEXT NULL, published INTEGER NOT NULL DEFAULT 0 CHECK (published IN (0,1)),
       created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      graph_updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (id AUTOINCREMENT)
     )`,
     `CREATE TABLE IF NOT EXISTS workflow_nodes (
       id INTEGER NOT NULL, workflow_id INTEGER NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
-      type TEXT NOT NULL CHECK (type IN ('start','schedule','device_control','xiaoai','ir_control','scene_execute','llm','if_else','delay','parallel','code','answer','executor_call','subflow','knowledge_retrieve','candidate_plan_resolve','rerank_score','agent_dispatch')),
+      type TEXT NOT NULL CHECK (type IN ('start','schedule','device_control','xiaoai','ir_control','scene_execute','device_capability','llm','if_else','delay','parallel','code','answer','executor_call','subflow','knowledge_retrieve','candidate_plan_resolve','rerank_score','agent_dispatch')),
       position_json TEXT NOT NULL DEFAULT '{}', config_json TEXT NOT NULL DEFAULT '{}', label TEXT NOT NULL DEFAULT '',
       PRIMARY KEY (id AUTOINCREMENT)
     )`,
@@ -70,6 +76,10 @@ function createTables(db: Database.Database) {
       status TEXT NOT NULL CHECK (status IN ('pending','running','succeeded','failed')) DEFAULT 'pending',
       triggered_by TEXT NOT NULL CHECK (triggered_by IN ('manual','cron','chat')),
       started_at TEXT NULL, finished_at TEXT NULL, result_json TEXT NOT NULL DEFAULT '{}',
+      graph_hash TEXT NOT NULL DEFAULT '',
+      trace_json TEXT NOT NULL DEFAULT '[]',
+      events_json TEXT NOT NULL DEFAULT '[]',
+      inputs_json TEXT NOT NULL DEFAULT '{}',
       PRIMARY KEY (id AUTOINCREMENT)
     )`,
     `CREATE TABLE IF NOT EXISTS skills (
@@ -138,6 +148,7 @@ function createTables(db: Database.Database) {
     `CREATE TABLE IF NOT EXISTS llm_providers (
       id INTEGER NOT NULL, name TEXT NOT NULL,
       api_base TEXT NOT NULL DEFAULT '', api_key TEXT NOT NULL DEFAULT '',
+      category TEXT NOT NULL DEFAULT 'chat' CHECK (category IN ('chat','embedding','rerank','vision')),
       enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
       extra_config TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -147,11 +158,26 @@ function createTables(db: Database.Database) {
       id INTEGER NOT NULL,
       provider_id INTEGER NOT NULL,
       model_name TEXT NOT NULL,
-      category TEXT NOT NULL DEFAULT 'chat' CHECK (category IN ('chat', 'embedding', 'rerank')),
+      category TEXT NOT NULL DEFAULT 'chat' CHECK (category IN ('chat', 'embedding', 'rerank', 'vision')),
       is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0,1)),
       enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
       created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (id AUTOINCREMENT)
+    )`,
+    `CREATE TABLE IF NOT EXISTS external_integrations (
+      id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('http','cli','local_service','webhook')) DEFAULT 'http',
+      endpoint TEXT NOT NULL DEFAULT '',
+      description TEXT NOT NULL DEFAULT '',
+      capability_ids_json TEXT NOT NULL DEFAULT '[]',
+      actions_json TEXT NOT NULL DEFAULT '[]',
+      enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (id AUTOINCREMENT),
+      UNIQUE (name)
     )`,
     `CREATE TABLE IF NOT EXISTS llm_model_slots (
       slot_name TEXT NOT NULL,
@@ -175,6 +201,26 @@ function createTables(db: Database.Database) {
       id INTEGER NOT NULL, name TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (id AUTOINCREMENT)
+    )`,
+    `CREATE TABLE IF NOT EXISTS user_context (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS stopwords (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      word TEXT NOT NULL UNIQUE,
+      is_custom INTEGER NOT NULL DEFAULT 0 CHECK (is_custom IN (0,1))
+    )`,
+    `CREATE TABLE IF NOT EXISTS capability_aliases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_type TEXT NOT NULL DEFAULT '',
+      device_id INTEGER NULL REFERENCES user_devices(id) ON DELETE CASCADE,
+      capability TEXT NOT NULL,
+      ir_key TEXT NOT NULL DEFAULT '',
+      alias TEXT NOT NULL,
+      is_custom INTEGER NOT NULL DEFAULT 0 CHECK (is_custom IN (0,1)),
+      enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1))
     )`,
     `CREATE TABLE IF NOT EXISTS user_devices (
       id INTEGER NOT NULL, name TEXT NOT NULL,
@@ -213,6 +259,42 @@ function createTables(db: Database.Database) {
       key TEXT NOT NULL, value TEXT NOT NULL,
       valid_from TEXT NOT NULL DEFAULT (datetime('now')), valid_to TEXT NULL,
       PRIMARY KEY (entity_id, key, valid_from)
+    )`,
+    `CREATE TABLE IF NOT EXISTS memory_items (
+      id TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('experience_path','feedback','device_preference','spatial_node','spatial_edge','knowledge_chunk')),
+      title TEXT NOT NULL,
+      summary TEXT NOT NULL DEFAULT '',
+      search_text TEXT NOT NULL DEFAULT '',
+      scope TEXT NOT NULL CHECK (scope IN ('global','room','device','conversation','user')) DEFAULT 'global',
+      room_id INTEGER NULL REFERENCES rooms(id) ON DELETE SET NULL,
+      device_id INTEGER NULL REFERENCES user_devices(id) ON DELETE SET NULL,
+      conversation_id INTEGER NULL REFERENCES conversations(id) ON DELETE SET NULL,
+      source TEXT NOT NULL CHECK (source IN ('user','runtime','imported','legacy','system')) DEFAULT 'runtime',
+      confidence REAL NOT NULL DEFAULT 0.5,
+      status TEXT NOT NULL CHECK (status IN ('active','draft','archived','expired')) DEFAULT 'active',
+      priority REAL NOT NULL DEFAULT 0.5,
+      expires_at TEXT NULL,
+      last_used_at TEXT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      PRIMARY KEY (id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS memory_experience_paths (
+      memory_item_id TEXT NOT NULL REFERENCES memory_items(id) ON DELETE CASCADE,
+      intent_pattern TEXT NOT NULL DEFAULT '',
+      preconditions_json TEXT NOT NULL DEFAULT '{}',
+      steps_json TEXT NOT NULL DEFAULT '[]',
+      skill_refs_json TEXT NOT NULL DEFAULT '[]',
+      device_refs_json TEXT NOT NULL DEFAULT '[]',
+      success_criteria_json TEXT NOT NULL DEFAULT '{}',
+      failure_recovery_json TEXT NOT NULL DEFAULT '[]',
+      origin_trace_id TEXT NOT NULL DEFAULT '',
+      success_count INTEGER NOT NULL DEFAULT 0,
+      failure_count INTEGER NOT NULL DEFAULT 0,
+      last_success_at TEXT NULL,
+      PRIMARY KEY (memory_item_id)
     )`,
     `CREATE TABLE IF NOT EXISTS embedding_profiles (
       profile_name TEXT NOT NULL,
@@ -253,6 +335,34 @@ function createTables(db: Database.Database) {
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (knowledge_id, profile_name)
     )`,
+    `CREATE TABLE IF NOT EXISTS graph_nodes (
+      id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      label TEXT NOT NULL,
+      scope TEXT NOT NULL DEFAULT '',
+      embedding_ref TEXT NOT NULL DEFAULT '',
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS graph_edges (
+      id INTEGER NOT NULL,
+      from_node_id TEXT NOT NULL REFERENCES graph_nodes(id) ON DELETE CASCADE,
+      to_node_id TEXT NOT NULL REFERENCES graph_nodes(id) ON DELETE CASCADE,
+      relation TEXT NOT NULL,
+      weight REAL NOT NULL DEFAULT 1.0,
+      confidence REAL NOT NULL DEFAULT 1.0,
+      valid_from TEXT NOT NULL DEFAULT (datetime('now')),
+      valid_to TEXT NULL,
+      source_type TEXT NOT NULL DEFAULT '',
+      source_ref TEXT NOT NULL DEFAULT '',
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (id AUTOINCREMENT),
+      UNIQUE (from_node_id, to_node_id, relation)
+    )`,
   ]
 
   for (const sql of tables) {
@@ -272,15 +382,82 @@ function runMigrations(db: Database.Database) {
   ensureColumns(db, 'conversation_messages', [
     { name: 'tool_call_id', sql: "ALTER TABLE conversation_messages ADD COLUMN tool_call_id TEXT NULL" },
   ])
+  ensureColumns(db, 'workflows', [
+    { name: 'graph_updated_at', sql: "ALTER TABLE workflows ADD COLUMN graph_updated_at TEXT NOT NULL DEFAULT ''" },
+    { name: 'graph_hash', sql: "ALTER TABLE workflows ADD COLUMN graph_hash TEXT NOT NULL DEFAULT ''" },
+  ])
+  db.exec(`
+    UPDATE workflows
+    SET graph_updated_at = COALESCE(NULLIF(graph_updated_at, ''), NULLIF(updated_at, ''), NULLIF(created_at, ''), datetime('now'))
+    WHERE graph_updated_at = ''
+  `)
+  migrateWorkflowGraphHashes(db)
+  ensureColumns(db, 'workflow_runs', [
+    { name: 'inputs_json', sql: "ALTER TABLE workflow_runs ADD COLUMN inputs_json TEXT NOT NULL DEFAULT '{}'" },
+    { name: 'graph_hash', sql: "ALTER TABLE workflow_runs ADD COLUMN graph_hash TEXT NOT NULL DEFAULT ''" },
+    { name: 'trace_json', sql: "ALTER TABLE workflow_runs ADD COLUMN trace_json TEXT NOT NULL DEFAULT '[]'" },
+    { name: 'events_json', sql: "ALTER TABLE workflow_runs ADD COLUMN events_json TEXT NOT NULL DEFAULT '[]'" },
+  ])
+  ensureColumns(db, 'memory_experience_paths', [
+    { name: 'skill_refs_json', sql: "ALTER TABLE memory_experience_paths ADD COLUMN skill_refs_json TEXT NOT NULL DEFAULT '[]'" },
+    { name: 'device_refs_json', sql: "ALTER TABLE memory_experience_paths ADD COLUMN device_refs_json TEXT NOT NULL DEFAULT '[]'" },
+  ])
   ensureColumns(db, 'llm_providers', [
-    { name: 'category', sql: "ALTER TABLE llm_providers ADD COLUMN category TEXT NOT NULL DEFAULT 'chat' CHECK (category IN ('chat', 'embedding', 'rerank'))" },
+    { name: 'category', sql: "ALTER TABLE llm_providers ADD COLUMN category TEXT NOT NULL DEFAULT 'chat' CHECK (category IN ('chat', 'embedding', 'rerank', 'vision'))" },
+  ])
+  ensureColumns(db, 'graph_edges', [
+    { name: 'confidence', sql: "ALTER TABLE graph_edges ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0" },
+    { name: 'valid_from', sql: "ALTER TABLE graph_edges ADD COLUMN valid_from TEXT NOT NULL DEFAULT ''" },
+    { name: 'valid_to', sql: "ALTER TABLE graph_edges ADD COLUMN valid_to TEXT NULL" },
+    { name: 'source_type', sql: "ALTER TABLE graph_edges ADD COLUMN source_type TEXT NOT NULL DEFAULT ''" },
+    { name: 'source_ref', sql: "ALTER TABLE graph_edges ADD COLUMN source_ref TEXT NOT NULL DEFAULT ''" },
   ])
   migrateWorkflowNodesTable(db)
   migrateLlmSlotsCheckConstraint(db)
   migrateLlmProvidersToNewSchema(db)
+  migrateLlmProviderCategoryCheckConstraint(db)
   migrateDropDeprecatedTables(db)
   migrateDeviceCapabilities(db)
   migrateDeviceApps(db)
+  migrateAppMap(db)
+}
+
+function migrateAppMap(db: Database.Database) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_map_screens (
+      id INTEGER NOT NULL,
+      package_name TEXT NOT NULL,
+      screen_id TEXT NOT NULL DEFAULT '',
+      activity TEXT NOT NULL DEFAULT '',
+      screenshot_path TEXT NOT NULL DEFAULT '',
+      resolution TEXT NOT NULL DEFAULT '',
+      embedding_json TEXT NOT NULL DEFAULT '[]',
+      captured_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (id AUTOINCREMENT),
+      UNIQUE (package_name, screen_id)
+    )
+  `)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_map_elements (
+      id INTEGER NOT NULL,
+      screen_id INTEGER NOT NULL REFERENCES app_map_screens(id) ON DELETE CASCADE,
+      element_name TEXT NOT NULL,
+      element_type TEXT NOT NULL DEFAULT 'button',
+      bounds_json TEXT NOT NULL DEFAULT '{}',
+      template_path TEXT NOT NULL DEFAULT '',
+      confidence REAL NOT NULL DEFAULT 1.0,
+      hit_count INTEGER NOT NULL DEFAULT 0,
+      source TEXT NOT NULL DEFAULT 'vision' CHECK (source IN ('vision','ui_tree','manual')),
+      last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (id AUTOINCREMENT)
+    )
+  `)
+  db.exec('CREATE INDEX IF NOT EXISTS idx_app_map_screens_package ON app_map_screens(package_name)')
+  ensureColumns(db, 'app_map_screens', [
+    { name: 'embedding_json', sql: "ALTER TABLE app_map_screens ADD COLUMN embedding_json TEXT NOT NULL DEFAULT '[]'" },
+  ])
+  db.exec('CREATE INDEX IF NOT EXISTS idx_app_map_elements_screen ON app_map_elements(screen_id)')
 }
 
 function ensureColumns(
@@ -395,6 +572,19 @@ function migrateDeviceApps(db: Database.Database) {
   `)
 }
 
+function migrateWorkflowGraphHashes(db: Database.Database) {
+  const rows = db.prepare(`
+    SELECT id, graph_json, graph_hash
+    FROM workflows
+    WHERE COALESCE(graph_hash, '') = ''
+  `).all() as Array<{ id: number; graph_json: string; graph_hash?: string }>
+
+  for (const row of rows) {
+    const graphHash = computeWorkflowGraphHash(row.graph_json || '{}')
+    db.prepare('UPDATE workflows SET graph_hash = ? WHERE id = ?').run(graphHash, row.id)
+  }
+}
+
 function migrateWorkflowNodesTable(db: Database.Database) {
   const row = db.prepare(
     "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'workflow_nodes'",
@@ -403,7 +593,7 @@ function migrateWorkflowNodesTable(db: Database.Database) {
   const tableSql = row?.sql
   const requiredNodeTypes = [
     'start','schedule','device_control','xiaoai','ir_control','scene_execute',
-    'llm','if_else','delay','parallel','code','answer','executor_call','subflow',
+    'device_capability','llm','if_else','delay','parallel','code','answer','executor_call','subflow',
     'knowledge_retrieve','candidate_plan_resolve','rerank_score','agent_dispatch',
   ]
 
@@ -416,7 +606,7 @@ function migrateWorkflowNodesTable(db: Database.Database) {
       CREATE TABLE workflow_nodes_new (
         id INTEGER NOT NULL,
         workflow_id INTEGER NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
-        type TEXT NOT NULL CHECK (type IN ('start','schedule','device_control','xiaoai','ir_control','scene_execute','llm','if_else','delay','parallel','code','answer','executor_call','subflow','knowledge_retrieve','candidate_plan_resolve','rerank_score','agent_dispatch')),
+        type TEXT NOT NULL CHECK (type IN ('start','schedule','device_control','xiaoai','ir_control','scene_execute','device_capability','llm','if_else','delay','parallel','code','answer','executor_call','subflow','knowledge_retrieve','candidate_plan_resolve','rerank_score','agent_dispatch')),
         position_json TEXT NOT NULL DEFAULT '{}',
         config_json TEXT NOT NULL DEFAULT '{}',
         label TEXT NOT NULL DEFAULT '',
@@ -441,7 +631,7 @@ function migrateWorkflowNodesTable(db: Database.Database) {
 
 function migrateLlmSlotsCheckConstraint(db: Database.Database) {
   const rows = db.prepare(
-    "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name IN ('llm_providers','llm_model_slots')",
+    "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name = 'llm_model_slots'",
   ).all() as Array<{ name: string; sql: string }>
 
   for (const row of rows) {
@@ -471,20 +661,21 @@ function migrateLlmProvidersToNewSchema(db: Database.Database) {
   db.exec(`CREATE TABLE IF NOT EXISTS llm_providers (
     id INTEGER NOT NULL, name TEXT NOT NULL,
     api_base TEXT NOT NULL DEFAULT '', api_key TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL DEFAULT 'chat' CHECK (category IN ('chat','embedding','rerank','vision')),
     enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
     extra_config TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (id AUTOINCREMENT)
   )`)
-  db.exec(`INSERT INTO llm_providers (id, name, api_base, api_key, enabled, extra_config, created_at, updated_at)
-    SELECT id, name, api_base, api_key, enabled, extra_config, created_at, updated_at FROM llm_providers_old`)
+  db.exec(`INSERT INTO llm_providers (id, name, api_base, api_key, category, enabled, extra_config, created_at, updated_at)
+    SELECT id, name, api_base, api_key, COALESCE(category, 'chat'), enabled, extra_config, created_at, updated_at FROM llm_providers_old`)
 
   // Create llm_models table
   db.exec(`CREATE TABLE IF NOT EXISTS llm_models (
     id INTEGER NOT NULL,
     provider_id INTEGER NOT NULL,
     model_name TEXT NOT NULL,
-    category TEXT NOT NULL DEFAULT 'chat' CHECK (category IN ('chat', 'embedding', 'rerank')),
+    category TEXT NOT NULL DEFAULT 'chat' CHECK (category IN ('chat', 'embedding', 'rerank', 'vision')),
     is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0,1)),
     enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
     created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -502,16 +693,100 @@ function migrateLlmProvidersToNewSchema(db: Database.Database) {
   db.exec(`DROP TABLE llm_providers_old`)
 }
 
+function migrateLlmProviderCategoryCheckConstraint(db: Database.Database) {
+  const providerRow = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'llm_providers'",
+  ).get() as { sql?: string } | undefined
+  const modelRow = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'llm_models'",
+  ).get() as { sql?: string } | undefined
+  const staleProviderRow = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'llm_providers_old'",
+  ).get() as { sql?: string } | undefined
+
+  const providerNeedsUpdate = providerRow?.sql && !providerRow.sql.includes("'vision'")
+  const modelNeedsUpdate = modelRow?.sql && !modelRow.sql.includes("'vision'")
+  if (!providerNeedsUpdate && !modelNeedsUpdate && !staleProviderRow) return
+
+  db.exec('PRAGMA foreign_keys = OFF')
+  db.exec('BEGIN')
+  try {
+    // Step 1: Recover residual llm_providers_old into main table if main is empty.
+    if (staleProviderRow?.sql) {
+      const providerCount = (db.prepare('SELECT COUNT(*) AS count FROM llm_providers').get() as { count: number }).count
+      const staleProviderCount = (db.prepare('SELECT COUNT(*) AS count FROM llm_providers_old').get() as { count: number }).count
+      if (providerCount === 0 && staleProviderCount > 0) {
+        db.exec('DROP TABLE llm_providers')
+        db.exec('ALTER TABLE llm_providers_old RENAME TO llm_providers')
+      } else {
+        db.exec('DROP TABLE IF EXISTS llm_providers_old')
+      }
+    }
+
+    // Step 2: Rebuild llm_providers with vision CHECK constraint.
+    if (providerNeedsUpdate) {
+      db.exec('DROP TABLE IF EXISTS _llm_providers_new')
+      db.exec(`CREATE TABLE _llm_providers_new (
+        id INTEGER NOT NULL, name TEXT NOT NULL,
+        api_base TEXT NOT NULL DEFAULT '', api_key TEXT NOT NULL DEFAULT '',
+        category TEXT NOT NULL DEFAULT 'chat' CHECK (category IN ('chat','embedding','rerank','vision')),
+        enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+        extra_config TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (id AUTOINCREMENT)
+      )`)
+      db.exec(`INSERT INTO _llm_providers_new (id, name, api_base, api_key, category, enabled, extra_config, created_at, updated_at)
+        SELECT id, name, api_base, api_key,
+          CASE WHEN category IN ('chat','embedding','rerank','vision') THEN category ELSE 'chat' END,
+          enabled, extra_config, created_at, updated_at
+        FROM llm_providers`)
+      db.exec('DROP TABLE llm_providers')
+      db.exec('ALTER TABLE _llm_providers_new RENAME TO llm_providers')
+    }
+
+    // Step 3: Rebuild llm_models with vision CHECK constraint.
+    if (modelNeedsUpdate) {
+      db.exec('DROP TABLE IF EXISTS _llm_models_new')
+      db.exec(`CREATE TABLE _llm_models_new (
+        id INTEGER NOT NULL,
+        provider_id INTEGER NOT NULL,
+        model_name TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'chat' CHECK (category IN ('chat', 'embedding', 'rerank', 'vision')),
+        is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0,1)),
+        enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+        created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (id AUTOINCREMENT)
+      )`)
+      db.exec(`INSERT INTO _llm_models_new (id, provider_id, model_name, category, is_default, enabled, created_at, updated_at)
+        SELECT id, provider_id, model_name,
+          CASE WHEN category IN ('chat','embedding','rerank','vision') THEN category ELSE 'chat' END,
+          is_default, enabled, created_at, updated_at
+        FROM llm_models`)
+      db.exec('DROP TABLE llm_models')
+      db.exec('ALTER TABLE _llm_models_new RENAME TO llm_models')
+    }
+
+    db.exec('COMMIT')
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON')
+  }
+}
+
 function createIndexes(db: Database.Database) {
   const indexes = [
     'CREATE INDEX IF NOT EXISTS idx_user_devices_mi_did ON user_devices(mi_did)',
     'CREATE INDEX IF NOT EXISTS idx_workflows_trigger_type ON workflows(trigger_type)',
     'CREATE INDEX IF NOT EXISTS idx_workflows_published ON workflows(published)',
+    'CREATE INDEX IF NOT EXISTS idx_workflows_graph_hash ON workflows(graph_hash)',
     'CREATE INDEX IF NOT EXISTS idx_workflow_nodes_workflow_id ON workflow_nodes(workflow_id)',
     'CREATE INDEX IF NOT EXISTS idx_workflow_edges_workflow_id ON workflow_edges(workflow_id)',
     'CREATE INDEX IF NOT EXISTS idx_workflow_edges_source ON workflow_edges(source_node_id)',
     'CREATE INDEX IF NOT EXISTS idx_workflow_edges_target ON workflow_edges(target_node_id)',
     'CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow_id ON workflow_runs(workflow_id)',
+    'CREATE INDEX IF NOT EXISTS idx_workflow_runs_graph_hash ON workflow_runs(workflow_id, graph_hash)',
     'CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status)',
     'CREATE INDEX IF NOT EXISTS idx_workflow_runs_started_at ON workflow_runs(started_at)',
     'CREATE INDEX IF NOT EXISTS idx_skills_source ON skills(source)',
@@ -545,6 +820,13 @@ function createIndexes(db: Database.Database) {
     'CREATE INDEX IF NOT EXISTS idx_memory_triples_valid ON memory_triples(subject, predicate, object, valid_from)',
     'CREATE INDEX IF NOT EXISTS idx_memory_attributes_entity_id ON memory_attributes(entity_id)',
     'CREATE INDEX IF NOT EXISTS idx_memory_attributes_key ON memory_attributes(key)',
+    'CREATE INDEX IF NOT EXISTS idx_memory_items_kind ON memory_items(kind)',
+    'CREATE INDEX IF NOT EXISTS idx_memory_items_scope ON memory_items(scope, room_id, device_id, conversation_id)',
+    'CREATE INDEX IF NOT EXISTS idx_memory_items_status ON memory_items(status)',
+    'CREATE INDEX IF NOT EXISTS idx_memory_items_source ON memory_items(source)',
+    'CREATE INDEX IF NOT EXISTS idx_memory_items_priority ON memory_items(priority DESC, confidence DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_memory_items_last_used ON memory_items(last_used_at DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_memory_experience_paths_intent ON memory_experience_paths(intent_pattern)',
     'CREATE INDEX IF NOT EXISTS idx_embedding_profiles_slot ON embedding_profiles(slot_name)',
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_embedding_profiles_canonical ON embedding_profiles(is_canonical) WHERE is_canonical = 1',
     'CREATE INDEX IF NOT EXISTS idx_compiled_knowledge_kind ON compiled_knowledge_items(kind)',
@@ -552,6 +834,17 @@ function createIndexes(db: Database.Database) {
     'CREATE INDEX IF NOT EXISTS idx_compiled_knowledge_source ON compiled_knowledge_items(source_type, source_ref)',
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_compiled_knowledge_unique ON compiled_knowledge_items(kind, source_type, source_ref)',
     'CREATE INDEX IF NOT EXISTS idx_compiled_knowledge_embeddings_profile ON compiled_knowledge_embeddings(profile_name)',
+    'CREATE INDEX IF NOT EXISTS idx_graph_nodes_type ON graph_nodes(type)',
+    'CREATE INDEX IF NOT EXISTS idx_graph_nodes_scope ON graph_nodes(scope)',
+    'CREATE INDEX IF NOT EXISTS idx_graph_nodes_label ON graph_nodes(label)',
+    'CREATE INDEX IF NOT EXISTS idx_graph_edges_from ON graph_edges(from_node_id)',
+    'CREATE INDEX IF NOT EXISTS idx_graph_edges_to ON graph_edges(to_node_id)',
+    'CREATE INDEX IF NOT EXISTS idx_graph_edges_relation ON graph_edges(relation)',
+    'CREATE INDEX IF NOT EXISTS idx_graph_edges_valid ON graph_edges(valid_from, valid_to)',
+    'CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges(source_type, source_ref)',
+    'CREATE INDEX IF NOT EXISTS idx_stopwords_word ON stopwords(word)',
+    'CREATE INDEX IF NOT EXISTS idx_aliases_device ON capability_aliases(device_id)',
+    'CREATE INDEX IF NOT EXISTS idx_aliases_alias ON capability_aliases(alias)',
   ]
 
   for (const sql of indexes) {
@@ -562,4 +855,5 @@ function createIndexes(db: Database.Database) {
 function createFts(db: Database.Database) {
   db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS experiences_fts USING fts5(title, content, category)`)
   db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS compiled_knowledge_fts USING fts5(title, body, kind, wing, room, source_ref)`)
+  db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS memory_items_fts USING fts5(id UNINDEXED, title, summary, search_text, kind, source)`)
 }

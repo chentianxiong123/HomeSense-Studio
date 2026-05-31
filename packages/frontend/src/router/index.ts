@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import ChatView from '@/views/ChatView.vue'
 import StudioView from '@/views/StudioView.vue'
 import AssetDetailView from '@/views/AssetDetailView.vue'
-import SettingsRouteView from '@/views/SettingsRouteView.vue'
+import WorkflowRunsView from '@/views/WorkflowRunsView.vue'
 import DevicesView from '@/views/DevicesView.vue'
 import DeviceDetailView from '@/views/DeviceDetailView.vue'
 import LLMView from '@/views/LLMView.vue'
@@ -13,7 +13,6 @@ import MiTestView from '@/views/MiTestView.vue'
 import AssetsView from '@/views/AssetsView.vue'
 import StudioHomeView from '@/views/StudioHomeView.vue'
 import WorkflowOverviewView from '@/views/WorkflowOverviewView.vue'
-import WorkflowRunsView from '@/views/WorkflowRunsView.vue'
 import { APP_DEFAULT_ROUTE, LAST_ROUTE_STORAGE_KEY, normalizeRememberedRoute, shouldRememberRoute } from './navigation'
 
 export const router = createRouter({
@@ -41,6 +40,12 @@ export const router = createRouter({
     { path: '/studio/workflows/:id/editor', name: 'studio-workflow-editor', component: StudioView },
     { path: '/studio/workflows/:id/runs', name: 'studio-workflow-runs', component: WorkflowRunsView },
     {
+      path: '/assets/device-skills/:id/overview',
+      name: 'asset-device-skill-overview',
+      component: AssetDetailView,
+      meta: { assetKind: 'device_skill', assetTab: 'overview' },
+    },
+    {
       path: '/assets/skills/:name/overview',
       name: 'asset-skill-overview',
       component: AssetDetailView,
@@ -65,6 +70,12 @@ export const router = createRouter({
       meta: { assetKind: 'plan', assetTab: 'overview' },
     },
     {
+      path: '/assets/memory/:id/overview',
+      name: 'asset-memory-overview',
+      component: AssetDetailView,
+      meta: { assetKind: 'memory', assetTab: 'overview' },
+    },
+    {
       path: '/assets/agents/:target/overview',
       name: 'asset-agent-overview',
       component: AssetDetailView,
@@ -75,7 +86,6 @@ export const router = createRouter({
     { path: '/studio/manifests/:id/:tab', redirect: (to) => `/assets/manifests/${to.params.id}/${to.params.tab}` },
     { path: '/studio/plans/:id/:tab', redirect: (to) => `/assets/plans/${to.params.id}/${to.params.tab}` },
     { path: '/studio/agents/:target/:tab', redirect: (to) => `/assets/agents/${to.params.target}/${to.params.tab}` },
-    { path: '/settings', name: 'settings', component: SettingsRouteView },
   ],
 })
 

@@ -62,6 +62,7 @@ export interface SearchResult {
   fts_score: number
   graph_score: number
   source: string
+  metadata?: Record<string, unknown>
 }
 
 interface StoredEmbeddingRow {
@@ -90,6 +91,40 @@ export interface PalaceEdge {
 export interface PalaceGraph {
   nodes: PalaceNode[]
   edges: PalaceEdge[]
+}
+
+export interface GraphNode {
+  id: string
+  type: string
+  label: string
+  scope: string
+  embedding_ref: string
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface GraphEdge {
+  id: number
+  from_node_id: string
+  to_node_id: string
+  relation: string
+  weight: number
+  confidence: number
+  valid_from: string
+  valid_to: string | null
+  source_type: string
+  source_ref: string
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface GraphNeighbor {
+  node: GraphNode
+  edge: GraphEdge
+  direction: 'out' | 'in'
+  score: number
 }
 
 export interface EmbeddingProfile {
@@ -481,6 +516,25 @@ export class MemoryKernelService {
       }
     }
 
+    const graphRows = this.repo.searchGraphNodesByLike(keywords.slice(0, 4), 12)
+    for (const node of graphRows) {
+      const nodeId = `graph_node_${node.id}`
+      if (results.has(nodeId)) continue
+      const metadata = this.parseJson<Record<string, unknown>>(node.metadata_json, {})
+      const score = Number(metadata.rank_score ?? 0.65)
+      results.set(nodeId, {
+        id: nodeId,
+        content: [node.label, node.type, node.scope].filter(Boolean).join('\n'),
+        type: node.type,
+        wing: node.scope,
+        room: '',
+        score,
+        fts_score: 0,
+        graph_score: score,
+        source: 'graph',
+      })
+    }
+
     return Array.from(results.values()).sort((left, right) => right.score - left.score).slice(0, 20)
   }
 
@@ -673,6 +727,105 @@ export class MemoryKernelService {
     return { nodes, edges }
   }
 
+  upsertGraphNode(input: {
+    id: string
+    type: string
+    label: string
+    scope?: string
+    embedding_ref?: string
+    metadata?: Record<string, unknown>
+  }): GraphNode {
+    this.repo.upsertGraphNode({
+      id: input.id,
+      type: input.type,
+      label: input.label,
+      scope: input.scope ?? '',
+      embeddingRef: input.embedding_ref ?? '',
+      metadataJson: JSON.stringify(input.metadata ?? {}),
+    })
+    const row = this.repo.getGraphNodeById(input.id)
+    if (!row) {
+      throw new Error(`Graph node upsert failed: ${input.id}`)
+    }
+    return this.normalizeGraphNode(row as unknown as Record<string, unknown>)
+  }
+
+  upsertGraphEdge(input: {
+    from_node_id: string
+    to_node_id: string
+    relation: string
+    weight?: number
+    confidence?: number
+    valid_from?: string
+    valid_to?: string | null
+    source_type?: string
+    source_ref?: string
+    metadata?: Record<string, unknown>
+  }): GraphEdge {
+    const from = this.repo.getGraphNodeById(input.from_node_id)
+    const to = this.repo.getGraphNodeById(input.to_node_id)
+    if (!from) throw new Error(`Graph node not found: ${input.from_node_id}`)
+    if (!to) throw new Error(`Graph node not found: ${input.to_node_id}`)
+
+    const id = this.repo.upsertGraphEdge({
+      fromNodeId: input.from_node_id,
+      toNodeId: input.to_node_id,
+      relation: input.relation,
+      weight: input.weight ?? 1,
+      confidence: input.confidence ?? 1,
+      validFrom: input.valid_from ?? new Date().toISOString(),
+      validTo: input.valid_to ?? null,
+      sourceType: input.source_type ?? '',
+      sourceRef: input.source_ref ?? '',
+      metadataJson: JSON.stringify(input.metadata ?? {}),
+    })
+
+    return {
+      id,
+      from_node_id: input.from_node_id,
+      to_node_id: input.to_node_id,
+      relation: input.relation,
+      weight: input.weight ?? 1,
+      confidence: input.confidence ?? 1,
+      valid_from: input.valid_from ?? '',
+      valid_to: input.valid_to ?? null,
+      source_type: input.source_type ?? '',
+      source_ref: input.source_ref ?? '',
+      metadata: input.metadata ?? {},
+      created_at: '',
+      updated_at: '',
+    }
+  }
+
+  expandGraphNeighborhood(nodeId: string, limit: number = 20): GraphNeighbor[] {
+    const rows = this.repo.listGraphNeighbors(nodeId, limit)
+    return rows.map((row) => {
+      const node = this.normalizeGraphNode({
+        id: row.neighbor_id,
+        type: row.neighbor_type,
+        label: row.neighbor_label,
+        scope: row.neighbor_scope,
+        embedding_ref: '',
+        metadata_json: row.neighbor_metadata_json,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      })
+      const edge = this.normalizeGraphEdge(row as unknown as Record<string, unknown>)
+      return {
+        node,
+        edge,
+        direction: row.direction,
+        score: Math.max(0, Math.min(1, Number(row.weight ?? 1))),
+      }
+    })
+  }
+
+  searchGraph(query: string, limit: number = 10): GraphNode[] {
+    const keywords = query.split(/\s+/).filter((word) => word.length >= 2).slice(0, 5)
+    return this.repo.searchGraphNodesByLike(keywords, limit)
+      .map((row) => this.normalizeGraphNode(row as unknown as Record<string, unknown>))
+  }
+
   listCompiledKnowledge(filters: { kind?: CompiledKnowledgeItem['kind']; wing?: string; room?: string; limit?: number } = {}): CompiledKnowledgeItem[] {
     const db = this.getDb()
     const conditions: string[] = []
@@ -826,6 +979,37 @@ export class MemoryKernelService {
       metadata: this.parseJson<Record<string, unknown>>(row.metadata_json as string, {}),
       embedding_profile: row.embedding_profile == null ? null : String(row.embedding_profile),
       rank_score: Number(row.rank_score ?? 0.5),
+      created_at: String(row.created_at ?? ''),
+      updated_at: String(row.updated_at ?? ''),
+    }
+  }
+
+  private normalizeGraphNode(row: Record<string, unknown>): GraphNode {
+    return {
+      id: String(row.id),
+      type: String(row.type),
+      label: String(row.label),
+      scope: String(row.scope ?? ''),
+      embedding_ref: String(row.embedding_ref ?? ''),
+      metadata: this.parseJson<Record<string, unknown>>(String(row.metadata_json ?? '{}'), {}),
+      created_at: String(row.created_at ?? ''),
+      updated_at: String(row.updated_at ?? ''),
+    }
+  }
+
+  private normalizeGraphEdge(row: Record<string, unknown>): GraphEdge {
+    return {
+      id: Number(row.id),
+      from_node_id: String(row.from_node_id),
+      to_node_id: String(row.to_node_id),
+      relation: String(row.relation),
+      weight: Number(row.weight ?? 1),
+      confidence: Number(row.confidence ?? 1),
+      valid_from: String(row.valid_from ?? ''),
+      valid_to: row.valid_to == null ? null : String(row.valid_to),
+      source_type: String(row.source_type ?? ''),
+      source_ref: String(row.source_ref ?? ''),
+      metadata: this.parseJson<Record<string, unknown>>(String(row.metadata_json ?? '{}'), {}),
       created_at: String(row.created_at ?? ''),
       updated_at: String(row.updated_at ?? ''),
     }

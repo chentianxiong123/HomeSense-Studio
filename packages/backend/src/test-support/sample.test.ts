@@ -27,8 +27,8 @@ describe('test-support · sample composition', () => {
     const llm = new FakeLlmService()
     llm.setEmbedDimensions(8)
 
-    const a1 = await llm.embed({ slot: 'embedding', input: 'turn on the lamp' })
-    const a2 = await llm.embed({ slot: 'embedding', input: 'turn on the lamp' })
+    const a1 = await llm.embed({ input: 'turn on the lamp' })
+    const a2 = await llm.embed({ input: 'turn on the lamp' })
 
     expect(a1.data[0].embedding).toEqual(a2.data[0].embedding)
     expect(a1.data[0].embedding.length).toBe(8)

@@ -23,6 +23,7 @@ import {
   formatCliExecutorSource,
   formatExecutorKind,
 } from '../../features/studio/studioExecutorDisplay'
+import { buildWorkflowStepSummary } from '../../features/studio/workflowRunSummary'
 
 const props = defineProps<{
   selectedNode: any
@@ -48,6 +49,8 @@ const props = defineProps<{
   selectedCliParamEntries: any[]
   selectedAgentTargets: string[]
   selectedAgentAdapter: any
+  runtimeDeviceManifest: any[]
+  runtimeDeviceManifestLoading: boolean
   availableSubflowWorkflows: any[]
   workflows: any[]
   executorParamsText: string
@@ -70,6 +73,7 @@ const emit = defineEmits<{
   (e: 'apply-cli-action', action: string): void
   (e: 'apply-agent-adapter', target: string): void
   (e: 'apply-agent-sample'): void
+  (e: 'refresh-runtime-device-manifest'): void
   (e: 'update-cli-param', key: string, type: string, value: any): void
   (e: 'update-cli-json-param', key: string, raw: string): void
   (e: 'update-node-object-config', key: string, raw: string): void
@@ -107,6 +111,89 @@ function formatJsonConfigValue(value: any): string {
   } catch {
     return '{}'
   }
+}
+
+const selectedDeviceCapabilityDeviceId = computed(() => {
+  const raw = props.selectedNode?.config?.device_id
+  const id = Number(raw)
+  return Number.isFinite(id) && props.runtimeDeviceManifest.some((device) => device.id === id) ? id : ''
+})
+
+const selectedDeviceCapabilityDevice = computed(() =>
+  props.runtimeDeviceManifest.find((device) => device.id === selectedDeviceCapabilityDeviceId.value) ?? null,
+)
+
+const selectedDeviceCapabilities = computed(() =>
+  (selectedDeviceCapabilityDevice.value?.capabilities ?? []) as any[],
+)
+
+const selectedConcreteCapabilityId = computed(() => {
+  const capabilityId = String(props.selectedNode?.config?.capability_id ?? '')
+  return selectedDeviceCapabilities.value.some((capability) => capability.capability_id === capabilityId)
+    ? capabilityId
+    : ''
+})
+
+const selectedDeviceCapability = computed(() =>
+  selectedDeviceCapabilities.value.find((capability) => capability.capability_id === selectedConcreteCapabilityId.value) ?? null,
+)
+
+const selectedTraceSummary = computed(() => {
+  const trace = props.selectedNodeTrace
+  if (!trace) return null
+  return buildWorkflowStepSummary({
+    nodeId: String(trace.node_id ?? ''),
+    nodeType: String(trace.node_type ?? props.selectedNode?.type ?? ''),
+    status: trace.status ?? 'skipped',
+    outputs: trace.outputs ?? {},
+    error: trace.error,
+    durationMs: trace.duration_ms,
+  }, props.label)
+})
+
+function isTemplateLike(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().startsWith('{{') && value.trim().endsWith('}}')
+}
+
+function deviceLabel(device: any): string {
+  return [device.name, device.room?.name, device.device_type].filter(Boolean).join(' · ')
+}
+
+function handleDeviceCapabilityDeviceChange(raw: string) {
+  if (!raw) {
+    emit('update-config', 'device_id', null)
+    return
+  }
+  const id = Number(raw)
+  emit('update-config', 'device_id', Number.isFinite(id) ? id : raw)
+  const device = props.runtimeDeviceManifest.find((item) => item.id === id)
+  const capabilities = (device?.capabilities ?? []) as any[]
+  const firstCapability = capabilities[0]
+  if (firstCapability) {
+    emit('update-config', 'capability_id', firstCapability.capability_id)
+    emit('update-config', 'capability', firstCapability.name)
+    if (isEmptyObject(props.selectedNode?.config?.arguments)) {
+      emit('update-config', 'arguments', firstCapability.sample_arguments ?? {})
+    }
+  }
+}
+
+function handleDeviceCapabilityChange(capabilityId: string) {
+  const capability = selectedDeviceCapabilities.value.find((item) => item.capability_id === capabilityId)
+  emit('update-config', 'capability_id', capabilityId)
+  emit('update-config', 'capability', capability?.name ?? '')
+  if (capability && isEmptyObject(props.selectedNode?.config?.arguments)) {
+    emit('update-config', 'arguments', capability.sample_arguments ?? {})
+  }
+}
+
+function applyDeviceCapabilitySampleArguments() {
+  if (!selectedDeviceCapability.value) return
+  emit('update-config', 'arguments', selectedDeviceCapability.value.sample_arguments ?? {})
+}
+
+function isEmptyObject(value: unknown): boolean {
+  return !value || (typeof value === 'object' && !Array.isArray(value) && Object.keys(value as Record<string, unknown>).length === 0)
 }
 </script>
 
@@ -187,6 +274,46 @@ function formatJsonConfigValue(value: any): string {
             <span class="node-id-hint">ID: {{ selectedNodeTrace.node_id }}</span>
           </div>
           <div v-if="selectedNodeTrace.error" class="trace-error">{{ selectedNodeTrace.error }}</div>
+
+          <div v-if="selectedTraceSummary" :class="['trace-summary-card', selectedTraceSummary.kind, selectedTraceSummary.tone]">
+            <div class="trace-summary-title">{{ selectedTraceSummary.title }}</div>
+            <div v-if="selectedTraceSummary.device" class="trace-summary-device">
+              <span :class="['trace-device-dot', selectedTraceSummary.device.status]"></span>
+              <div>
+                <strong>{{ selectedTraceSummary.device.name }}</strong>
+                <span v-if="selectedTraceSummary.device.detail">{{ selectedTraceSummary.device.detail }}</span>
+              </div>
+            </div>
+            <div v-if="selectedTraceSummary.phases?.length" class="trace-phase-row">
+              <span
+                v-for="phase in selectedTraceSummary.phases"
+                :key="phase.label"
+                :class="['trace-phase-chip', phase.tone]"
+              >
+                <em>{{ phase.label }}</em>
+                <strong>{{ phase.value }}</strong>
+              </span>
+            </div>
+            <div v-if="selectedTraceSummary.effect" class="trace-effect">{{ selectedTraceSummary.effect }}</div>
+            <div v-if="selectedTraceSummary.changedFields?.length" class="trace-changed-fields">
+              <span
+                v-for="field in selectedTraceSummary.changedFields"
+                :key="field"
+              >
+                {{ field }}
+              </span>
+            </div>
+            <div class="trace-summary-rows">
+              <div
+                v-for="row in selectedTraceSummary.rows"
+                :key="row.label"
+                class="trace-summary-row"
+              >
+                <span>{{ row.label }}</span>
+                <strong>{{ row.value }}</strong>
+              </div>
+            </div>
+          </div>
 
           <div class="trace-details-list">
             <details class="styled-details">
@@ -571,6 +698,125 @@ function formatJsonConfigValue(value: any): string {
           </div>
 
           <PlanPreviewCard v-if="selectedExecutorParams.plan_id" :plan-id="selectedExecutorParams.plan_id" />
+        </section>
+      </template>
+
+      <template v-else-if="selectedNode.type === 'device_capability'">
+        <section class="inspector-section">
+          <div class="section-head">
+            <h5>{{ inspectorCopy.deviceCapabilityConfig }}</h5>
+            <button
+              type="button"
+              class="mini-btn"
+              :disabled="runtimeDeviceManifestLoading"
+              @click="emit('refresh-runtime-device-manifest')"
+            >
+              {{ runtimeDeviceManifestLoading ? label('读取中', 'Loading') : label('刷新', 'Refresh') }}
+            </button>
+          </div>
+
+          <div class="form-group">
+            <label>{{ inspectorCopy.device }}</label>
+            <select
+              class="styled-select"
+              :value="selectedDeviceCapabilityDeviceId"
+              :disabled="runtimeDeviceManifestLoading || runtimeDeviceManifest.length === 0"
+              @change="handleDeviceCapabilityDeviceChange(($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">{{ inspectorCopy.selectDevice }}</option>
+              <option
+                v-for="device in runtimeDeviceManifest"
+                :key="device.id"
+                :value="device.id"
+              >
+                {{ deviceLabel(device) }}
+              </option>
+            </select>
+            <p class="hint-text">{{ inspectorCopy.concreteDeviceHint }}</p>
+          </div>
+
+          <div class="form-group">
+            <label>{{ formatNodeFieldLabel('device_id', 'Device ID', label) }}</label>
+            <input
+              class="styled-input"
+              :value="String(selectedNode.config.device_id ?? '')"
+              @input="emit('update-config', 'device_id', ($event.target as HTMLInputElement).value)"
+            />
+          </div>
+
+          <div class="form-group">
+            <label>{{ inspectorCopy.capability }}</label>
+            <select
+              class="styled-select"
+              :value="selectedConcreteCapabilityId"
+              :disabled="selectedDeviceCapabilities.length === 0"
+              @change="handleDeviceCapabilityChange(($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">{{ inspectorCopy.selectCapability }}</option>
+              <option
+                v-for="capability in selectedDeviceCapabilities"
+                :key="capability.capability_id"
+                :value="capability.capability_id"
+              >
+                {{ capability.name || capability.capability_id }}
+              </option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>{{ formatNodeFieldLabel('capability_id', 'Capability ID', label) }}</label>
+            <input
+              class="styled-input"
+              :value="String(selectedNode.config.capability_id ?? '')"
+              @input="emit('update-config', 'capability_id', ($event.target as HTMLInputElement).value)"
+            />
+          </div>
+
+          <div v-if="selectedDeviceCapability" class="glass-card capability-contract-card">
+            <div class="card-head">
+              <span class="card-label">{{ selectedDeviceCapability.name }}</span>
+              <span class="type-badge">{{ selectedDeviceCapability.source }}</span>
+            </div>
+            <div class="capability-meta-row">
+              <span>{{ selectedDeviceCapability.kind }}</span>
+              <span>{{ selectedDeviceCapability.risk }}</span>
+              <span v-if="selectedDeviceCapability.required_fields?.length">
+                {{ label('必填', 'Required') }}: {{ selectedDeviceCapability.required_fields.join(', ') }}
+              </span>
+            </div>
+            <details class="styled-details compact-details">
+              <summary>{{ inspectorCopy.capabilitySchema }}</summary>
+              <pre class="json-block">{{ JSON.stringify(selectedDeviceCapability.input_schema ?? {}, null, 2) }}</pre>
+            </details>
+            <div class="action-strip">
+              <span class="eyebrow-mini">{{ inspectorCopy.sampleArguments }}</span>
+              <button class="mini-btn" type="button" @click="applyDeviceCapabilitySampleArguments">{{ inspectorCopy.useSample }}</button>
+            </div>
+            <pre class="json-block compact-json">{{ JSON.stringify(selectedDeviceCapability.sample_arguments ?? {}, null, 2) }}</pre>
+          </div>
+
+          <div class="form-group">
+            <label>{{ formatNodeFieldLabel('arguments', 'Arguments', label) }}</label>
+            <textarea
+              class="styled-textarea"
+              rows="6"
+              :value="formatJsonConfigValue(selectedNode.config.arguments)"
+              @blur="emit('update-node-object-config', 'arguments', ($event.target as HTMLTextAreaElement).value)"
+            ></textarea>
+            <p v-if="isTemplateLike(selectedNode.config.device_id) || isTemplateLike(selectedNode.config.capability_id)" class="hint-text">
+              {{ label('当前节点使用模板输入，运行时会从 workflow inputs 解析。', 'This node uses template inputs and resolves them from workflow inputs at runtime.') }}
+            </p>
+          </div>
+
+          <div class="form-group">
+            <label>{{ inspectorCopy.configJson }}</label>
+            <textarea
+              class="styled-textarea"
+              rows="7"
+              :value="JSON.stringify(selectedNode.config ?? {}, null, 2)"
+              @blur="emit('commit-node-config', ($event.target as HTMLTextAreaElement).value)"
+            ></textarea>
+          </div>
         </section>
       </template>
 
@@ -1087,6 +1333,188 @@ function formatJsonConfigValue(value: any): string {
   gap: 10px;
 }
 
+.trace-summary-card {
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px solid rgba(16, 185, 129, 0.16);
+  border-radius: 18px;
+  background: rgba(16, 185, 129, 0.045);
+}
+
+.trace-summary-card.warning {
+  border-color: rgba(245, 158, 11, 0.22);
+  background: rgba(245, 158, 11, 0.055);
+}
+
+.trace-summary-card.error {
+  border-color: rgba(239, 68, 68, 0.2);
+  background: rgba(239, 68, 68, 0.045);
+}
+
+.trace-summary-title {
+  margin-bottom: 12px;
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+}
+
+.trace-summary-device {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(226, 232, 240, 0.55);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.6);
+  margin-bottom: 12px;
+}
+
+.trace-device-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+
+.trace-device-dot.online { background: #10b981; }
+.trace-device-dot.offline { background: #ef4444; }
+.trace-device-dot.unknown { background: #94a3b8; }
+
+.trace-summary-device div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.trace-summary-device strong,
+.trace-summary-device span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trace-summary-device strong {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.trace-summary-device span {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.trace-phase-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.trace-phase-chip {
+  min-width: 0;
+  padding: 9px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(226, 232, 240, 0.6);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.trace-phase-chip em,
+.trace-phase-chip strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: normal;
+}
+
+.trace-phase-chip em {
+  margin-bottom: 4px;
+  color: var(--text-tertiary);
+  font-size: 8px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.trace-phase-chip strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.trace-phase-chip.success { border-color: rgba(16, 185, 129, 0.18); background: rgba(16, 185, 129, 0.08); }
+.trace-phase-chip.warning { border-color: rgba(245, 158, 11, 0.2); background: rgba(245, 158, 11, 0.08); }
+.trace-phase-chip.error { border-color: rgba(239, 68, 68, 0.2); background: rgba(239, 68, 68, 0.08); }
+
+.trace-effect {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-left: 3px solid rgba(16, 185, 129, 0.55);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.56);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 750;
+}
+
+.trace-changed-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.trace-changed-fields span {
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.08);
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 850;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.trace-summary-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.trace-summary-row {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.trace-summary-row span {
+  color: var(--text-tertiary);
+  font-size: 8px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.trace-summary-row strong {
+  min-width: 0;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.56);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
 .styled-details {
   border: 1px solid rgba(229, 231, 235, 0.5);
   border-radius: 16px;
@@ -1285,6 +1713,24 @@ function formatJsonConfigValue(value: any): string {
   margin-bottom: 16px;
 }
 
+.capability-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.capability-meta-row span {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgba(16, 185, 129, 0.08);
+  color: #047857;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 .trait.live { background: rgba(16, 185, 129, 0.12); color: #059669; border-color: rgba(16, 185, 129, 0.15); }
 .trait.idle { background: rgba(241, 245, 249, 0.8); color: #64748b; border-color: rgba(100, 116, 139, 0.1); }
 
@@ -1324,6 +1770,13 @@ function formatJsonConfigValue(value: any): string {
   color: white;
   box-shadow: 0 6px 16px rgba(16, 163, 127, 0.25);
   transform: translateY(-2px);
+}
+
+.mini-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 .executor-description, .agent-desc {

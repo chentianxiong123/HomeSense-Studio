@@ -1,4 +1,10 @@
 import { getDb as defaultGetDb } from '../../db/index.js'
+import {
+  getAdbDefinitions,
+  MI_PROPERTY_KEYS,
+  resolveMiCapabilityKey,
+  type JsonSchema,
+} from '../device/device-capability-registry.js'
 import { resolveNodeValue } from './node-base.js'
 import type { WorkflowEdge, WorkflowNode } from './types.js'
 import { VariablePool, type VariableValueMode } from './variable-pool.js'
@@ -20,6 +26,13 @@ export interface WorkflowPreviewStep {
   runnable: boolean
   preview_state: 'ready' | 'skipped' | 'blocked'
   active_outputs: string[]
+  subflow?: {
+    workflow_id?: number
+    workflow_name?: string
+    input_keys: string[]
+    output_key: string | null
+    node_count?: number
+  }
 }
 
 export interface WorkflowPreviewResult {
@@ -29,7 +42,7 @@ export interface WorkflowPreviewResult {
   warnings: string[]
 }
 
-class WorkflowPreviewService {
+export class WorkflowPreviewService {
   constructor(private readonly getDb: GetDbFn = defaultGetDb) {}
 
   previewWorkflow(workflowId: number, inputs: Record<string, unknown> = {}): WorkflowPreviewResult {
@@ -57,7 +70,7 @@ class WorkflowPreviewService {
         continue
       }
 
-      const evaluation = this.previewNode(node, variables)
+      const evaluation = this.previewNode(node, variables, workflowId)
       steps.push(evaluation.step)
       stepByNodeId.set(node.id, evaluation)
       this.applyPreviewOutputs(node, evaluation.outputs, variables)
@@ -98,7 +111,7 @@ class WorkflowPreviewService {
     }
   }
 
-  private previewNode(node: WorkflowNode, variables: VariablePool): PreviewNodeEvaluation {
+  private previewNode(node: WorkflowNode, variables: VariablePool, workflowId: number): PreviewNodeEvaluation {
     if (node.type === 'start') {
       const defaultInputs = asRecord(node.config.inputs)
       const injected: Record<string, unknown> = {}
@@ -106,6 +119,7 @@ class WorkflowPreviewService {
         const variableKey = `input.${key}`
         if (!variables.has(variableKey)) {
           injected[key] = value
+          variables.set(variableKey, value, 'static')
         }
       }
       return this.previewResult(node, 'Inject workflow inputs.', 'none', true, {
@@ -140,25 +154,11 @@ class WorkflowPreviewService {
     if (node.type === 'executor_call') {
       return this.previewExecutorNode(node, variables)
     }
+    if (node.type === 'device_capability') {
+      return this.previewDeviceCapabilityNode(node, variables)
+    }
     if (node.type === 'subflow') {
-      const workflowId = resolveNodeValue(node.config.workflow_id, variables)
-      const workflowName = resolveNodeValue(node.config.workflow_name, variables)
-      const params = asRecord(resolveNodeValue(node.config.inputs ?? {}, variables))
-      const runnable = Boolean(workflowId || workflowName)
-      return this.previewResult(
-        node,
-        `Run child workflow ${workflowId || workflowName || '(unselected)'}`,
-        'external',
-        runnable,
-        { trigger: runnable },
-        {
-          active_outputs: runnable ? ['out'] : [],
-          resolution_mode: runnable ? 'simulated' : 'unresolved',
-          executor_name: 'workflow.subflow',
-          target: String(workflowId || workflowName || ''),
-          params,
-        },
-      )
+      return this.previewSubflowNode(node, variables, workflowId)
     }
     if (node.type === 'code') {
       return this.previewResult(node, 'Resolve variables with inline code.', 'none', true, { trigger: true }, { active_outputs: ['out'], resolution_mode: 'simulated' })
@@ -170,6 +170,112 @@ class WorkflowPreviewService {
       return this.previewResult(node, 'Produce workflow answer.', 'none', true, {}, { active_outputs: [], resolution_mode: inferPreviewModeForValue(node.config.message, variables) })
     }
     return this.previewResult(node, `Run ${node.type} node.`, inferNodeRisk(node.type), true, { trigger: true }, { active_outputs: ['out'], resolution_mode: 'static' })
+  }
+
+  private previewSubflowNode(node: WorkflowNode, variables: VariablePool, currentWorkflowId: number): PreviewNodeEvaluation {
+    const rawWorkflowId = resolveNodeValue(node.config.workflow_id, variables)
+    const rawWorkflowName = resolveNodeValue(node.config.workflow_name, variables)
+    const params = asRecord(resolveNodeValue(node.config.inputs ?? {}, variables))
+    const outputKey = String(resolveNodeValue(node.config.output_key ?? '', variables) ?? '').trim()
+    const inputKeys = Object.keys(params)
+    const child = this.resolveChildWorkflow(rawWorkflowId, rawWorkflowName)
+
+    if (!child.requested) {
+      return this.previewResult(
+        node,
+        'Missing child workflow id or name.',
+        'external',
+        false,
+        { trigger: false },
+        {
+          active_outputs: [],
+          resolution_mode: 'unresolved',
+          executor_name: 'workflow.subflow',
+          target: '',
+          params,
+          subflow: {
+            input_keys: inputKeys,
+            output_key: outputKey || null,
+          },
+        },
+      )
+    }
+
+    if (!child.workflow) {
+      return this.previewResult(
+        node,
+        `Child workflow ${child.requested} was not found.`,
+        'external',
+        false,
+        { trigger: false },
+        {
+          active_outputs: [],
+          resolution_mode: 'unresolved',
+          executor_name: 'workflow.subflow',
+          target: child.requested,
+          params,
+          subflow: {
+            input_keys: inputKeys,
+            output_key: outputKey || null,
+          },
+        },
+      )
+    }
+
+    const nodeCount = this.countWorkflowNodes(child.workflow.id)
+    const subflow = {
+      workflow_id: child.workflow.id,
+      workflow_name: child.workflow.name,
+      input_keys: inputKeys,
+      output_key: outputKey || null,
+      node_count: nodeCount,
+    }
+
+    if (child.workflow.id === currentWorkflowId) {
+      return this.previewResult(
+        node,
+        `Subflow cannot call the current workflow (#${currentWorkflowId}).`,
+        'external',
+        false,
+        { trigger: false },
+        {
+          active_outputs: [],
+          resolution_mode: 'unresolved',
+          executor_name: 'workflow.subflow',
+          target: `${child.workflow.id}:${child.workflow.name}`,
+          params,
+          subflow,
+        },
+      )
+    }
+
+    const summary = `Run child workflow ${child.workflow.name} (#${child.workflow.id}).`
+    return this.previewResult(
+      node,
+      summary,
+      'external',
+      true,
+      {
+        trigger: true,
+        subflow: {
+          preview: true,
+          workflow_id: child.workflow.id,
+          workflow_name: child.workflow.name,
+          input_keys: inputKeys,
+          output_key: outputKey || null,
+          node_count: nodeCount,
+        },
+      },
+      {
+        active_outputs: ['out'],
+        resolution_mode: 'simulated',
+        executor_name: 'workflow.subflow',
+        target: `${child.workflow.id}:${child.workflow.name}`,
+        action: 'run_workflow',
+        params,
+        subflow,
+      },
+    )
   }
 
   private previewExecutorNode(node: WorkflowNode, variables: VariablePool): PreviewNodeEvaluation {
@@ -279,6 +385,187 @@ class WorkflowPreviewService {
         params,
       },
     )
+  }
+
+  private previewDeviceCapabilityNode(node: WorkflowNode, variables: VariablePool): PreviewNodeEvaluation {
+    const deviceId = Number(resolveNodeValue(node.config.device_id, variables))
+    const capabilityId = String(resolveNodeValue(node.config.capability_id ?? '', variables) ?? '').trim()
+    const capability = String(resolveNodeValue(node.config.capability ?? '', variables) ?? '').trim()
+    const args = asRecord(resolveNodeValue(node.config.arguments ?? {}, variables))
+    const validation = this.validateDeviceCapabilityPreview(deviceId, capabilityId, capability, args)
+    const action = validation.capability_id || validation.capability || capabilityId || capability
+
+    return this.previewResult(
+      node,
+      validation.summary,
+      'device',
+      validation.runnable,
+      {
+        trigger: validation.runnable,
+        rehearsal: {
+          preview: true,
+          device_id: validation.device?.id ?? (Number.isFinite(deviceId) ? deviceId : null),
+          device: validation.device,
+          capability_id: validation.capability_id ?? capabilityId,
+          capability: validation.capability ?? capability,
+          source: validation.source,
+          arguments: args,
+          missing_arguments: validation.missing_arguments ?? [],
+          validation: validation.runnable ? 'ready' : 'blocked',
+        },
+        result: {
+          preview: true,
+          status: validation.runnable ? 'planned' : 'blocked',
+        },
+      },
+      {
+        active_outputs: validation.runnable ? ['out'] : [],
+        resolution_mode: validation.runnable ? 'simulated' : 'unresolved',
+        executor_name: 'device.capability',
+        target: validation.device ? `${validation.device.id}:${validation.device.name}` : Number.isFinite(deviceId) ? String(deviceId) : '',
+        action,
+        params: args,
+      },
+    )
+  }
+
+  private validateDeviceCapabilityPreview(
+    deviceId: number,
+    capabilityId: string,
+    capability: string,
+    args: Record<string, unknown>,
+  ): {
+    runnable: boolean
+    summary: string
+    device?: { id: number; name: string; device_type: string; room_name?: string | null; mi_bound: boolean; adb_bound: boolean }
+    capability_id?: string
+    capability?: string
+    source?: 'adb' | 'mi'
+    missing_arguments?: string[]
+  } {
+    if (!Number.isFinite(deviceId) || deviceId <= 0) {
+      return { runnable: false, summary: 'Missing device_id.' }
+    }
+    if (!capabilityId && !capability) {
+      return { runnable: false, summary: 'Missing capability_id or capability.' }
+    }
+
+    const row = this.getDb().prepare(`
+      SELECT d.id, d.name, d.device_type, d.mi_did, d.adb_ip, r.name AS room_name
+      FROM user_devices d
+      LEFT JOIN rooms r ON r.id = d.room_id
+      WHERE d.id = ?
+    `).get(deviceId) as {
+      id: number
+      name: string
+      device_type: string
+      mi_did?: string | null
+      adb_ip?: string | null
+      room_name?: string | null
+    } | undefined
+
+    if (!row) {
+      return { runnable: false, summary: `Device ${deviceId} does not exist in device management.` }
+    }
+
+    const device = {
+      id: row.id,
+      name: row.name,
+      device_type: row.device_type,
+      room_name: row.room_name,
+      mi_bound: Boolean(row.mi_did),
+      adb_bound: Boolean(row.adb_ip),
+    }
+
+    if (capabilityId.startsWith('adb.')) {
+      if (!row.adb_ip) {
+        return { runnable: false, summary: `${row.name} has no ADB binding.`, device, capability_id: capabilityId, source: 'adb' }
+      }
+      const definition = getAdbDefinitions(row.device_type).find((item) => item.id === capabilityId || item.name === capabilityId)
+      if (!definition) {
+        return { runnable: false, summary: `${row.name} does not expose ${capabilityId}.`, device, capability_id: capabilityId, source: 'adb' }
+      }
+      const missing = missingRequiredArguments(definition.input_schema, args)
+      if (missing.length > 0) {
+        return {
+          runnable: false,
+          summary: `${definition.name} is missing argument(s): ${missing.join(', ')}.`,
+          device,
+          capability_id: definition.id,
+          capability: definition.name,
+          source: 'adb',
+          missing_arguments: missing,
+        }
+      }
+      return {
+        runnable: true,
+        summary: `Rehearse and execute ${definition.name} on ${row.name}.`,
+        device,
+        capability_id: definition.id,
+        capability: definition.name,
+        source: 'adb',
+      }
+    }
+
+    const miKey = resolveMiCapabilityKey(capabilityId, capability)
+    if (capabilityId.startsWith('mi.') || capability) {
+      if (!row.mi_did) {
+        return { runnable: false, summary: `${row.name} has no MI binding.`, device, capability_id: capabilityId, capability, source: 'mi' }
+      }
+      if (!miKey) {
+        return { runnable: false, summary: `Unknown MI capability: ${capability || capabilityId}.`, device, capability_id: capabilityId, capability, source: 'mi' }
+      }
+      const missing = missingMiArguments(miKey, args)
+      if (missing.length > 0) {
+        return {
+          runnable: false,
+          summary: `${capability || capabilityId} is missing argument(s): ${missing.join(', ')}.`,
+          device,
+          capability_id: capabilityId || `mi.${miKey}`,
+          capability,
+          source: 'mi',
+          missing_arguments: missing,
+        }
+      }
+      return {
+        runnable: true,
+        summary: `Rehearse and execute ${capability || capabilityId} on ${row.name}.`,
+        device,
+        capability_id: capabilityId || `mi.${miKey}`,
+        capability,
+        source: 'mi',
+      }
+    }
+
+    return { runnable: false, summary: 'Capability must use a known device-management capability id.', device }
+  }
+
+  private resolveChildWorkflow(
+    rawWorkflowId: unknown,
+    rawWorkflowName: unknown,
+  ): { requested: string; workflow?: { id: number; name: string } } {
+    const numericId = typeof rawWorkflowId === 'number' ? rawWorkflowId : Number(rawWorkflowId)
+    if (Number.isInteger(numericId) && numericId > 0) {
+      const row = this.getDb().prepare('SELECT id, name FROM workflows WHERE id = ? LIMIT 1').get(numericId) as { id: number; name: string } | undefined
+      return {
+        requested: `#${numericId}`,
+        workflow: row ? { id: Number(row.id), name: String(row.name) } : undefined,
+      }
+    }
+
+    const name = String(rawWorkflowName ?? '').trim()
+    if (!name) return { requested: '' }
+
+    const row = this.getDb().prepare('SELECT id, name FROM workflows WHERE name = ? LIMIT 1').get(name) as { id: number; name: string } | undefined
+    return {
+      requested: name,
+      workflow: row ? { id: Number(row.id), name: String(row.name) } : undefined,
+    }
+  }
+
+  private countWorkflowNodes(workflowId: number): number {
+    const row = this.getDb().prepare('SELECT COUNT(*) AS count FROM workflow_nodes WHERE workflow_id = ?').get(workflowId) as { count?: number } | undefined
+    return Number(row?.count ?? 0)
   }
 
   private previewResult(
@@ -484,8 +771,29 @@ interface PreviewNodeEvaluation {
   outputs: Record<string, unknown>
 }
 
+function missingRequiredArguments(schema: JsonSchema, args: Record<string, unknown>): string[] {
+  const required = schema.required
+  if (!Array.isArray(required)) return []
+  return required
+    .filter((item): item is string => typeof item === 'string')
+    .filter((key) => args[key] === undefined || args[key] === null || args[key] === '')
+}
+
+function missingMiArguments(miKey: string, args: Record<string, unknown>): string[] {
+  if (miKey === 'ir_key') {
+    return args.key_id || args.key || args.name ? [] : ['key_id']
+  }
+  if (MI_PROPERTY_KEYS.has(miKey)) {
+    return args.value === undefined || args.value === null || args.value === '' ? ['value'] : []
+  }
+  if (miKey === 'execute_text' || miKey === 'play_text') {
+    return typeof args.text === 'string' && args.text.trim() ? [] : ['text']
+  }
+  return []
+}
+
 function inferNodeRisk(type: string): WorkflowPreviewStep['risk'] {
-  return ['device_control', 'xiaoai', 'ir_control', 'scene_execute'].includes(type) ? 'device' : 'none'
+  return ['device_control', 'xiaoai', 'ir_control', 'scene_execute', 'device_capability'].includes(type) ? 'device' : 'none'
 }
 
 function inferCliRisk(cliName: string, action: string): WorkflowPreviewStep['risk'] {
@@ -502,7 +810,7 @@ function inferAgentRisk(target: string, payload: Record<string, unknown>): Workf
 }
 
 function inferOutputMode(node: WorkflowNode, outputs: Record<string, unknown>): VariableValueMode {
-  if (node.type === 'executor_call' || node.type === 'subflow' || node.type === 'code') {
+  if (node.type === 'executor_call' || node.type === 'subflow' || node.type === 'code' || node.type === 'device_capability') {
     return 'simulated'
   }
   if (node.type === 'if_else') {

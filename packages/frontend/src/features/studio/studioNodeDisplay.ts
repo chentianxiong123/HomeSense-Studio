@@ -3,6 +3,7 @@ type Labeler = (zh: string, en: string) => string
 const NODE_LABELS: Record<string, [string, string]> = {
   start: ['开始节点', 'Start'],
   device_control: ['设备控制', 'Device Control'],
+  device_capability: ['设备能力', 'Device Capability'],
   xiaoai: ['小爱音箱', 'XiaoAi'],
   ir_control: ['红外控制', 'IR Control'],
   llm: ['LLM', 'LLM'],
@@ -11,13 +12,14 @@ const NODE_LABELS: Record<string, [string, string]> = {
   parallel: ['并行', 'Parallel'],
   subflow: ['子流程', 'Subflow'],
   code: ['代码节点', 'Code'],
-  executor_call: ['执行器调用', 'Executor Call'],
+  executor_call: ['高级调用', 'Advanced Call'],
   answer: ['回答节点', 'Answer'],
 }
 
 const NODE_DESCRIPTIONS: Record<string, [string, string]> = {
   start: ['工作流入口节点。', 'Entry node.'],
   device_control: ['控制米家设备实体。', 'Control Mi device entity.'],
+  device_capability: ['通过统一设备能力执行动作，运行前会先进行沙箱演练。', 'Run a structured device capability with rehearsal before execution.'],
   xiaoai: ['向小爱音箱发送语音播报。', 'Send TTS to XiaoAi speaker.'],
   ir_control: ['发送红外按键命令。', 'Send IR key command.'],
   llm: ['执行一次 LLM 推理。', 'Run LLM inference.'],
@@ -26,13 +28,17 @@ const NODE_DESCRIPTIONS: Record<string, [string, string]> = {
   parallel: ['并行编排多个分支。', 'Parallel orchestration node.'],
   subflow: ['运行一个子工作流。', 'Run child workflow.'],
   code: ['执行内联 JavaScript 变换。', 'Run inline JavaScript transform.'],
-  executor_call: ['通过执行网关调用能力。', 'Invoke executor via gateway.'],
+  executor_call: ['兼容低层执行网关；设备动作优先使用设备能力节点。', 'Compatibility entry for low-level executors; prefer Device Capability for smart-home actions.'],
   answer: ['输出最终回答。', 'Output final answer.'],
 }
 
 const FIELD_LABELS: Record<string, [string, string]> = {
   inputs: ['输入', 'Inputs'],
   did: ['设备 ID', 'Device ID'],
+  device_id: ['设备 ID', 'Device ID'],
+  capability_id: ['能力 ID', 'Capability ID'],
+  capability: ['能力名称', 'Capability'],
+  arguments: ['能力参数', 'Arguments'],
   siid: ['服务 IID', 'Service IID'],
   piid: ['属性 IID', 'Property IID'],
   aiid: ['动作 IID', 'Action IID'],

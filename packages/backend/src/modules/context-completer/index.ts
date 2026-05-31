@@ -1,3 +1,6 @@
+import { getDb } from '../../db/index.js'
+import type Database from 'better-sqlite3'
+
 export interface ContextCompleterInput {
   message: string
   history?: Array<{ role: string; content: string }>
@@ -7,7 +10,7 @@ export interface ContextCompleterInput {
 export interface DeviceWeight {
   device_id: string
   label: string
-  type: 'tv' | 'speaker' | 'stb' | 'hub'
+  type: string
   score: number
 }
 
@@ -16,32 +19,34 @@ export interface ContextCompletionResult {
   completed_message: string
   target_device_id?: string
   target_device_label?: string
-  target_device_type?: 'tv' | 'speaker' | 'stb' | 'hub'
+  target_device_type?: string
   matched_media_app?: 'bilibili'
   device_weights: DeviceWeight[]
 }
 
-interface DevicePattern {
+interface DeviceCandidate {
   device_id: string
   label: string
-  type: 'tv' | 'speaker' | 'stb' | 'hub'
+  type: string
   keywords: string[]
+  score_bias: number
 }
 
-const DEVICE_PATTERNS: DevicePattern[] = [
-  { device_id: 'toshiba_tv', label: '东芝电视', type: 'tv', keywords: ['东芝', 'toshiba', '东芝电视'] },
-  { device_id: 'letv_tv', label: '乐视电视', type: 'tv', keywords: ['乐视', 'letv', '乐视电视'] },
-  { device_id: 'stb', label: '机顶盒', type: 'stb', keywords: ['机顶盒', '盒子', 'stb'] },
-  { device_id: 'xiaoai_ir_hub', label: '小爱红外音箱', type: 'hub', keywords: ['小爱', '小爱红外', '红外音箱'] },
-  { device_id: 'redmi_xiaoai_speaker', label: '红米小爱音箱', type: 'speaker', keywords: ['红米小爱', '小爱音箱', 'speaker'] },
-]
+interface DeviceRow {
+  id: number
+  name: string
+  device_type: string
+  room_name?: string | null
+}
 
 const PRONOUNS = ['它', '那个', '这个', '那台', '这台']
 const BILIBILI_ALIASES = ['bilibili', 'bili', 'b站', '哔哩哔哩', '小电视']
 const WORKFLOW_HINTS = ['workflow', 'studio', 'graph', 'node', 'orchestrate', 'automation', '工作流', '编排', '节点', '流程']
 const TV_ACTION_HINTS = ['watch', 'open', 'launch', 'play', '打开', '看', '播放', '启动']
 
-class ContextCompleterService {
+export class ContextCompleterService {
+  constructor(private readonly dbProvider: () => Database.Database = getDb) {}
+
   complete(input: ContextCompleterInput): ContextCompletionResult {
     const message = input.message.trim()
     const normalizedMessage = normalizeText(message)
@@ -50,7 +55,8 @@ class ContextCompleterService {
       .map((item) => item.content)
       .slice(-10)
 
-    const scoredDevices = scoreDevices(message, historyTexts, input.working_context)
+    const deviceCatalog = buildDeviceCatalog(input.working_context, this.dbProvider)
+    const scoredDevices = scoreDevices(message, historyTexts, input.working_context, deviceCatalog)
     const matchedMediaApp = BILIBILI_ALIASES.some((alias) => normalizedMessage.includes(normalizeText(alias)))
       ? 'bilibili'
       : undefined
@@ -70,12 +76,14 @@ class ContextCompleterService {
       workingContext: input.working_context,
       matchedMediaApp,
       workflowIntent,
+      deviceCatalog,
     })
     completedMessage = this.applyTriggerRules({
       message: completedMessage,
       target,
       matchedMediaApp,
       workflowIntent,
+      deviceCatalog,
     })
 
     return {
@@ -95,11 +103,12 @@ class ContextCompleterService {
     workingContext: Record<string, unknown> | undefined
     matchedMediaApp?: 'bilibili'
     workflowIntent: boolean
+    deviceCatalog: DeviceCandidate[]
   }): DeviceWeight | undefined {
     const normalizedMessage = normalizeText(params.message)
     const explicit = params.scoredDevices.find((device) => {
-      const pattern = DEVICE_PATTERNS.find((item) => item.device_id === device.device_id)
-      return (pattern?.keywords ?? []).some((keyword) => normalizedMessage.includes(normalizeText(keyword)))
+      const candidate = params.deviceCatalog.find((item) => item.device_id === device.device_id)
+      return (candidate?.keywords ?? []).some((keyword) => normalizedMessage.includes(normalizeText(keyword)))
     })
     if (explicit) return explicit
 
@@ -108,23 +117,18 @@ class ContextCompleterService {
     }
 
     if (params.matchedMediaApp) {
-      const rememberedTv = typeof params.workingContext?.preferred_tv_device_id === 'string'
+      const preferredTv = typeof params.workingContext?.preferred_tv_device_id === 'string'
         ? params.scoredDevices.find((device) => device.device_id === params.workingContext?.preferred_tv_device_id)
         : undefined
-      if (rememberedTv) return rememberedTv
+      if (preferredTv && isTvLike(preferredTv.type)) return preferredTv
 
-      const toshiba = params.scoredDevices.find((device) => device.device_id === 'toshiba_tv')
-      if (toshiba) return toshiba
+      const current = currentContextDevice(params.workingContext, params.scoredDevices)
+      if (current && isTvLike(current.type)) return current
 
-      const tv = params.scoredDevices.find((device) => device.type === 'tv')
+      const tv = params.scoredDevices.find((device) => isTvLike(device.type))
       if (tv) return tv
 
-      return {
-        device_id: 'toshiba_tv',
-        label: '东芝电视',
-        type: 'tv',
-        score: 1,
-      }
+      return undefined
     }
 
     return params.scoredDevices[0]
@@ -135,12 +139,13 @@ class ContextCompleterService {
     target: DeviceWeight | undefined
     matchedMediaApp?: 'bilibili'
     workflowIntent: boolean
+    deviceCatalog: DeviceCandidate[]
   }): string {
     if (!params.target) return params.message
     if (params.workflowIntent) return params.message
 
     const normalizedMessage = normalizeText(params.message)
-    const hasDeviceName = DEVICE_PATTERNS.some((device) =>
+    const hasDeviceName = params.deviceCatalog.some((device) =>
       device.keywords.some((keyword) => normalizedMessage.includes(normalizeText(keyword))),
     )
 
@@ -148,7 +153,7 @@ class ContextCompleterService {
       return `在${params.target.label}上看B站`
     }
 
-    if (!hasDeviceName && hasTvActionIntent(params.message) && params.target.type === 'tv') {
+    if (!hasDeviceName && hasTvActionIntent(params.message) && isTvLike(params.target.type)) {
       return `在${params.target.label}上${params.message}`
     }
 
@@ -156,10 +161,82 @@ class ContextCompleterService {
   }
 }
 
+function buildDeviceCatalog(
+  workingContext: Record<string, unknown> | undefined,
+  dbProvider: () => Database.Database,
+): DeviceCandidate[] {
+  const candidates = new Map<string, DeviceCandidate>()
+
+  const contextDeviceId = readFirstString(
+    workingContext?.current_device_id,
+    workingContext?.current_device,
+    workingContext?.target_device_id,
+  )
+  const contextDeviceName = readFirstString(workingContext?.current_device_name, workingContext?.target_device_name)
+  const contextDeviceType = readFirstString(workingContext?.current_device_type, workingContext?.target_device_type)
+  if (contextDeviceId && contextDeviceName) {
+    addDeviceCandidate(candidates, {
+      device_id: contextDeviceId,
+      label: contextDeviceName,
+      type: normalizeDeviceType(contextDeviceType),
+      keywords: [
+        contextDeviceName,
+        contextDeviceType,
+        String(workingContext?.current_device_room_name ?? ''),
+      ],
+      score_bias: 0.65,
+    })
+  }
+
+  for (const row of loadUserDevices(dbProvider)) {
+    addDeviceCandidate(candidates, {
+      device_id: String(row.id),
+      label: row.name,
+      type: normalizeDeviceType(row.device_type),
+      keywords: [row.name, row.device_type, row.room_name ?? '', ...genericDeviceKeywords(row.device_type)],
+      score_bias: 0,
+    })
+  }
+
+  return Array.from(candidates.values())
+}
+
+function addDeviceCandidate(map: Map<string, DeviceCandidate>, candidate: DeviceCandidate): void {
+  const keywords = Array.from(new Set([
+    candidate.label,
+    candidate.type,
+    ...candidate.keywords,
+    ...genericDeviceKeywords(candidate.type),
+  ].map((item) => String(item).trim()).filter(Boolean)))
+  const existing = map.get(candidate.device_id)
+  map.set(candidate.device_id, {
+    device_id: candidate.device_id,
+    label: existing?.label || candidate.label,
+    type: normalizeDeviceType(existing?.type || candidate.type),
+    keywords: Array.from(new Set([...(existing?.keywords ?? []), ...keywords])),
+    score_bias: Math.max(existing?.score_bias ?? 0, candidate.score_bias),
+  })
+}
+
+function loadUserDevices(dbProvider: () => Database.Database): DeviceRow[] {
+  try {
+    return dbProvider().prepare(`
+      SELECT d.id, d.name, d.device_type, r.name AS room_name
+      FROM user_devices d
+      LEFT JOIN rooms r ON r.id = d.room_id
+      ORDER BY d.created_at DESC
+      LIMIT 50
+    `).all() as DeviceRow[]
+  } catch {
+    return []
+  }
+}
+
 function scoreDevices(
   currentMessage: string,
   historyTexts: string[],
-  workingContext?: Record<string, unknown>,
+  workingContext: Record<string, unknown> | undefined,
+  deviceCatalog: DeviceCandidate[],
 ): DeviceWeight[] {
   const scores = new Map<string, DeviceWeight>()
   const combinedTexts = [...historyTexts, currentMessage]
@@ -170,7 +247,7 @@ function scoreDevices(
     const weight = isCurrentMessage ? 1 : Math.pow(0.9, combinedTexts.length - 1 - index)
     const normalizedText = normalizeText(text)
 
-    for (const device of DEVICE_PATTERNS) {
+    for (const device of deviceCatalog) {
       const matchCount = device.keywords.filter((keyword) => normalizedText.includes(normalizeText(keyword))).length
       if (matchCount === 0) continue
       const existing = scores.get(device.device_id)
@@ -184,6 +261,19 @@ function scoreDevices(
     }
   }
 
+  const currentDevice = currentContextDevice(workingContext, deviceCatalog.map((device) => ({
+    device_id: device.device_id,
+    label: device.label,
+    type: device.type,
+    score: 0,
+  })))
+  if (currentDevice) {
+    scores.set(currentDevice.device_id, {
+      ...currentDevice,
+      score: (scores.get(currentDevice.device_id)?.score ?? 0) + 0.55,
+    })
+  }
+
   const preferredTv = typeof workingContext?.preferred_tv_device_id === 'string'
     ? workingContext.preferred_tv_device_id
     : null
@@ -193,16 +283,27 @@ function scoreDevices(
     scores.set(preferredTv, item)
   }
 
-  if (!scores.has('toshiba_tv')) {
-    scores.set('toshiba_tv', {
-      device_id: 'toshiba_tv',
-      label: '东芝电视',
-      type: 'tv',
-      score: preferredTv === 'toshiba_tv' ? 0.6 : 0.2,
+  for (const device of deviceCatalog) {
+    if (scores.has(device.device_id)) continue
+    if (device.score_bias <= 0) continue
+    scores.set(device.device_id, {
+      device_id: device.device_id,
+      label: device.label,
+      type: device.type,
+      score: device.score_bias,
     })
   }
 
   return Array.from(scores.values()).sort((left, right) => right.score - left.score)
+}
+
+function currentContextDevice(
+  workingContext: Record<string, unknown> | undefined,
+  devices: DeviceWeight[],
+): DeviceWeight | undefined {
+  const currentId = readFirstString(workingContext?.current_device_id, workingContext?.current_device)
+  if (!currentId) return undefined
+  return devices.find((device) => device.device_id === currentId)
 }
 
 function containsPronoun(message: string): boolean {
@@ -227,9 +328,37 @@ function isWorkflowIntent(message: string): boolean {
   return WORKFLOW_HINTS.some((hint) => compact.includes(normalizeText(hint)))
 }
 
+function isTvLike(type: string): boolean {
+  const normalized = normalizeDeviceType(type)
+  return ['tv', 'television', 'stb', 'tv_box'].includes(normalized)
+}
+
+function normalizeDeviceType(value: string): string {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  if (normalized === 'television') return 'tv'
+  return normalized || 'unknown'
+}
+
+function genericDeviceKeywords(type: string): string[] {
+  const normalized = normalizeDeviceType(type)
+  if (isTvLike(normalized)) return ['电视', 'tv', 'television', '机顶盒', '盒子', 'stb']
+  if (normalized === 'speaker') return ['音箱', '小爱', 'speaker']
+  if (normalized === 'computer') return ['电脑', 'computer', 'pc']
+  if (normalized === 'phone') return ['手机', 'phone']
+  if (normalized === 'tablet') return ['平板', 'tablet']
+  return []
+}
+
+function readFirstString(...values: unknown[]): string {
+  for (const value of values) {
+    const text = String(value ?? '').trim()
+    if (text) return text
+  }
+  return ''
+}
+
 function normalizeText(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, '')
 }
 
 export const contextCompleter = new ContextCompleterService()
-

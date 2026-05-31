@@ -36,6 +36,20 @@ export interface CompensationTask {
   created_at: string
 }
 
+export interface WorkflowNodeFailureTaskParams extends Record<string, unknown> {
+  workflow_id: number
+  run_id: number
+  node_id: string
+  node_type: string
+  label?: string
+  error?: string
+  inputs?: Record<string, unknown>
+  resolved_inputs?: Record<string, unknown>
+  outputs?: Record<string, unknown>
+  triggered_by?: string
+  duration_ms?: number
+}
+
 export interface PreviewResult {
   can_execute: boolean
   checks: Array<{
@@ -61,29 +75,12 @@ export class CompensationService {
     params: Record<string, unknown>,
     maxRetries: number = 3,
   ): CompensationTask {
-    const db = this.getDb()
-    const now = new Date().toISOString()
-    const paramsJson = JSON.stringify(params)
+    return this.insertTask(type, params, maxRetries, 'pending', '')
+  }
 
-    const result = db.prepare(
-      `INSERT INTO compensation_tasks (type, params_json, retry_count, max_retries, next_retry_at, state, error_message, created_at)
-     VALUES (?, ?, 0, ?, ?, 'pending', '', ?)`,
-    ).run(type, paramsJson, maxRetries, now, now)
-
-    const task: CompensationTask = {
-      id: Number(result.lastInsertRowid),
-      type,
-      params_json: paramsJson,
-      retry_count: 0,
-      max_retries: maxRetries,
-      next_retry_at: now,
-      state: 'pending',
-      error_message: '',
-      created_at: now,
-    }
-
-    this.eventBus.fire(HeartEvent.COMPENSATION_TASK_CREATED, { task_id: task.id, type })
-    return task
+  recordWorkflowNodeFailure(params: WorkflowNodeFailureTaskParams): CompensationTask {
+    const errorMessage = params.error ?? 'workflow node failed'
+    return this.insertTask('workflow.node_failure', params, 0, 'failed', errorMessage)
   }
 
   private persistState(task: CompensationTask): void {
@@ -91,6 +88,43 @@ export class CompensationService {
     db.prepare(
       `UPDATE compensation_tasks SET state = ?, retry_count = ?, next_retry_at = ?, error_message = ? WHERE id = ?`,
     ).run(task.state, task.retry_count, task.next_retry_at, task.error_message, task.id)
+  }
+
+  private insertTask(
+    type: string,
+    params: Record<string, unknown>,
+    maxRetries: number,
+    state: CompensationTask['state'],
+    errorMessage: string,
+  ): CompensationTask {
+    const db = this.getDb()
+    const now = new Date().toISOString()
+    const paramsJson = JSON.stringify(params)
+    const normalizedRetries = Math.max(0, Math.trunc(maxRetries))
+
+    const result = db.prepare(
+      `INSERT INTO compensation_tasks (type, params_json, retry_count, max_retries, next_retry_at, state, error_message, created_at)
+     VALUES (?, ?, 0, ?, ?, ?, ?, ?)`,
+    ).run(type, paramsJson, normalizedRetries, now, state, errorMessage, now)
+
+    const task: CompensationTask = {
+      id: Number(result.lastInsertRowid),
+      type,
+      params_json: paramsJson,
+      retry_count: 0,
+      max_retries: normalizedRetries,
+      next_retry_at: now,
+      state,
+      error_message: errorMessage,
+      created_at: now,
+    }
+
+    this.eventBus.fire(HeartEvent.COMPENSATION_TASK_CREATED, {
+      task_id: task.id,
+      type,
+      state,
+    })
+    return task
   }
 
   preview(task: CompensationTask): PreviewResult {
@@ -111,6 +145,28 @@ export class CompensationService {
       canExecute = false
     } else {
       checks.push({ name: 'type_valid', passed: true, message: `任务类型: ${task.type}` })
+    }
+
+    if (task.type === 'workflow.node_failure') {
+      checks.push({
+        name: 'workflow_context',
+        passed: true,
+        message: [
+          `工作流 #${String(params.workflow_id ?? '-')}`,
+          `节点 ${String(params.label ?? params.node_id ?? '-')}`,
+          String(params.node_type ?? ''),
+        ].filter(Boolean).join(' · '),
+      })
+      if (params.error) {
+        checks.push({ name: 'failure_error', passed: false, message: String(params.error) })
+      }
+      checks.push({ name: 'observation_only', passed: false, message: '失败观察任务，不直接重试；请根据预览修复节点或重新运行工作流。' })
+      return {
+        can_execute: false,
+        checks,
+        estimated_impact: '工作流失败修复线索',
+        warnings,
+      }
     }
 
     if (task.type === 'device_control') {
@@ -214,6 +270,13 @@ export class CompensationService {
   getTask(id: number): CompensationTask | undefined {
     const db = this.getDb()
     return db.prepare('SELECT * FROM compensation_tasks WHERE id = ?').get(id) as CompensationTask | undefined
+  }
+
+  listTasks(limit: number = 100): CompensationTask[] {
+    const db = this.getDb()
+    return db.prepare(
+      'SELECT * FROM compensation_tasks ORDER BY datetime(created_at) DESC, id DESC LIMIT ?',
+    ).all(Math.max(1, Math.trunc(limit))) as CompensationTask[]
   }
 
   getPendingTasks(): CompensationTask[] {

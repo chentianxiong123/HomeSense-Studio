@@ -1,4 +1,5 @@
 import { getDb as defaultGetDb } from '../../db/index.js'
+import { computeWorkflowGraphHash } from './graph-version.js'
 
 type GetDbFn = () => ReturnType<typeof defaultGetDb>
 
@@ -38,8 +39,8 @@ export interface SeedSyncResult {
 
 const DEFAULT_WORKFLOW_SEEDS: SeedWorkflowInput[] = [
   {
-    name: 'Agent Dispatch Demo',
-    description: 'Demo control-plane workflow: dispatch a structured task to an external adapter target and summarize the outcome.',
+    name: 'Device Capability Rehearsal Demo',
+    description: 'Recommended smart-home workflow: run a structured device capability through the shared device-agent runtime, with sandbox rehearsal before real execution.',
     trigger_type: 'manual',
     published: true,
     nodes: [
@@ -49,34 +50,30 @@ const DEFAULT_WORKFLOW_SEEDS: SeedWorkflowInput[] = [
         position: { x: 80, y: 120 },
         config: {
           inputs: {
-            target: 'codex',
-            task: 'Review the repository architecture and propose a minimal improvement plan.',
+            device_id: 1,
+            capability_id: 'mi.ir_key',
+            key: 'BACK',
           },
         },
       },
       {
-        type: 'executor_call',
-        label: 'Dispatch Agent',
-        position: { x: 340, y: 120 },
+        type: 'device_capability',
+        label: 'Rehearse And Execute',
+        position: { x: 390, y: 120 },
         config: {
-          executor_name: 'agent.dispatch',
-          params: {
-            target: 'codex',
-            task: 'Review the repository architecture and propose a minimal improvement plan.',
-            payload: {
-              scope: 'homesense-studio',
-              focus: ['workflow-runtime', 'adapter-registry'],
-            },
-            execution_mode: 'deferred',
+          device_id: '{{input.device_id}}',
+          capability_id: '{{input.capability_id}}',
+          arguments: {
+            key: '{{input.key}}',
           },
         },
       },
       {
         type: 'answer',
         label: 'Answer',
-        position: { x: 620, y: 120 },
+        position: { x: 720, y: 120 },
         config: {
-          message: 'Agent dispatch demo prepared. Review node.result for the planned adapter envelope.',
+          message: 'Device capability demo finished. Review the rehearsal and execution result on the device capability node.',
         },
       },
     ],
@@ -114,8 +111,8 @@ const DEFAULT_WORKFLOW_SEEDS: SeedWorkflowInput[] = [
             params: {
               title: '{{input.title}}',
               source_path: '{{input.source_path}}',
-              description: 'HomeSense Studio workflow and agent-control demo.',
-              tags: ['HomeSense', 'AI Agent', 'Smart Home'],
+              description: 'HomeSense Studio workflow and smart-home runtime demo.',
+              tags: ['HomeSense', 'Smart Home', 'Workflow'],
               visibility: 'private',
               dry_run: true,
             },
@@ -137,8 +134,132 @@ const DEFAULT_WORKFLOW_SEEDS: SeedWorkflowInput[] = [
     ],
   },
   {
-    name: 'Bilibili Agent Dispatch Demo',
-    description: 'Demo agent control-plane workflow: dispatch a Bilibili media task through adapter binding instead of calling the CLI executor directly.',
+    name: 'DLNA Cast Demo',
+    description: 'Studio workflow skeleton: call the DLNA casting capability surface backed by the external bilibili-music project.',
+    trigger_type: 'manual',
+    published: false,
+    nodes: [
+      {
+        type: 'start',
+        label: 'Start',
+        position: { x: 80, y: 330 },
+        config: {
+          inputs: {
+            base_url: 'http://127.0.0.1:28974',
+            target_ip: '',
+          },
+        },
+      },
+      {
+        type: 'executor_call',
+        label: 'Check DLNA Adapter',
+        position: { x: 380, y: 300 },
+        config: {
+          executor_name: 'cli.invoke',
+          params: {
+            cli_name: 'dlna-cast-cli',
+            action: 'health',
+            params: {
+              base_url: '{{input.base_url}}',
+            },
+          },
+        },
+      },
+      {
+        type: 'executor_call',
+        label: 'Discover DLNA Devices',
+        position: { x: 700, y: 300 },
+        config: {
+          executor_name: 'cli.invoke',
+          params: {
+            cli_name: 'dlna-cast-cli',
+            action: 'discover_devices',
+            params: {
+              base_url: '{{input.base_url}}',
+              target_ip: '{{input.target_ip}}',
+            },
+          },
+        },
+      },
+      {
+        type: 'answer',
+        label: 'Answer',
+        position: { x: 1020, y: 300 },
+        config: {
+          message: 'DLNA cast path checked. Use dlna-cast-cli.start_cast after a real device_udn and playable episode_url are selected.',
+        },
+      },
+    ],
+    edges: [
+      { sourceIndex: 0, targetIndex: 1 },
+      { sourceIndex: 1, targetIndex: 2 },
+      { sourceIndex: 2, targetIndex: 3 },
+    ],
+  },
+  {
+    name: 'Speaker Cast Demo',
+    description: 'Studio workflow skeleton: call the speaker casting capability surface backed by the external bilibili-music project.',
+    trigger_type: 'manual',
+    published: false,
+    nodes: [
+      {
+        type: 'start',
+        label: 'Start',
+        position: { x: 80, y: 440 },
+        config: {
+          inputs: {
+            base_url: 'http://127.0.0.1:28974',
+          },
+        },
+      },
+      {
+        type: 'executor_call',
+        label: 'Check Speaker Adapter',
+        position: { x: 380, y: 440 },
+        config: {
+          executor_name: 'cli.invoke',
+          params: {
+            cli_name: 'speaker-cast-cli',
+            action: 'health',
+            params: {
+              base_url: '{{input.base_url}}',
+            },
+          },
+        },
+      },
+      {
+        type: 'executor_call',
+        label: 'List Speakers',
+        position: { x: 700, y: 440 },
+        config: {
+          executor_name: 'cli.invoke',
+          params: {
+            cli_name: 'speaker-cast-cli',
+            action: 'list_speakers',
+            params: {
+              base_url: '{{input.base_url}}',
+            },
+          },
+        },
+      },
+      {
+        type: 'answer',
+        label: 'Answer',
+        position: { x: 1020, y: 440 },
+        config: {
+          message: 'Speaker cast path checked. Use speaker-cast-cli.play_bilibili after a real speaker did and bvid are selected.',
+        },
+      },
+    ],
+    edges: [
+      { sourceIndex: 0, targetIndex: 1 },
+      { sourceIndex: 1, targetIndex: 2 },
+      { sourceIndex: 2, targetIndex: 3 },
+    ],
+  },
+  {
+    name: 'Bilibili Media Dispatch Demo',
+    description: 'Demo local capability workflow: dispatch a Bilibili media draft task through the registered CLI adapter and keep the result visible in trace.',
     trigger_type: 'manual',
     published: true,
     nodes: [
@@ -148,25 +269,25 @@ const DEFAULT_WORKFLOW_SEEDS: SeedWorkflowInput[] = [
         position: { x: 80, y: 400 },
         config: {
           inputs: {
-            title: 'HomeSense Studio agent dispatch demo',
-            source_path: './exports/homesense-agent-demo.mp4',
+            title: 'HomeSense Studio media dispatch demo',
+            source_path: './exports/homesense-media-demo.mp4',
           },
         },
       },
       {
         type: 'executor_call',
-        label: 'Dispatch Bilibili Agent',
+        label: 'Dispatch Bilibili Adapter',
         position: { x: 380, y: 400 },
         config: {
           executor_name: 'agent.dispatch',
           params: {
             target: 'bilibili_cli',
-            task: 'Prepare a Bilibili upload draft for a HomeSense demo video.',
+            task: 'Prepare a Bilibili upload draft through the local media adapter.',
             payload: {
               title: '{{input.title}}',
               source_path: '{{input.source_path}}',
-              description: 'HomeSense Studio agent adapter and workflow demo.',
-              tags: ['HomeSense', 'AI Agent', 'Workflow'],
+              description: 'HomeSense Studio local adapter and workflow demo.',
+              tags: ['HomeSense', 'Smart Home', 'Workflow'],
               visibility: 'private',
               dry_run: true,
             },
@@ -179,7 +300,7 @@ const DEFAULT_WORKFLOW_SEEDS: SeedWorkflowInput[] = [
         label: 'Answer',
         position: { x: 700, y: 400 },
         config: {
-          message: 'Bilibili agent dispatch demo executed through adapter binding. Review node.result.adapter_result for the CLI output.',
+          message: 'Bilibili media dispatch demo executed through local adapter binding. Review node.result.adapter_result for the CLI output.',
         },
       },
     ],
@@ -190,7 +311,7 @@ const DEFAULT_WORKFLOW_SEEDS: SeedWorkflowInput[] = [
   },
   {
     name: 'Bilibili Subflow Demo',
-    description: 'Demo child-engine workflow: call the Bilibili agent dispatch workflow as a reusable subflow.',
+    description: 'Demo child-engine workflow: call the Bilibili media dispatch workflow as a reusable subflow.',
     trigger_type: 'manual',
     published: true,
     nodes: [
@@ -207,10 +328,10 @@ const DEFAULT_WORKFLOW_SEEDS: SeedWorkflowInput[] = [
       },
       {
         type: 'subflow',
-        label: 'Run Bilibili Agent Flow',
+        label: 'Run Bilibili Media Flow',
         position: { x: 380, y: 540 },
         config: {
-          workflow_name: 'Bilibili Agent Dispatch Demo',
+          workflow_name: 'Bilibili Media Dispatch Demo',
           inputs: {
             title: '{{input.title}}',
             source_path: '{{input.source_path}}',
@@ -425,94 +546,6 @@ const DEFAULT_WORKFLOW_SEEDS: SeedWorkflowInput[] = [
     ],
   },
   {
-    name: 'A2A Agent Dispatch Demo',
-    description: 'Demo Studio as an agent hub: dispatch coding, review, and scheduled automation tasks through A2A-compatible adapters in dry-run mode.',
-    trigger_type: 'manual',
-    published: true,
-    nodes: [
-      {
-        type: 'start',
-        label: 'Task Input',
-        position: { x: 80, y: 900 },
-        config: {
-          inputs: {
-            scope: 'homesense-studio',
-            workflow_name: 'Watch Bilibili On Toshiba TV Demo',
-          },
-        },
-      },
-      {
-        type: 'executor_call',
-        label: 'Ask Codex A2A',
-        position: { x: 360, y: 820 },
-        config: {
-          executor_name: 'agent.dispatch',
-          params: {
-            target: 'a2a_codex',
-            task: 'Review the HomeSense Studio workflow architecture and return implementation notes.',
-            payload: {
-              scope: '{{input.scope}}',
-              focus: ['workflow-runtime', 'executor-gateway', 'studio-debugging'],
-              dry_run: true,
-            },
-            execution_mode: 'deferred',
-          },
-        },
-      },
-      {
-        type: 'executor_call',
-        label: 'Ask Claude Code A2A',
-        position: { x: 360, y: 980 },
-        config: {
-          executor_name: 'agent.dispatch',
-          params: {
-            target: 'a2a_claude_code',
-            task: 'Inspect the selected workflow and suggest refactor or UX improvements.',
-            payload: {
-              workflow_name: '{{input.workflow_name}}',
-              focus: ['node-contract', 'preview', 'trace'],
-              dry_run: true,
-            },
-            execution_mode: 'deferred',
-          },
-        },
-      },
-      {
-        type: 'executor_call',
-        label: 'Schedule Xiaolongxia A2A',
-        position: { x: 700, y: 900 },
-        config: {
-          executor_name: 'agent.dispatch',
-          params: {
-            target: 'a2a_xiaolongxia',
-            task: 'Create a scheduled automation proposal for the family entertainment demo.',
-            payload: {
-              schedule: 'daily 20:00',
-              platform: 'homesense',
-              action: 'preview_watch_bilibili',
-              dry_run: true,
-            },
-            execution_mode: 'deferred',
-          },
-        },
-      },
-      {
-        type: 'answer',
-        label: 'Answer',
-        position: { x: 1040, y: 900 },
-        config: {
-          message: 'A2A agent hub demo prepared: Codex, Claude Code, and Xiaolongxia dispatch envelopes are visible in trace without requiring real endpoints.',
-        },
-      },
-    ],
-    edges: [
-      { sourceIndex: 0, targetIndex: 1 },
-      { sourceIndex: 1, targetIndex: 2 },
-      { sourceIndex: 2, targetIndex: 3 },
-      { sourceIndex: 3, targetIndex: 4 },
-    ],
-  },
-  {
     name: 'Candidate Plan Routing Demo',
     description: 'Demo shared-infra workflow: retrieve semantic knowledge, rerank the hit set, resolve candidate plans, and summarize the best route without reusing Chat L1/L2/L3 runtime logic.',
     trigger_type: 'manual',
@@ -651,13 +684,14 @@ class WorkflowSeedService {
     const db = this.getDb()
     db.prepare(
       `UPDATE workflows
-       SET description = ?, trigger_type = ?, published = ?, graph_json = ?, updated_at = datetime('now')
+       SET description = ?, trigger_type = ?, published = ?, graph_json = ?, graph_hash = ?, updated_at = datetime('now'), graph_updated_at = datetime('now')
        WHERE id = ?`,
     ).run(
       seed.description,
       seed.trigger_type ?? 'manual',
       seed.published ? 1 : 0,
-      JSON.stringify({ nodes: seed.nodes, edges: seed.edges }),
+      seedGraphJson(seed),
+      computeWorkflowGraphHash(seedGraphJson(seed)),
       workflowId,
     )
 
@@ -719,8 +753,10 @@ class WorkflowSeedService {
       condition: edge.condition ?? {},
     }))
 
-    db.prepare('UPDATE workflows SET graph_json = ?, updated_at = datetime(\'now\') WHERE id = ?').run(
-      JSON.stringify({ nodes: resolvedNodes, edges: resolvedEdges }),
+    const graphJson = JSON.stringify({ nodes: resolvedNodes, edges: resolvedEdges })
+    db.prepare('UPDATE workflows SET graph_json = ?, graph_hash = ?, updated_at = datetime(\'now\'), graph_updated_at = datetime(\'now\') WHERE id = ?').run(
+      graphJson,
+      computeWorkflowGraphHash(graphJson),
       workflowId,
     )
   }
@@ -753,3 +789,7 @@ class WorkflowSeedService {
 }
 
 export const workflowSeedService = new WorkflowSeedService()
+
+function seedGraphJson(seed: SeedWorkflowInput): string {
+  return JSON.stringify({ nodes: seed.nodes, edges: seed.edges })
+}

@@ -1,11 +1,12 @@
 import type { ContextCompletionResult } from '../context-completer/index.js'
 import { llmService as defaultLlmService } from '../llm-provider/service.js'
+import { memoryAssetsService as defaultMemoryAssetsService } from '../memory-assets/index.js'
 import { memoryKernel as defaultMemoryKernel, type SearchResult } from '../memory-kernel/index.js'
 import { planLibrary as defaultPlanLibrary, type CompiledPlanDefinition, type PlanStepDefinition } from '../plan-library/index.js'
 import { rerankService as defaultRerankService } from '../rerank-service/index.js'
 
 export interface CandidatePlanEvidence {
-  source: 'context' | 'plan_library' | 'compiled_knowledge' | 'memory_observation' | 'search'
+  source: 'context' | 'plan_library' | 'compiled_knowledge' | 'memory' | 'memory_observation' | 'search'
   ref: string
   score?: number
   note?: string
@@ -20,7 +21,7 @@ export interface ObservationForAdjustment {
 export interface CandidatePlan {
   id: string
   title: string
-  source: 'plan_library' | 'compiled_knowledge'
+  source: 'plan_library' | 'compiled_knowledge' | 'memory'
   candidate_kind: 'compiled_plan' | 'workflow_candidate'
   confidence: number
   goal: string
@@ -32,11 +33,21 @@ export interface CandidatePlan {
   plan_id?: string
   compiled_knowledge_id?: number
   intent?: string
+  device_refs?: string[]
+  skill_refs?: Array<{ kind: string; id: string; label?: string }>
+  workflow_id?: number
+  workflow_inputs?: Record<string, unknown>
+  workflow_graph_hash?: string
+  success_count?: number
+  failure_count?: number
+  evidence_status?: 'untested' | 'proven' | 'regressed' | 'failing' | 'running'
+  reuse_score?: number
 }
 
-class CandidatePlanService {
+export class CandidatePlanService {
   constructor(
     private readonly memoryKernel = defaultMemoryKernel,
+    private readonly memoryAssetsService = defaultMemoryAssetsService,
     private readonly llmService = defaultLlmService,
     private readonly planLibrary = defaultPlanLibrary,
     private readonly rerankService = defaultRerankService,
@@ -51,7 +62,10 @@ class CandidatePlanService {
   }): Promise<CandidatePlan[]> {
     const candidates = new Map<string, CandidatePlan>()
     const completion = params.completion
-    const lexicalHits = params.searchHits ?? this.memoryKernel.search(params.query).slice(0, 8)
+    const lexicalHits = params.searchHits ?? [
+      ...this.memoryKernel.search(params.query).slice(0, 8),
+      ...this.memoryAssetsService.searchExperiencePaths(params.query, 8),
+    ]
     let semanticHits: SearchResult[] = []
     try {
       semanticHits = await this.memoryKernel.semanticSearch(params.query, 8)
@@ -168,6 +182,93 @@ class CandidatePlanService {
   }
 
   private fromSearchHit(hit: SearchResult): CandidatePlan | null {
+    if (hit.source === 'memory') {
+      const metadata = isRecord(hit.metadata) ? hit.metadata : {}
+      const steps = this.extractSteps(metadata.steps)
+      if (steps.length === 0) return null
+      const title = typeof metadata.title === 'string' && metadata.title.trim() ? metadata.title : hit.content.split('\n')[0] || 'memory path'
+      const intent = typeof metadata.intent_pattern === 'string' ? metadata.intent_pattern : undefined
+      const goal = typeof metadata.summary === 'string' && metadata.summary.trim()
+        ? metadata.summary
+        : intent || title
+      const entities = this.extractEntitiesFromText([title, hit.content, intent ?? ''].join('\n'))
+      const assumptions = ['device_state_available', 'device_context_verified']
+      const risks = ['device_offline', 'capability_changed', 'arguments_missing']
+      const successCount = readNumberMetadata(metadata.success_count)
+      const failureCount = readNumberMetadata(metadata.failure_count)
+      const runStatus = typeof metadata.run_status === 'string'
+        ? metadata.run_status
+        : metadata.saved_from === 'workflow_success'
+          ? 'succeeded'
+          : metadata.saved_from === 'workflow_failure'
+            ? 'failed'
+            : ''
+      const totalRuns = successCount + failureCount
+      const successRate = totalRuns > 0 ? successCount / totalRuns : 0.5
+      const evidenceStatus = workflowEvidenceStatus({
+        success_count: successCount,
+        failure_count: failureCount,
+        last_run_status: runStatus,
+      })
+      const explicitEvidenceStatus = readEvidenceStatusMetadata(metadata.evidence_status)
+      const explicitReuseScore = readOptionalScoreMetadata(metadata.reuse_score)
+      const reuseScore = explicitReuseScore ?? workflowReuseScore({
+        success_count: successCount,
+        failure_count: failureCount,
+        last_run_status: runStatus,
+      })
+      const confidence = Math.min(
+        0.98,
+        Math.max(
+          0.35,
+          (hit.score * 0.68)
+          + Math.min(0.16, successCount * 0.04)
+          - Math.min(0.18, failureCount * 0.045)
+          + ((successRate - 0.5) * 0.16),
+          reuseScore,
+        ),
+      )
+      const deviceRefs = readStringArrayMetadata(metadata.device_refs)
+      const skillRefs = readSkillRefsMetadata(metadata.skill_refs)
+      const workflowId = readNumberMetadata(metadata.workflow_id)
+      const workflowInputs = isRecord(metadata.workflow_inputs) ? metadata.workflow_inputs : undefined
+      const workflowGraphHash = readStringMetadata(metadata.workflow_graph_hash)
+      const candidateKind = workflowId > 0 || metadata.saved_from === 'workflow_success' || metadata.saved_from === 'workflow_failure'
+        ? 'workflow_candidate'
+        : 'compiled_plan'
+
+      return {
+        id: hit.id,
+        title,
+        source: 'memory',
+        candidate_kind: candidateKind,
+        confidence,
+        goal,
+        entities,
+        steps,
+        assumptions,
+        risks,
+        evidence: [
+          {
+            source: 'memory',
+            ref: hit.id,
+            score: confidence,
+            note: intent || title,
+          },
+        ],
+        intent,
+        device_refs: deviceRefs,
+        skill_refs: skillRefs,
+        ...(workflowId > 0 ? { workflow_id: workflowId } : {}),
+        ...(workflowInputs ? { workflow_inputs: workflowInputs } : {}),
+        ...(workflowGraphHash ? { workflow_graph_hash: workflowGraphHash } : {}),
+        success_count: successCount,
+        failure_count: failureCount,
+        evidence_status: explicitEvidenceStatus ?? evidenceStatus,
+        reuse_score: reuseScore,
+      }
+    }
+
     if (hit.source !== 'compiled' && hit.source !== 'semantic') return null
     if (!hit.id.startsWith('compiled_')) return null
 
@@ -329,6 +430,15 @@ export function mergeDuplicateCandidates(candidates: CandidatePlan[]): Candidate
       plan_id: preferred.plan_id ?? secondary.plan_id,
       entities: Array.from(new Set([...existing.entities, ...candidate.entities])),
       steps: preferred.steps.length > 0 ? preferred.steps : secondary.steps,
+      device_refs: Array.from(new Set([...(existing.device_refs ?? []), ...(candidate.device_refs ?? [])])),
+      skill_refs: mergeSkillRefs(existing.skill_refs, candidate.skill_refs),
+      workflow_id: preferred.workflow_id ?? secondary.workflow_id,
+      workflow_inputs: preferred.workflow_inputs ?? secondary.workflow_inputs,
+      workflow_graph_hash: preferred.workflow_graph_hash ?? secondary.workflow_graph_hash,
+      success_count: Math.max(existing.success_count ?? 0, candidate.success_count ?? 0),
+      failure_count: Math.max(existing.failure_count ?? 0, candidate.failure_count ?? 0),
+      evidence_status: preferEvidenceStatus(existing.evidence_status, candidate.evidence_status),
+      reuse_score: Math.max(existing.reuse_score ?? 0, candidate.reuse_score ?? 0),
     })
   }
 
@@ -342,14 +452,27 @@ export function applyCandidateKindStrategy(query: string, candidates: CandidateP
 
   const boosted = candidates.map((candidate) => {
     let boost = 0
+    const baseConfidence = candidate.candidate_kind === 'workflow_candidate'
+      ? Math.max(candidate.confidence, candidate.reuse_score ?? 0)
+      : candidate.confidence
     if (workflowIntent && candidate.candidate_kind === 'workflow_candidate') boost += 0.08
     if (directActionIntent && candidate.candidate_kind === 'compiled_plan') boost += 0.08
-    if (directActionIntent && candidate.candidate_kind === 'workflow_candidate') boost -= 0.03
+    if (directActionIntent && candidate.candidate_kind === 'workflow_candidate') {
+      if (candidate.evidence_status === 'proven' || (candidate.reuse_score ?? 0) >= 0.75) {
+        boost += 0.04
+      } else if (candidate.evidence_status === 'regressed') {
+        boost -= 0.04
+      } else if (candidate.evidence_status === 'failing') {
+        boost -= 0.08
+      } else {
+        boost -= 0.03
+      }
+    }
     if (workflowIntent && candidate.candidate_kind === 'compiled_plan') boost -= 0.02
 
     return {
       ...candidate,
-      confidence: Math.max(0, Math.min(0.99, candidate.confidence + boost)),
+      confidence: Math.max(0, Math.min(0.99, baseConfidence + boost)),
     }
   })
 
@@ -397,6 +520,107 @@ function uniqueEvidence(evidence: CandidatePlanEvidence[]): CandidatePlanEvidenc
   }
 
   return output
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function readStringArrayMetadata(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return Array.from(new Set(value.map((item) => String(item).trim()).filter(Boolean)))
+}
+
+function readNumberMetadata(value: unknown): number {
+  const number = Number(value)
+  return Number.isFinite(number) ? Math.max(0, number) : 0
+}
+
+function readStringMetadata(value: unknown): string {
+  const text = String(value ?? '').trim()
+  return text
+}
+
+function readOptionalScoreMetadata(value: unknown): number | undefined {
+  const number = Number(value)
+  return Number.isFinite(number) ? Math.max(0, Math.min(1, number)) : undefined
+}
+
+function readEvidenceStatusMetadata(value: unknown): CandidatePlan['evidence_status'] | undefined {
+  const status = String(value ?? '').trim()
+  if (status === 'untested' || status === 'proven' || status === 'regressed' || status === 'failing' || status === 'running') {
+    return status
+  }
+  return undefined
+}
+
+function readSkillRefsMetadata(value: unknown): Array<{ kind: string; id: string; label?: string }> {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((item): item is Record<string, unknown> => isRecord(item) && typeof item.kind === 'string' && typeof item.id === 'string')
+    .map((item) => ({
+      kind: String(item.kind),
+      id: String(item.id),
+      ...(typeof item.label === 'string' ? { label: item.label } : {}),
+    }))
+}
+
+function workflowEvidenceStatus(runStats: {
+  success_count: number
+  failure_count: number
+  last_run_status: string
+}): CandidatePlan['evidence_status'] {
+  const totalRuns = runStats.success_count + runStats.failure_count
+  if (totalRuns === 0 && !runStats.last_run_status) return 'untested'
+  if (runStats.last_run_status === 'succeeded') return 'proven'
+  if (runStats.last_run_status === 'failed') return runStats.success_count > 0 ? 'regressed' : 'failing'
+  if (runStats.last_run_status === 'running' || runStats.last_run_status === 'pending') return 'running'
+  if (runStats.success_count > 0 && runStats.failure_count === 0) return 'proven'
+  if (runStats.success_count > 0 && runStats.failure_count > 0) return 'regressed'
+  if (runStats.failure_count > 0) return 'failing'
+  return 'untested'
+}
+
+function workflowReuseScore(runStats: {
+  success_count: number
+  failure_count: number
+  last_run_status: string
+}): number {
+  let score = 0.48
+  score += Math.min(runStats.success_count, 5) * 0.08
+  score -= Math.min(runStats.failure_count, 5) * 0.06
+  if (runStats.last_run_status === 'succeeded') score += 0.18
+  if (runStats.last_run_status === 'failed') score -= 0.16
+  if (runStats.last_run_status === 'running' || runStats.last_run_status === 'pending') score -= 0.04
+  return Math.max(0.05, Math.min(0.98, Number(score.toFixed(2))))
+}
+
+function preferEvidenceStatus(
+  left: CandidatePlan['evidence_status'],
+  right: CandidatePlan['evidence_status'],
+): CandidatePlan['evidence_status'] {
+  const rank = new Map<CandidatePlan['evidence_status'], number>([
+    ['proven', 5],
+    ['regressed', 4],
+    ['running', 3],
+    ['untested', 2],
+    ['failing', 1],
+  ])
+  return (rank.get(right) ?? 0) > (rank.get(left) ?? 0) ? right : left
+}
+
+function mergeSkillRefs(
+  left: Array<{ kind: string; id: string; label?: string }> | undefined,
+  right: Array<{ kind: string; id: string; label?: string }> | undefined,
+): Array<{ kind: string; id: string; label?: string }> | undefined {
+  const refs = [...(left ?? []), ...(right ?? [])]
+  if (refs.length === 0) return undefined
+  const merged = new Map<string, { kind: string; id: string; label?: string }>()
+  for (const ref of refs) {
+    const key = `${ref.kind}:${ref.id}`
+    if (!merged.has(key)) merged.set(key, ref)
+  }
+  return Array.from(merged.values())
 }
 
 export const candidatePlanService = new CandidatePlanService()

@@ -14,7 +14,9 @@ describe('normalizeRememberedRoute', () => {
     expect(normalizeRememberedRoute('/devices')).toBe('/devices')
     expect(normalizeRememberedRoute('/integrations')).toBe('/integrations')
     expect(normalizeRememberedRoute('/studio/workflows/9/editor')).toBe('/studio/workflows/9/editor')
+    expect(normalizeRememberedRoute('/assets/device-skills/device_skill.tv_box/overview')).toBe('/assets/device-skills/device_skill.tv_box/overview')
     expect(normalizeRememberedRoute('/assets/manifests/cli.mi_adb/overview')).toBe('/assets/manifests/cli.mi_adb/overview')
+    expect(normalizeRememberedRoute('/assets/memory/memory.experience_path.workflow.7/overview')).toBe('/assets/memory/memory.experience_path.workflow.7/overview')
   })
 })
 

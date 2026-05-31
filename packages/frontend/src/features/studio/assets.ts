@@ -1,6 +1,4 @@
-import type { Workflow } from '@/api/workflow'
-
-export type AssetKind = 'workflow' | 'skill' | 'manifest' | 'plan' | 'agent'
+export type AssetKind = 'device_skill' | 'skill' | 'manifest' | 'plan' | 'agent'
 export type AssetFilter = 'all' | AssetKind
 
 export interface SkillAssetSource {
@@ -56,19 +54,19 @@ export interface AgentAssetSource {
   status: string
 }
 
-export interface WorkflowGraphSnapshot {
-  nodes: Array<{
-    id?: number | string
-    type: string
-    label: string
-    position?: { x: number; y: number }
-  }>
-  edges: Array<{
-    source_node_id: number | string
-    target_node_id: number | string
-    source_port?: string
-    target_port?: string
-  }>
+export interface DeviceSkillAssetSource {
+  id: string
+  asset_type: 'device_skill'
+  device_type: string
+  title: string
+  summary: string
+  status: 'active' | 'draft'
+  load_policy: string
+  when_to_load: string[]
+  preferred_tools: string[]
+  common_paths: Array<{ intent: string; steps: string[] }>
+  argument_rules: Record<string, string>
+  failure_recovery: string[]
 }
 
 export interface AssetRecord {
@@ -83,13 +81,12 @@ export interface AssetRecord {
   route: string
   searchText: string
   accent: string
-  workflowGraph?: WorkflowGraphSnapshot
   meta?: Record<string, unknown>
 }
 
 export interface AssetSummary {
   total: number
-  workflows: number
+  deviceSkills: number
   skills: number
   manifests: number
   plans: number
@@ -99,7 +96,7 @@ export interface AssetSummary {
 }
 
 export interface StudioAssetPayload {
-  workflows: Workflow[]
+  deviceSkills: DeviceSkillAssetSource[]
   skills: SkillAssetSource[]
   manifests: ManifestAssetSource[]
   plans: PlanAssetSource[]
@@ -107,7 +104,7 @@ export interface StudioAssetPayload {
 }
 
 const ASSET_ACCENTS: Record<AssetKind, string> = {
-  workflow: '#1f7a4f',
+  device_skill: '#10b981',
   skill: '#7c3aed',
   manifest: '#2563eb',
   plan: '#d97706',
@@ -116,23 +113,23 @@ const ASSET_ACCENTS: Record<AssetKind, string> = {
 
 export function buildAssetRecords(payload: StudioAssetPayload): AssetRecord[] {
   const records: AssetRecord[] = [
-    ...payload.workflows.map((workflow) => ({
-      id: `workflow:${workflow.id}`,
-      kind: 'workflow' as const,
-      title: workflow.name,
-      badge: 'Workflow',
-      subtitle: [workflow.trigger_type, workflow.published ? 'Published' : 'Draft'].join(' · '),
-      description: workflow.description || '',
-      status: workflow.published ? 'published' : 'draft',
-      updatedAt: workflow.updated_at || workflow.created_at || '',
-      route: `/studio/workflows/${workflow.id}/overview`,
-      searchText: `${workflow.name} ${workflow.description} ${workflow.trigger_type}`.toLowerCase(),
-      accent: ASSET_ACCENTS.workflow,
-      workflowGraph: parseWorkflowGraph(workflow.graph_json),
+    ...payload.deviceSkills.map((skill) => ({
+      id: skill.id,
+      kind: 'device_skill' as const,
+      title: skill.title,
+      badge: 'Device Skill',
+      subtitle: [skill.device_type, skill.load_policy].join(' · '),
+      description: skill.summary,
+      status: skill.status,
+      updatedAt: '',
+      route: `/assets/device-skills/${encodeURIComponent(skill.id)}/overview`,
+      searchText: `${skill.title} ${skill.device_type} ${skill.summary} ${skill.when_to_load.join(' ')}`.toLowerCase(),
+      accent: ASSET_ACCENTS.device_skill,
       meta: {
-        triggerType: workflow.trigger_type,
-        cronExpression: workflow.cron_expression,
-        published: Boolean(workflow.published),
+        deviceType: skill.device_type,
+        loadPolicy: skill.load_policy,
+        triggers: skill.when_to_load,
+        preferredTools: skill.preferred_tools,
       },
     })),
     ...payload.skills.map((skill) => ({
@@ -221,7 +218,7 @@ export function filterAssetsByKind(assets: AssetRecord[], filter: AssetFilter): 
 export function buildAssetSummary(assets: Array<Pick<AssetRecord, 'kind' | 'status'>>): AssetSummary {
   return {
     total: assets.length,
-    workflows: countByKind(assets, 'workflow'),
+    deviceSkills: countByKind(assets, 'device_skill'),
     skills: countByKind(assets, 'skill'),
     manifests: countByKind(assets, 'manifest'),
     plans: countByKind(assets, 'plan'),
@@ -233,18 +230,6 @@ export function buildAssetSummary(assets: Array<Pick<AssetRecord, 'kind' | 'stat
 
 function countByKind(assets: Array<Pick<AssetRecord, 'kind'>>, kind: AssetKind): number {
   return assets.filter((asset) => asset.kind === kind).length
-}
-
-function parseWorkflowGraph(raw: string): WorkflowGraphSnapshot {
-  try {
-    const parsed = JSON.parse(raw) as Partial<WorkflowGraphSnapshot>
-    return {
-      nodes: Array.isArray(parsed.nodes) ? parsed.nodes : [],
-      edges: Array.isArray(parsed.edges) ? parsed.edges : [],
-    }
-  } catch {
-    return { nodes: [], edges: [] }
-  }
 }
 
 function safeParseJsonArray(raw: string): string[] {

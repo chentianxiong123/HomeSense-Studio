@@ -1,12 +1,12 @@
 ---
-name: adb-cli
-description: "Virtual Android TV / ADB executor for HomeSense demo flows."
+name: sandbox-adb-cli
+description: "Sandbox Android TV / ADB executor for HomeSense demo flows."
 allowed_tools:
-  - adb-cli
+  - sandbox-adb-cli
 context_mode: inline
 ---
 
-# adb-cli
+# sandbox-adb-cli
 
 ## Actions
 

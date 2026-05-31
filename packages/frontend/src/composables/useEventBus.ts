@@ -6,15 +6,17 @@ export interface BusEvent {
   ts?: number
 }
 
-const API_BASE = (import.meta.env.VITE_API_BASE as string) || 'http://localhost:3000'
+const API_BASE = (import.meta.env.VITE_API_BASE as string) || ''
 
 function wsUrl(): string {
+  const base = API_BASE || window.location.origin
   try {
-    const u = new URL(API_BASE)
+    const u = new URL(base)
     const proto = u.protocol === 'https:' ? 'wss:' : 'ws:'
     return `${proto}//${u.host}/ws`
   } catch {
-    return 'ws://localhost:3000/ws'
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return `${proto}//${window.location.host}/ws`
   }
 }
 

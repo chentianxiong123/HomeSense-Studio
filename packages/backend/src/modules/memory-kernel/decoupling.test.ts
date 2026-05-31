@@ -86,6 +86,49 @@ describe('memory-kernel · heart writes pass through repository', () => {
     expect(ftsHits[0].title).toContain('bilibili')
     expect(repo.countCompiledKnowledge()).toBe(1)
   })
+
+  it('graph substrate stores nodes, edges, and neighborhoods', () => {
+    const db = createInMemoryDb()
+    const repo = new SqlMemoryRepository(() => db)
+
+    repo.upsertGraphNode({
+      id: 'device.tv.toshiba',
+      type: 'device',
+      label: 'Toshiba TV',
+      scope: 'home.living_room',
+      embeddingRef: '',
+      metadataJson: '{"rank_score":0.8}',
+    })
+    repo.upsertGraphNode({
+      id: 'app.bilibili.tv',
+      type: 'app',
+      label: 'Bilibili TV',
+      scope: 'home.living_room',
+      embeddingRef: '',
+      metadataJson: '{}',
+    })
+
+    const edgeId = repo.upsertGraphEdge({
+      fromNodeId: 'device.tv.toshiba',
+      toNodeId: 'app.bilibili.tv',
+      relation: 'can_launch',
+      weight: 0.9,
+      confidence: 0.95,
+      validFrom: '2026-05-29T00:00:00.000Z',
+      validTo: null,
+      sourceType: 'test',
+      sourceRef: 'graph-substrate-test',
+      metadataJson: '{}',
+    })
+
+    expect(edgeId).toBeGreaterThan(0)
+    expect(repo.searchGraphNodesByLike(['Bilibili'], 5)[0].id).toBe('app.bilibili.tv')
+    const neighbors = repo.listGraphNeighbors('device.tv.toshiba', 5)
+    expect(neighbors.length).toBe(1)
+    expect(neighbors[0].neighbor_id).toBe('app.bilibili.tv')
+    expect(neighbors[0].confidence).toBe(0.95)
+    expect(neighbors[0].source_ref).toBe('graph-substrate-test')
+  })
 })
 
 describe('MemoryKernelService · service-level decoupling', () => {
@@ -131,5 +174,26 @@ describe('MemoryKernelService · service-level decoupling', () => {
     const recalled = service.recall('home', 'preference')
     expect(recalled.length).toBe(1)
     expect(recalled[0].entity).toBeDefined()
+  })
+
+  it('graph substrate participates in MemoryKernel search', () => {
+    const db = createInMemoryDb()
+    const eventBus = new FakeEventBus()
+    const llm = new FakeLlmService()
+    const skills = { getSkill: () => undefined }
+    const repo = new SqlMemoryRepository(() => db)
+
+    const service = new MemoryKernelService(() => db, eventBus, llm, skills, repo)
+    service.upsertGraphNode({
+      id: 'screen.bilibili.home',
+      type: 'screen',
+      label: 'Bilibili home screen',
+      scope: 'tv.bilibili',
+      metadata: { rank_score: 0.82 },
+    })
+
+    const hits = service.search('Bilibili')
+    expect(hits.some((hit) => hit.id === 'graph_node_screen.bilibili.home')).toBe(true)
+    expect(service.searchGraph('Bilibili')[0].id).toBe('screen.bilibili.home')
   })
 })

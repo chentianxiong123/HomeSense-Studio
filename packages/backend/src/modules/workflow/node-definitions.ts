@@ -127,6 +127,26 @@ const DEFINITIONS: WorkflowNodeDefinition[] = [
     ],
   },
   {
+    type: 'device_capability',
+    label: 'Device Capability',
+    icon: 'C',
+    color: '#2563eb',
+    category: 'device',
+    description: 'Run a structured device capability through the shared device-agent runtime with rehearsal first.',
+    default_config: { device_id: null, capability_id: '', capability: '', arguments: {} },
+    config_schema: [
+      { key: 'device_id', label: 'Device ID', control: 'text', required: true, helper: 'Accepts a numeric id or a variable template such as {{input.device_id}}.' },
+      { key: 'capability_id', label: 'Capability ID', control: 'text', helper: 'Structured capability id such as adb.launch_app or mi.ir_key.' },
+      { key: 'capability', label: 'Capability Name', control: 'text', helper: 'Fallback capability name when the id is not known.' },
+      { key: 'arguments', label: 'Arguments', control: 'json' },
+    ],
+    output_schema: [
+      { key: 'rehearsal', label: 'Rehearsal', type: 'object', description: 'Sandbox rehearsal result before execution.' },
+      { key: 'result', label: 'Result', type: 'object', description: 'Final device-agent execution result or error payload.' },
+      { key: 'trigger', label: 'Trigger', type: 'boolean', description: 'True when the capability succeeds.' },
+    ],
+  },
+  {
     type: 'llm',
     label: 'LLM',
     icon: 'L',
@@ -248,11 +268,11 @@ const DEFINITIONS: WorkflowNodeDefinition[] = [
   },
   {
     type: 'executor_call',
-    label: 'Executor Call',
+    label: 'Advanced Runtime Call',
     icon: 'E',
     color: '#18a058',
     category: 'control',
-    description: 'Invoke runtime executor via ExecutorGateway.',
+    description: 'Advanced compatibility node for low-level executors. Prefer Device Capability for smart-home actions.',
     default_config: { executor_name: '', params: {} },
     config_schema: [
       { key: 'executor_name', label: 'Executor Name', control: 'text', required: true },
@@ -328,11 +348,11 @@ const DEFINITIONS: WorkflowNodeDefinition[] = [
   },
   {
     type: 'agent_dispatch',
-    label: 'Agent Dispatch',
+    label: 'Capability Dispatch',
     icon: 'G',
     color: '#2563eb',
     category: 'control',
-    description: 'Dispatch a task to a registered external agent through the shared executor gateway.',
+    description: 'Dispatch a structured task to a registered local or remote capability adapter through the shared executor gateway.',
     default_config: { target: '', task: '', payload: {}, execution_mode: 'deferred' },
     config_schema: [
       { key: 'target', label: 'Target', control: 'text', required: true },

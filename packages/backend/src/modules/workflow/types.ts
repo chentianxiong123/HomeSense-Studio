@@ -27,6 +27,8 @@ export interface WorkflowNodeRunOutcome {
 export interface NodeResult extends WorkflowNodeRunOutcome {
   node_id: string
   duration_ms: number
+  attempts?: number
+  retry_errors?: string[]
 }
 
 export interface NodeTrace {
@@ -46,11 +48,15 @@ export interface NodeTrace {
   outputs: Record<string, unknown>
   duration_ms: number
   error?: string
+  compensation_task_id?: number
+  attempts?: number
+  retry_errors?: string[]
 }
 
 export interface WorkflowResult {
   run_id: number
   workflow_id: number
+  graph_hash: string
   status: 'succeeded' | 'failed'
   outputs: Record<string, unknown>
   error?: string

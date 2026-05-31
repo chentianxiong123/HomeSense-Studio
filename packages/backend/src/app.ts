@@ -9,6 +9,7 @@ import { authRoutes } from './modules/auth/routes.js'
 import { deviceRoutes } from './modules/device/routes.js'
 import { userDeviceRoutes } from './modules/device/user-device-routes.js'
 import { roomRoutes } from './modules/device/room-routes.js'
+import { userContextRoutes } from './modules/device/context-routes.js'
 import { chatRoutes } from './modules/chat/routes.js'
 import { workflowRoutes } from './modules/workflow/routes.js'
 import { workflowSeedService } from './modules/workflow/seed.js'
@@ -18,6 +19,7 @@ import { experienceRoutes } from './modules/experience/routes.js'
 import { settingRoutes } from './modules/setting/routes.js'
 import { skillRoutes } from './modules/skill/routes.js'
 import { ruleRoutes } from './modules/rule/routes.js'
+import { commandRoutes } from './modules/command/routes.js'
 import { compensationRoutes } from './modules/compensation/routes.js'
 import { compensationService } from './modules/compensation/index.js'
 import { cronRoutes } from './modules/cron/routes.js'
@@ -27,6 +29,11 @@ import { approvalRoutes } from './modules/approval/routes.js'
 import { agentInstanceRoutes } from './modules/agent-instance/routes.js'
 import { devtestRoutes } from './modules/devtest/routes.js'
 import { intentRouterRoutes } from './modules/intent-router/routes.js'
+import { deviceTypeSkillRoutes } from './modules/device-type-skill/routes.js'
+import { memoryAssetsRoutes } from './modules/memory-assets/routes.js'
+import { runtimeCapabilityMapRoutes } from './modules/runtime-capability-map/routes.js'
+import { externalIntegrationsService } from './modules/external-integrations/index.js'
+import { externalIntegrationRoutes } from './modules/external-integrations/routes.js'
 import { eventBus } from './modules/event-bus/index.js'
 // import { deviceStatePoller } from './modules/device-state-poller/index.js'
 import { ruleEngine } from './modules/rule-engine/index.js'
@@ -89,6 +96,7 @@ export async function buildApp() {
 
   experienceService.indexAllExperiences()
   knowledgeCompiler.refreshKnowledge()
+  externalIntegrationsService.ensureDefaults()
 
   // setTimeout(() => {
   //   if (process.env.ENABLE_STARTUP_EMBEDDING === 'true') {
@@ -142,6 +150,7 @@ export async function buildApp() {
   app.register(deviceRoutes)
   app.register(userDeviceRoutes)
   app.register(roomRoutes)
+  app.register(userContextRoutes)
   app.register(chatRoutes)
   app.register(workflowRoutes)
   app.register(llmProviderRoutes)
@@ -150,6 +159,7 @@ export async function buildApp() {
   app.register(settingRoutes)
   app.register(skillRoutes)
   app.register(ruleRoutes)
+  app.register(commandRoutes)
   app.register(compensationRoutes)
   app.register(cronRoutes)
   app.register(executorGatewayRoutes)
@@ -158,6 +168,10 @@ export async function buildApp() {
   app.register(agentInstanceRoutes)
   app.register(devtestRoutes)
   app.register(intentRouterRoutes)
+  app.register(deviceTypeSkillRoutes)
+  app.register(memoryAssetsRoutes)
+  app.register(runtimeCapabilityMapRoutes)
+  app.register(externalIntegrationRoutes)
 
   app.register(async (instance) => {
     instance.get('/ws', { websocket: true }, (socket) => {
@@ -182,7 +196,7 @@ export async function buildApp() {
     })
   })
 
-  eventBus.listen('state_changed', (data) => {
+  eventBus.on('state_changed', (data) => {
     const msg = JSON.stringify({ type: 'state_changed', data })
     for (const client of wsClients) {
       if (client.readyState === 1) {
@@ -191,7 +205,7 @@ export async function buildApp() {
     }
   })
 
-  eventBus.listen('workflow_node_started', (data) => {
+  eventBus.on('workflow_node_started', (data) => {
     const msg = JSON.stringify({ type: 'workflow_step', data: { ...(data as any), status: 'running' } })
     for (const client of wsClients) {
       if (client.readyState === 1) {
@@ -200,7 +214,7 @@ export async function buildApp() {
     }
   })
 
-  eventBus.listen('workflow_node_completed', (data) => {
+  eventBus.on('workflow_node_completed', (data) => {
     const msg = JSON.stringify({ type: 'workflow_step', data: { ...(data as any), status: 'succeeded' } })
     for (const client of wsClients) {
       if (client.readyState === 1) {
@@ -209,7 +223,7 @@ export async function buildApp() {
     }
   })
 
-  eventBus.listen('workflow_node_failed', (data) => {
+  eventBus.on('workflow_node_failed', (data) => {
     const msg = JSON.stringify({ type: 'workflow_step', data: { ...(data as any), status: 'failed' } })
     for (const client of wsClients) {
       if (client.readyState === 1) {
@@ -218,7 +232,7 @@ export async function buildApp() {
     }
   })
 
-  eventBus.listen('workflow_completed', (data) => {
+  eventBus.on('workflow_completed', (data) => {
     const msg = JSON.stringify({ type: 'workflow_completed', data: data as any })
     for (const client of wsClients) {
       if (client.readyState === 1) {
@@ -227,8 +241,17 @@ export async function buildApp() {
     }
   })
 
-  for (const channel of ['cron_fired', 'service_called', 'memory_observation', 'memory_remembered', 'compiled_knowledge_updated', 'service_registered', 'compensation_task_created', 'rule_executed'] as const) {
-    eventBus.listen(channel, (data) => {
+  eventBus.on('workflow_failed', (data) => {
+    const msg = JSON.stringify({ type: 'workflow_failed', data: { ...(data as any), status: 'failed' } })
+    for (const client of wsClients) {
+      if (client.readyState === 1) {
+        client.send(msg)
+      }
+    }
+  })
+
+  for (const channel of ['cron_fired', 'service_called', 'memory_observation', 'memory_remembered', 'compiled_knowledge_updated', 'service_registered', 'compensation_task_created', 'compensation_task_failed', 'compensation_task_succeeded', 'compensation_retry', 'rule_executed'] as const) {
+    eventBus.on(channel, (data) => {
       const msg = JSON.stringify({ type: channel, data: data as any, ts: Date.now() })
       for (const client of wsClients) {
         if (client.readyState === 1) client.send(msg)

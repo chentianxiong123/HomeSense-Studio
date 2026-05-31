@@ -4,10 +4,24 @@ import { useRoute, useRouter } from 'vue-router'
 import { api, type UserDevice } from '@/api'
 import { useLocale } from '@/composables/useLocale'
 import AppBrowserModal from '@/components/AppBrowserModal.vue'
+import { formatChinaTime } from '@/utils/chinaTime'
 
 const { locale } = useLocale()
 const isZh = computed(() => locale.value === 'zh')
 function label(zh: string, en: string) { return isZh.value ? zh : en }
+
+interface DeviceCapability {
+  capability_id?: string
+  name: string
+  kind: string
+  type?: string
+  source?: string
+  input_schema?: Record<string, unknown>
+  output_schema?: Record<string, unknown> | null
+  output?: Record<string, { type: string; description: string }> | null
+  risk?: string
+  metadata?: Record<string, unknown>
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -15,7 +29,7 @@ const deviceId = Number(route.params.id)
 
 const loading = ref(true)
 const device = ref<UserDevice | null>(null)
-const capabilities = ref<Array<{ name: string; kind: string; type?: string }>>([])
+const capabilities = ref<DeviceCapability[]>([])
 const capsLoading = ref(false)
 const capsError = ref('')
 const errorMessage = ref('')
@@ -71,11 +85,11 @@ async function loadHistory() {
   try {
     const result = await api.userDevices.capabilityHistory(deviceId)
     if (result.history) {
-      execHistory.value = result.history.map((e: { time: string; deviceId: string; capability: string; params: string; status: string; result: string }) => ({
+      execHistory.value = result.history.map((e: { time: string; deviceId: string; capability: string; params: string; status: string; result?: string }) => ({
         capability: e.capability,
         params: e.params,
         result: e.status === 'ok' ? (e.result || label('成功', 'Success')) : label('失败: ', 'Failed: ') + e.status,
-        time: new Date(e.time).toLocaleTimeString(),
+        time: formatChinaTime(e.time),
       })).reverse()
     }
   } catch {
@@ -123,7 +137,7 @@ async function executeIrKey(keyId: string) {
   }
 }
 
-async function executeCapability(cap: { name: string; type?: string }) {
+async function executeCapability(cap: DeviceCapability) {
   if (executingCap.value) return
   const params = textInputs.value[cap.name]
   // 播放音乐: optional params — empty click = generic play, text input = play text
@@ -135,7 +149,12 @@ async function executeCapability(cap: { name: string; type?: string }) {
   execResult.value = ''
   execError.value = ''
   try {
-    const result = await api.userDevices.executeCapability(deviceId, cap.name, params)
+    const result = await api.userDevices.executeCapability(deviceId, {
+      capability: cap.name,
+      ...(cap.capability_id ? { capability_id: cap.capability_id } : {}),
+      ...(params !== undefined ? { params } : {}),
+      arguments: buildCapabilityArguments(cap, params),
+    })
     if (result.status === 'success') {
       execResult.value = label('已发送: ', 'Sent: ') + cap.name
       textInputs.value[cap.name] = ''
@@ -149,6 +168,53 @@ async function executeCapability(cap: { name: string; type?: string }) {
   } finally {
     executingCap.value = ''
   }
+}
+
+function buildCapabilityArguments(cap: DeviceCapability, rawValue?: string): Record<string, unknown> {
+  const text = rawValue?.trim()
+  if (!text) return {}
+
+  const properties = readSchemaProperties(cap.input_schema)
+  if (properties.package) return { package: text }
+  if (properties.index || (properties.index && properties.text)) {
+    if (text.startsWith('index:')) return { index: Number(text.slice(6).trim()) }
+    const index = Number(text)
+    return Number.isFinite(index) ? { index } : { text }
+  }
+  if (properties.x && properties.y) {
+    const [x, y] = text.split(',').map((item) => Number(item.trim()))
+    return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : { value: text }
+  }
+  if (properties.start_x && properties.start_y && properties.end_x && properties.end_y) {
+    const [start_x, start_y, end_x, end_y, duration] = text.split(',').map((item) => Number(item.trim()))
+    if ([start_x, start_y, end_x, end_y].every(Number.isFinite)) {
+      return {
+        start_x,
+        start_y,
+        end_x,
+        end_y,
+        ...(Number.isFinite(duration) ? { duration } : {}),
+      }
+    }
+    return { value: text }
+  }
+  if (properties.text) return { text }
+  if (properties.value) return { value: coerceCapabilityValue(text) }
+  if (cap.capability_id === 'mi.ir_key' || cap.name === '遥控按键') return { key_id: text }
+  return { value: coerceCapabilityValue(text) }
+}
+
+function readSchemaProperties(schema: Record<string, unknown> | undefined): Record<string, unknown> {
+  const properties = schema?.properties
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) return {}
+  return properties as Record<string, unknown>
+}
+
+function coerceCapabilityValue(value: string): unknown {
+  if (/^-?\d+(\.\d+)?$/.test(value)) return Number(value)
+  if (value === 'true') return true
+  if (value === 'false') return false
+  return value
 }
 
 const miActionCaps = computed(() => capabilities.value.filter(c => c.source === 'mi' && c.kind === 'action' && c.name !== '遥控按键' && c.name !== 'Remote Keys'))

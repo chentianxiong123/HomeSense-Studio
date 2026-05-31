@@ -1,6 +1,6 @@
 import { VariablePool } from './variable-pool.js'
 import { GraphRuntimeState } from './runtime-state.js'
-import type { NodeResult, WorkflowNode, WorkflowNodeRunOutcome } from './types.js'
+import type { NodeResult, WorkflowNode, WorkflowNodeRunOutcome, WorkflowResult } from './types.js'
 
 export interface WorkflowNodeCliBridge {
   run(cliName: string, action: string, params: Record<string, unknown>): Promise<{ status: string; data?: unknown; error?: string }>
@@ -11,6 +11,13 @@ export interface WorkflowNodeExecutorGateway {
     name: string,
     params: Record<string, unknown>,
   ): Promise<{ status: 'success' | 'error'; executor: string; data?: unknown; error?: string; message?: string }>
+}
+
+export interface WorkflowNodeDeviceAgentTools {
+  execute(
+    name: string,
+    params: Record<string, unknown>,
+  ): Promise<{ status: string; executor: string; data?: unknown; error?: string; message?: string }>
 }
 
 export interface WorkflowNodeLLMService {
@@ -42,13 +49,28 @@ export interface WorkflowNodeRerankService {
   }>>
 }
 
+export interface WorkflowNodeWorkflowRuntime {
+  runWorkflow(
+    workflowId: number,
+    inputs: Record<string, unknown>,
+    options: { parentState?: GraphRuntimeState; triggeredBy?: 'manual' | 'cron' | 'chat' },
+  ): Promise<WorkflowResult>
+  runWorkflowByName(
+    workflowName: string,
+    inputs: Record<string, unknown>,
+    options: { parentState?: GraphRuntimeState; triggeredBy?: 'manual' | 'cron' | 'chat' },
+  ): Promise<WorkflowResult>
+}
+
 export interface WorkflowNodeDependencies {
   cliBridge: WorkflowNodeCliBridge
   executorGateway: WorkflowNodeExecutorGateway
+  deviceAgentTools: WorkflowNodeDeviceAgentTools
   llmService: WorkflowNodeLLMService
   memoryKernel: WorkflowNodeMemoryKernel
   candidatePlanService: WorkflowNodeCandidatePlanService
   rerankService: WorkflowNodeRerankService
+  workflowRuntime: WorkflowNodeWorkflowRuntime
 }
 
 export interface NodeExecutionContext {

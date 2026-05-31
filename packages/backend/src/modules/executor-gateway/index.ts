@@ -1,6 +1,5 @@
 import { cliBridge as defaultCliBridge, type CLIResult, type CLIBridge } from '../cli-bridge/index.js'
 import { agentAdapterRegistry as defaultAgentAdapterRegistry, type AgentCliAdapterBinding } from '../agent-adapter/index.js'
-import { a2aClient as defaultA2aClient, type A2ASendParams } from '../a2a-client/index.js'
 import { serviceRegistry as defaultServiceRegistry } from '../service-registry/index.js'
 import { planLibrary as defaultPlanLibrary, type CompiledPlanDefinition, type PlanStepDefinition } from '../plan-library/index.js'
 import { memoryKernel as defaultMemoryKernel } from '../memory-kernel/index.js'
@@ -29,7 +28,6 @@ interface MemoryKernelInstance {
 }
 
 type AgentAdapterRegistryInstance = Pick<import('../agent-adapter/index.js').AgentAdapterRegistry, 'listEnabledTargets' | 'buildDispatchTemplate' | 'get'>
-type A2AClientInstance = Pick<import('../a2a-client/index.js').A2AClient, 'sendTask'>
 
 export type ExecutorKind = 'cli' | 'service' | 'workflow' | 'agent' | 'plan'
 
@@ -70,14 +68,13 @@ interface RegisteredExecutor {
   handler?: (params: Record<string, unknown>) => Promise<unknown>
 }
 
-class ExecutorGatewayService {
+export class ExecutorGatewayService {
   private registry = new Map<string, RegisteredExecutor>()
   private workflowRuntime: WorkflowRuntimeInstance | null = null
 
   constructor(
     private readonly cliBridge: CLIBridge = defaultCliBridge,
     private readonly agentAdapterRegistry: AgentAdapterRegistryInstance = defaultAgentAdapterRegistry,
-    private readonly a2aClient: A2AClientInstance = defaultA2aClient,
     private readonly serviceRegistry: ServiceRegistryInstance = defaultServiceRegistry,
     private readonly planLibrary: PlanLibraryInstance = defaultPlanLibrary,
     private readonly memoryKernel: MemoryKernelInstance = defaultMemoryKernel,
@@ -159,9 +156,9 @@ class ExecutorGatewayService {
     this.register({
       name: 'agent.dispatch',
       kind: 'agent',
-      description: 'Dispatch a task envelope to an external agent adapter such as Codex, Claude Code, OpenClaw, or a CLI worker.',
+      description: 'Dispatch a structured task envelope to a registered local capability adapter.',
       enabled: true,
-      capabilities: ['agent', 'delegation', 'dry_run'],
+      capabilities: ['device', 'adapter', 'dry_run'],
       metadata: {
         mode: 'dry_run',
         supported_targets: this.agentAdapterRegistry.listEnabledTargets(),
@@ -183,16 +180,7 @@ class ExecutorGatewayService {
       const adapter = this.agentAdapterRegistry.get(target)
       const adapterResult = adapter?.adapter_binding?.kind === 'cli'
         ? await this.dispatchCliAdapter(adapter.adapter_binding, payload)
-        : adapter?.adapter_binding?.kind === 'a2a'
-          ? await this.a2aClient.sendTask({
-              target,
-              task,
-              payload,
-              execution_mode: executionMode,
-              binding: adapter.adapter_binding,
-              dry_run: payload.dry_run !== false,
-            })
-          : null
+        : null
 
       return {
         dispatch_id: `dispatch_${Date.now()}`,
@@ -401,4 +389,4 @@ class ExecutorGatewayService {
 
 export const executorGateway = new ExecutorGatewayService()
 export const defaultExecutorGateway = executorGateway
-export type { ServiceRegistryInstance, PlanLibraryInstance, WorkflowRuntimeInstance, MemoryKernelInstance, AgentAdapterRegistryInstance, A2AClientInstance }
+export type { ServiceRegistryInstance, PlanLibraryInstance, WorkflowRuntimeInstance, MemoryKernelInstance, AgentAdapterRegistryInstance }

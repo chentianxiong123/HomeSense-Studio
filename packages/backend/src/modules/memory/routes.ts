@@ -76,6 +76,84 @@ export async function memoryRoutes(app: FastifyInstance) {
     return { status: 'success', data: memoryKernel.buildGraph(query.wing) }
   })
 
+  app.get('/api/memory/graph/search', async (request) => {
+    const query = request.query as { q: string; limit?: string }
+    if (!query.q) {
+      return { status: 'error', error: 'INVALID_PARAMS', message: 'Missing q parameter' }
+    }
+    return {
+      status: 'success',
+      data: memoryKernel.searchGraph(query.q, query.limit ? Number(query.limit) : 10),
+    }
+  })
+
+  app.get('/api/memory/graph/neighborhood/:id', async (request) => {
+    const params = request.params as { id: string }
+    const query = request.query as { limit?: string }
+    return {
+      status: 'success',
+      data: memoryKernel.expandGraphNeighborhood(params.id, query.limit ? Number(query.limit) : 20),
+    }
+  })
+
+  app.post('/api/memory/graph/nodes', async (request) => {
+    const body = request.body as {
+      id?: string
+      type?: string
+      label?: string
+      scope?: string
+      embedding_ref?: string
+      metadata?: Record<string, unknown>
+    }
+    if (!body.id || !body.type || !body.label) {
+      return { status: 'error', error: 'INVALID_PARAMS', message: 'Missing id/type/label parameter' }
+    }
+    return {
+      status: 'success',
+      data: memoryKernel.upsertGraphNode({
+        id: body.id,
+        type: body.type,
+        label: body.label,
+        scope: body.scope,
+        embedding_ref: body.embedding_ref,
+        metadata: body.metadata,
+      }),
+    }
+  })
+
+  app.post('/api/memory/graph/edges', async (request) => {
+    const body = request.body as {
+      from_node_id?: string
+      to_node_id?: string
+      relation?: string
+      weight?: number
+      confidence?: number
+      valid_from?: string
+      valid_to?: string | null
+      source_type?: string
+      source_ref?: string
+      metadata?: Record<string, unknown>
+    }
+    if (!body.from_node_id || !body.to_node_id || !body.relation) {
+      return { status: 'error', error: 'INVALID_PARAMS', message: 'Missing from_node_id/to_node_id/relation parameter' }
+    }
+    return {
+      status: 'success',
+      data: memoryKernel.upsertGraphEdge({
+        from_node_id: body.from_node_id,
+        to_node_id: body.to_node_id,
+        relation: body.relation,
+        weight: body.weight,
+        confidence: body.confidence,
+        valid_from: body.valid_from,
+        valid_to: body.valid_to,
+        source_type: body.source_type,
+        source_ref: body.source_ref,
+        metadata: body.metadata,
+      }),
+    }
+  })
+
   app.get('/api/memory/compiled', async (request) => {
     const query = request.query as {
       kind?: 'wiki_page' | 'compiled_plan' | 'experience_note' | 'skill_candidate' | 'rule_candidate' | 'workflow_candidate'

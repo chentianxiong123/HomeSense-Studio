@@ -149,12 +149,9 @@ async function doDiscover() {
   discoverError.value = ''
   try {
     const j = await api.devices.discover()
-    if (j.status === 'success' && j.data) {
-      devices.value = j.devices || j.data.devices || []
-    } else if (j.devices) {
-      devices.value = j.devices
-    } else {
-      discoverError.value = j.error || j.message || label('发现失败', 'Discovery failed')
+    devices.value = j.devices || []
+    if (j.error) {
+      discoverError.value = j.message || j.error || label('发现失败', 'Discovery failed')
     }
   } catch (e: any) {
     discoverError.value = e.message

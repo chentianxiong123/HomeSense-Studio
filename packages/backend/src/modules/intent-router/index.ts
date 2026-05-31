@@ -1,12 +1,13 @@
 import { candidatePlanService as defaultCandidatePlanService, type CandidatePlan } from '../candidate-plan/index.js'
 import { contextCompleter as defaultContextCompleter, type ContextCompletionResult, type ContextCompleterInput } from '../context-completer/index.js'
+import { memoryAssetsService as defaultMemoryAssetsService } from '../memory-assets/index.js'
 import { memoryKernel as defaultMemoryKernel, type SearchResult } from '../memory-kernel/index.js'
 import { planLibrary as defaultPlanLibrary, type CompiledPlanDefinition } from '../plan-library/index.js'
 import { ruleEngine as defaultRuleEngine, type RuleMatch } from '../rule-engine/index.js'
 import { skillsService as defaultSkillsService } from '../skills-system/index.js'
 
 export interface IntentEvidence {
-  source: 'context' | 'plan_library' | 'rule_engine' | 'skill' | 'compiled_knowledge' | 'memory_observation' | 'search'
+  source: 'context' | 'plan_library' | 'rule_engine' | 'skill' | 'compiled_knowledge' | 'memory' | 'memory_observation' | 'search'
   ref: string
   score?: number
   note?: string
@@ -44,7 +45,7 @@ export interface IntentRouterResult {
   allow_tool_calls: boolean
 }
 
-class IntentRouterService {
+export class IntentRouterService {
   constructor(
     private readonly candidatePlanService = defaultCandidatePlanService,
     private readonly contextCompleter = defaultContextCompleter,
@@ -52,6 +53,7 @@ class IntentRouterService {
     private readonly planLibrary = defaultPlanLibrary,
     private readonly ruleEngine = defaultRuleEngine,
     private readonly skillsService = defaultSkillsService,
+    private readonly memoryAssetsService = defaultMemoryAssetsService,
   ) {}
 
   /** Step 1: 收集所有证据（context → plan → rule → skill → memory → search → candidatePlans） */
@@ -67,7 +69,9 @@ class IntentRouterService {
     directActionIntent: boolean
   }> {
     const completion = this.contextCompleter.complete(input)
-    const routingMessage = completion.completed_message || input.message
+    const routingMessage = input.working_context?.use_original_query === true
+      ? input.message
+      : completion.completed_message || input.message
     const evidence: IntentEvidence[] = []
     const directActionIntent = shouldUseDirectActionRouting(input.message, routingMessage, completion)
 
@@ -113,14 +117,19 @@ class IntentRouterService {
       evidence.push({ source: 'skill', ref: matchedSkill, score: 0.85 })
     }
 
-    const observations = this.memoryKernel.recallObservations(routingMessage, 5)
+    const observations = directActionIntent ? this.memoryKernel.recallObservations(routingMessage, 5) : []
     for (const observation of observations.slice(0, 3)) {
       evidence.push({ source: 'memory_observation', ref: observation.id, score: observation.score, note: observation.last_action })
     }
 
-    const searchHits = this.memoryKernel.search(routingMessage).slice(0, 8)
+    const searchHits = directActionIntent
+      ? [
+          ...this.memoryKernel.search(routingMessage).slice(0, 8),
+          ...this.memoryAssetsService.searchExperiencePaths(routingMessage, 8),
+        ]
+      : []
     for (const hit of searchHits.slice(0, 3)) {
-      evidence.push({ source: hit.source === 'compiled' ? 'compiled_knowledge' : 'search', ref: hit.id, score: hit.score, note: hit.type })
+      evidence.push({ source: toEvidenceSource(hit.source), ref: hit.id, score: hit.score, note: hit.type })
     }
 
     return { completion, routingMessage, matchedPlan, matchedRule, matchedSkill, observations, searchHits, evidence, directActionIntent }
@@ -141,18 +150,24 @@ class IntentRouterService {
   }): Promise<IntentRouterResult> {
     const { completion, routingMessage, matchedPlan, matchedRule, matchedSkill, observations, searchHits, evidence, directActionIntent } = params
 
-    const candidatePlans = await this.candidatePlanService.resolve({
-      query: routingMessage,
-      matchedPlan,
-      completion,
-      searchHits,
-      observations,
-    })
+    const candidatePlans = directActionIntent
+      ? await this.candidatePlanService.resolve({
+          query: routingMessage,
+          matchedPlan,
+          completion,
+          searchHits,
+          observations,
+        })
+      : []
 
     if (!matchedPlan && candidatePlans.length > 0) {
       for (const plan of candidatePlans.slice(0, 3)) {
         evidence.push({
-          source: plan.source === 'compiled_knowledge' ? 'compiled_knowledge' : 'plan_library',
+          source: plan.source === 'compiled_knowledge'
+            ? 'compiled_knowledge'
+            : plan.source === 'memory'
+              ? 'memory'
+              : 'plan_library',
           ref: plan.plan_id ?? String(plan.compiled_knowledge_id ?? plan.id),
           score: plan.confidence,
           note: plan.title,
@@ -192,7 +207,7 @@ class IntentRouterService {
       }
     }
 
-    const routeLevel: 1 | 2 | 3 = candidatePlans.length > 0 || observations.length > 0 || searchHits.length > 0 ? 2 : 3
+    const routeLevel: 1 | 2 | 3 = directActionIntent && (candidatePlans.length > 0 || observations.length > 0 || searchHits.length > 0) ? 2 : 3
 
     return {
       original_message: params.input.message,
@@ -300,6 +315,12 @@ class IntentRouterService {
 }
 
 export const intentRouter = new IntentRouterService()
+
+function toEvidenceSource(source: string): IntentEvidence['source'] {
+  if (source === 'compiled' || source === 'semantic') return 'compiled_knowledge'
+  if (source === 'memory') return 'memory'
+  return 'search'
+}
 
 export function shouldUseDirectActionRouting(
   originalMessage: string,

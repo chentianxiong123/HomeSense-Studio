@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
 import { useLocale } from '../composables/useLocale'
+import { formatChinaDateTime } from '../utils/chinaTime'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -23,6 +24,7 @@ const approvals = ref<Array<{ id: string; turn_id: string; reason: string; decis
 const smokeSequence = ref<Array<{ order: number; label: string; tool: string; action: string; params: Record<string, unknown> }>>([])
 const smokeResult = ref<Awaited<ReturnType<typeof api.devtest.runSmoke>> | null>(null)
 const smokeBusy = ref(false)
+const virtualHome = ref<Record<string, unknown> | null>(null)
 const { t } = useLocale()
 
 async function runSmoke() {
@@ -62,8 +64,12 @@ async function refresh() {
       const result = await api.approvals.list()
       approvals.value = result.approvals
     } else if (tab.value === 'devtest') {
-      const result = await api.devtest.smokeSequence()
-      smokeSequence.value = result.sequence
+      const [sequenceResult, sandboxResult] = await Promise.all([
+        api.devtest.smokeSequence(),
+        api.devtest.virtualHome(),
+      ])
+      smokeSequence.value = sequenceResult.sequence
+      virtualHome.value = sandboxResult.sandbox
     }
   } catch (err) {
     error.value = (err as Error).message
@@ -96,6 +102,23 @@ const approvalStatus = computed(() => ({
   denied: approvals.value.filter((item) => item.decision === 'denied').length,
   timeout: approvals.value.filter((item) => item.decision === 'timeout').length,
 }))
+
+function taskState(task: Record<string, unknown>): string {
+  return String(task.state ?? task.status ?? '')
+}
+
+function taskType(task: Record<string, unknown>): string {
+  return String(task.type ?? task.action_type ?? '')
+}
+
+function taskAttempts(task: Record<string, unknown>): number {
+  const retryCount = task.retry_count ?? task.attempts ?? 0
+  return Number(retryCount) || 0
+}
+
+function taskNextRetryAt(task: Record<string, unknown>): string {
+  return String(task.next_retry_at ?? task.next_attempt_at ?? '')
+}
 </script>
 
 <template>
@@ -147,10 +170,10 @@ const approvalStatus = computed(() => ({
           <tbody>
             <tr v-for="task in compensationTasks" :key="String(task.id)">
               <td>{{ task.id }}</td>
-              <td>{{ task.status }}</td>
-              <td>{{ task.action_type }}</td>
-              <td>{{ task.attempts }}</td>
-              <td>{{ task.next_attempt_at || t('obs.none') }}</td>
+              <td>{{ taskState(task) }}</td>
+              <td>{{ taskType(task) }}</td>
+              <td>{{ taskAttempts(task) }}</td>
+              <td>{{ formatChinaDateTime(taskNextRetryAt(task)) || t('obs.none') }}</td>
             </tr>
           </tbody>
         </table>
@@ -183,7 +206,7 @@ const approvalStatus = computed(() => ({
         <ul v-else class="list">
           <li v-for="experience in experiences" :key="String(experience.id)">
             <div class="item-title">{{ experience.title }}</div>
-            <div class="item-meta">{{ experience.category }} - {{ experience.created_at }}</div>
+            <div class="item-meta">{{ experience.category }} - {{ formatChinaDateTime(String(experience.created_at ?? '')) }}</div>
             <div class="item-body">{{ experience.content }}</div>
           </li>
         </ul>
@@ -271,6 +294,28 @@ const approvalStatus = computed(() => ({
         </div>
 
         <div v-else-if="smokeSequence.length > 0">
+          <div v-if="virtualHome" class="sandbox-box">
+            <div class="sub-head">{{ t('obs.virtualHome') }}</div>
+            <div class="sandbox-grid">
+              <div>
+                <span class="k">{{ t('obs.home') }}</span>
+                <span class="v">{{ (virtualHome.home as any)?.name ?? 'sandbox-home' }}</span>
+              </div>
+              <div>
+                <span class="k">{{ t('obs.rooms') }}</span>
+                <span class="v">{{ Array.isArray(virtualHome.rooms) ? virtualHome.rooms.length : 0 }}</span>
+              </div>
+              <div>
+                <span class="k">{{ t('obs.devices') }}</span>
+                <span class="v">{{ Array.isArray(virtualHome.devices) ? virtualHome.devices.length : 0 }}</span>
+              </div>
+              <div>
+                <span class="k">{{ t('obs.events') }}</span>
+                <span class="v">{{ Array.isArray(virtualHome.timeline) ? virtualHome.timeline.length : 0 }}</span>
+              </div>
+            </div>
+          </div>
+
           <div class="sub-head">{{ t('obs.plannedSequence') }}</div>
           <ol class="smoke-plan">
             <li v-for="step in smokeSequence" :key="step.order">
@@ -483,4 +528,37 @@ const approvalStatus = computed(() => ({
 .smoke-plan { list-style: decimal; padding-left: 24px; font-size: 16px; color: var(--text-secondary); }
 .smoke-plan li { margin-bottom: 6px; }
 .smoke-plan code { font-family: ui-monospace, monospace; background: rgba(241, 243, 245, 0.8); padding: 1px 5px; border-radius: 4px; color: var(--text-primary); }
+
+.sandbox-box {
+  margin-bottom: 18px;
+}
+
+.sandbox-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.sandbox-grid > div {
+  border: 1px solid rgba(236, 239, 242, 0.6);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.sandbox-pre {
+  margin: 0;
+  padding: 12px;
+  border-radius: 10px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
 </style>

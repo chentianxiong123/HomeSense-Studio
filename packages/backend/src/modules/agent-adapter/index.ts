@@ -169,7 +169,7 @@ export class AgentAdapterRegistry {
         payload: {
           title: 'HomeSense Studio demo',
           source_path: './exports/homesense-demo.mp4',
-          tags: ['HomeSense', 'AI Agent', 'Smart Home'],
+          tags: ['HomeSense', 'Smart Home', 'Workflow'],
           visibility: 'private',
           dry_run: true,
         },
@@ -179,7 +179,7 @@ export class AgentAdapterRegistry {
         payload: {
           title: 'HomeSense Studio demo',
           source_path: './exports/homesense-demo.mp4',
-          tags: ['HomeSense', 'AI Agent', 'Smart Home'],
+          tags: ['HomeSense', 'Smart Home', 'Workflow'],
           visibility: 'private',
           dry_run: true,
         },
@@ -237,114 +237,6 @@ export class AgentAdapterRegistry {
       },
     })
 
-    this.register({
-      id: 'a2a_codex',
-      category: 'coding',
-      transport: 'a2a_http',
-      display_name: 'Codex A2A',
-      description: 'A2A-compatible bridge for dispatching coding tasks to a Codex-style agent endpoint.',
-      enabled: true,
-      status: 'planned',
-      capabilities: ['a2a', 'coding', 'delegation', 'dry_run'],
-      execution_modes: ['deferred'],
-      input_schema: {
-        task: 'string',
-        payload: 'object',
-        execution_mode: ['deferred'],
-      },
-      input_template: {
-        task: 'Review the current project state and return implementation notes.',
-        payload: { scope: 'homesense-studio', mode: 'dry_run' },
-      },
-      sample_dispatch: {
-        task: 'Review the current project state and return implementation notes.',
-        payload: { scope: 'homesense-studio', mode: 'dry_run' },
-        execution_mode: 'deferred',
-      },
-      adapter_binding: {
-        kind: 'a2a',
-        endpoint_env: 'A2A_CODEX_URL',
-        agent_name: 'codex',
-      },
-      payload_schema: {
-        scope: { type: 'string', required: false, description: '项目范围' },
-        mode: { type: 'string', required: false, default: 'dry_run', description: 'dry_run / live' },
-        focus: { type: 'string[]', required: false },
-      },
-    })
-
-    this.register({
-      id: 'a2a_claude_code',
-      category: 'coding',
-      transport: 'a2a_http',
-      display_name: 'Claude Code A2A',
-      description: 'A2A-compatible bridge for delegating implementation or review tasks to a Claude Code endpoint.',
-      enabled: true,
-      status: 'planned',
-      capabilities: ['a2a', 'coding', 'review', 'delegation', 'dry_run'],
-      execution_modes: ['deferred'],
-      input_schema: {
-        task: 'string',
-        payload: 'object',
-        execution_mode: ['deferred'],
-      },
-      input_template: {
-        task: 'Inspect a selected workflow and suggest implementation improvements.',
-        payload: { scope: 'workflow-runtime', mode: 'dry_run' },
-      },
-      sample_dispatch: {
-        task: 'Inspect a selected workflow and suggest implementation improvements.',
-        payload: { scope: 'workflow-runtime', mode: 'dry_run' },
-        execution_mode: 'deferred',
-      },
-      adapter_binding: {
-        kind: 'a2a',
-        endpoint_env: 'A2A_CLAUDE_CODE_URL',
-        agent_name: 'claude_code',
-      },
-      payload_schema: {
-        scope: { type: 'string', required: false, description: '工作流名/模块/范围' },
-        focus: { type: 'string[]', required: false },
-        mode: { type: 'string', required: false, default: 'dry_run' },
-      },
-    })
-
-    this.register({
-      id: 'a2a_xiaolongxia',
-      category: 'automation',
-      transport: 'a2a_http',
-      display_name: 'Xiaolongxia A2A',
-      description: 'A2A-compatible bridge for scheduling, platform integration, and automation handoff tasks.',
-      enabled: true,
-      status: 'planned',
-      capabilities: ['a2a', 'scheduler', 'platform_bridge', 'automation', 'dry_run'],
-      execution_modes: ['deferred', 'immediate'],
-      input_schema: {
-        task: 'string',
-        payload: 'object',
-        execution_mode: ['deferred', 'immediate'],
-      },
-      input_template: {
-        task: 'Create or update a scheduled automation task.',
-        payload: { schedule: '', platform: '', action: '', mode: 'dry_run' },
-      },
-      sample_dispatch: {
-        task: 'Create a dry-run scheduled task for the HomeSense demo.',
-        payload: { schedule: 'daily 20:00', platform: 'homesense', action: 'preview_watch_bilibili', mode: 'dry_run' },
-        execution_mode: 'deferred',
-      },
-      adapter_binding: {
-        kind: 'a2a',
-        endpoint_env: 'A2A_XIAOLONGXIA_URL',
-        agent_name: 'xiaolongxia',
-      },
-      payload_schema: {
-        schedule: { type: 'string', required: true, description: 'cron 或 "daily HH:MM" 等' },
-        platform: { type: 'string', required: true, description: '平台标识' },
-        action: { type: 'string', required: true, description: '调度动作名' },
-        mode: { type: 'string', required: false, default: 'dry_run' },
-      },
-    })
   }
 
   register(adapter: AgentAdapterDescriptor): void {
@@ -370,7 +262,9 @@ export class AgentAdapterRegistry {
   buildDispatchTemplate(target?: string): Record<string, unknown> {
     const resolvedTarget = target && this.adapters.has(target)
       ? target
-      : this.listEnabledTargets()[0] ?? 'codex'
+      : this.listEnabledTargets().includes('mi_adb')
+        ? 'mi_adb'
+        : this.listEnabledTargets()[0] ?? 'mi_adb'
     const adapter = this.get(resolvedTarget)
     const executionMode = adapter?.execution_modes[0] ?? 'deferred'
     return {

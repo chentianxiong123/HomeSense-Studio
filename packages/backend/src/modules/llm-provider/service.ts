@@ -3,12 +3,14 @@ import { getDb as defaultGetDb } from '../../db/index.js'
 import { chatService } from '../chat/service.js'
 
 type GetDbFn = () => ReturnType<typeof defaultGetDb>
+export type LLMProviderCategory = 'chat' | 'embedding' | 'rerank' | 'vision'
 
 export interface LLMProviderConfig {
   id: number
   name: string
   api_base: string
   api_key: string
+  category: LLMProviderCategory
   enabled: boolean
   extra_config: Record<string, unknown>
 }
@@ -48,11 +50,26 @@ export interface LLMRerankResult {
   usage?: Record<string, unknown>
 }
 
+export interface LLMVisionImageInput {
+  url?: string
+  image_url?: string
+  base64?: string
+  data?: string
+  mime_type?: string
+  detail?: 'auto' | 'low' | 'high'
+}
+
+export interface LLMVisionResult {
+  content: string | null
+  usage: { prompt_tokens: number; completion_tokens: number }
+}
+
 interface ProviderRow {
   id: number
   name: string
   api_base: string
   api_key: string
+  category: string
   enabled: number
   extra_config: string
 }
@@ -80,18 +97,25 @@ class LLMService {
 
   // ── Provider CRUD ──
 
-  listProviders(): LLMProviderConfig[] {
+  listProviders(category?: string): LLMProviderConfig[] {
     const db = this.getDb()
-    const rows = db.prepare('SELECT * FROM llm_providers ORDER BY id ASC').all() as ProviderRow[]
+    let sql = 'SELECT * FROM llm_providers'
+    const params: unknown[] = []
+    if (category) {
+      sql += ' WHERE category = ?'
+      params.push(category)
+    }
+    sql += ' ORDER BY id ASC'
+    const rows = db.prepare(sql).all(...params) as ProviderRow[]
     return rows.map((row) => this.normalizeProviderRow(row))
   }
 
   addProvider(config: Omit<LLMProviderConfig, 'id'>): number {
     const db = this.getDb()
     const result = db.prepare(
-      `INSERT INTO llm_providers (name, api_base, api_key, enabled, extra_config)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).run(config.name, config.api_base, config.api_key, config.enabled ? 1 : 0, JSON.stringify(config.extra_config ?? {}))
+      `INSERT INTO llm_providers (name, api_base, api_key, category, enabled, extra_config)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(config.name, config.api_base, config.api_key, config.category ?? 'chat', config.enabled ? 1 : 0, JSON.stringify(config.extra_config ?? {}))
     return Number(result.lastInsertRowid)
   }
 
@@ -101,8 +125,8 @@ class LLMService {
     if (!existing) throw new Error(`Provider not found: ${id}`)
     const updated = { ...this.normalizeProviderRow(existing), ...config }
     db.prepare(
-      `UPDATE llm_providers SET name=?, api_base=?, api_key=?, enabled=?, extra_config=?, updated_at=datetime('now') WHERE id=?`,
-    ).run(updated.name, updated.api_base, updated.api_key, updated.enabled ? 1 : 0, JSON.stringify(updated.extra_config ?? {}), id)
+      `UPDATE llm_providers SET name=?, api_base=?, api_key=?, category=?, enabled=?, extra_config=?, updated_at=datetime('now') WHERE id=?`,
+    ).run(updated.name, updated.api_base, updated.api_key, updated.category, updated.enabled ? 1 : 0, JSON.stringify(updated.extra_config ?? {}), id)
     this.clients.delete(`provider:${id}`)
   }
 
@@ -314,6 +338,62 @@ class LLMService {
     }
   }
 
+  async vision(params: {
+    model_id?: number
+    prompt: string
+    images: LLMVisionImageInput[]
+    system?: string
+    temperature?: number
+    max_tokens?: number
+  }): Promise<LLMVisionResult> {
+    if (!params.prompt?.trim()) throw new Error('Vision prompt is required')
+    if (!Array.isArray(params.images) || params.images.length === 0) {
+      throw new Error('At least one image is required')
+    }
+
+    const target = this.resolveChatTarget(params.model_id, 'vision')
+    const client = this.getClient(target)
+    const content: OpenAI.ChatCompletionContentPart[] = [
+      { type: 'text', text: params.prompt },
+      ...params.images.map((image) => ({
+        type: 'image_url' as const,
+        image_url: {
+          url: this.normalizeVisionImageUrl(image),
+          detail: image.detail ?? 'auto',
+        },
+      })),
+    ]
+
+    const messages: OpenAI.ChatCompletionMessageParam[] = [
+      ...(params.system?.trim()
+        ? [{ role: 'system' as const, content: params.system.trim() }]
+        : []),
+      { role: 'user', content },
+    ]
+
+    const response = await client.chat.completions.create({
+      model: target.model_name,
+      messages,
+      temperature: params.temperature ?? 0.2,
+      max_tokens: params.max_tokens ?? 1024,
+    })
+
+    const result: LLMVisionResult = {
+      content: response.choices[0]?.message?.content ?? null,
+      usage: {
+        prompt_tokens: response.usage?.prompt_tokens ?? 0,
+        completion_tokens: response.usage?.completion_tokens ?? 0,
+      },
+    }
+
+    try {
+      const meta = this.resolveUsageMeta2(params.model_id, 'vision')
+      chatService.recordUsage({ ...meta, category: 'vision', success: true, input_tokens: result.usage.prompt_tokens, output_tokens: result.usage.completion_tokens })
+    } catch {}
+
+    return result
+  }
+
   async embed(params: {
     model_id?: number
     input: string | string[]
@@ -484,12 +564,25 @@ class LLMService {
     return `${baseUrl.replace(/\/+$/, '')}${path}`
   }
 
+  private normalizeVisionImageUrl(image: LLMVisionImageInput): string {
+    const url = image.image_url || image.url
+    if (url) return url
+
+    const data = image.data || image.base64
+    if (!data) throw new Error('Vision image must include url, image_url, data, or base64')
+    if (data.startsWith('data:')) return data
+
+    const mimeType = image.mime_type || 'image/png'
+    return `data:${mimeType};base64,${data}`
+  }
+
   private normalizeProviderRow(row: ProviderRow): LLMProviderConfig {
     return {
       id: row.id,
       name: row.name,
       api_base: row.api_base,
       api_key: row.api_key,
+      category: (row.category as LLMProviderCategory) ?? 'chat',
       enabled: row.enabled === 1,
       extra_config: this.parseJson(row.extra_config, {}),
     }

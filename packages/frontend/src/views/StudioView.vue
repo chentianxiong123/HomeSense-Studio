@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, markRaw, onMounted, watch } from 'vue'
+import { ref, computed, markRaw, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useVueFlow } from '@vue-flow/core'
 import type { Connection } from '@vue-flow/core'
@@ -45,26 +45,31 @@ import {
 } from '../features/studio/studioExecutorDisplay'
 import { buildStudioInspectorCopy } from '../features/studio/studioInspectorCopy'
 import { buildWorkflowRoute, parseWorkflowRouteId, replaceWorkflowRouteId } from '../features/studio/workflowEditorRoute'
+import { buildWorkflowRunExperiencePayload } from '../features/studio/workflowRunMemory'
+import { buildWorkflowRunPresets, type WorkflowRunPreset } from '../features/studio/workflowRunPresets'
+import { buildWorkflowPublishEvidence, filterWorkflowRunsForGraph } from '../features/studio/workflowPublishEvidence'
+import { api, type DeviceRuntimeManifestCapabilitySummary, type DeviceRuntimeManifestItem } from '../api'
 import { executorApi } from '../api/executor'
+import { memoryAssetsApi } from '../api/memoryAssets'
 import type { AgentAdapterDescriptor, CLIExecutorDescriptor, ExecutorDescriptor } from '../api/executor'
-import type { Workflow, WorkflowEdgeData, WorkflowNodeConfigField, WorkflowPreviewResult, WorkflowRunResult } from '../api/workflow'
+import { workflowApi, type Workflow, type WorkflowEdgeData, type WorkflowNodeConfigField, type WorkflowPreviewResult, type WorkflowRun, type WorkflowRunResult } from '../api/workflow'
 
 const route = useRoute()
 const router = useRouter()
 
 const EXECUTOR_PRESETS: Record<string, Partial<ExecutorDescriptor>> = {
   'agent.dispatch': {
-    description: 'Dispatch a task envelope to an external agent adapter such as Codex, Claude Code, OpenClaw, or a CLI worker.',
+    description: 'Dispatch a structured runtime task to a registered local capability adapter.',
     enabled: true,
-    capabilities: ['agent', 'delegation', 'dry_run'],
+    capabilities: ['device', 'adapter', 'dry_run'],
     metadata: {
       mode: 'dry_run',
-      supported_targets: ['codex', 'claude_code', 'openclaw', 'bilibili_cli', 'mi_adb'],
+      supported_targets: ['mi_adb', 'bilibili_cli', 'openclaw'],
       param_template: {
-        target: 'codex',
-        task: '',
-        payload: {},
-        execution_mode: 'deferred',
+        target: 'mi_adb',
+        task: 'Inspect target device runtime before execution.',
+        payload: { action: 'list_packages', keyword: 'bili' },
+        execution_mode: 'immediate',
       },
     },
   },
@@ -119,7 +124,7 @@ const AGENT_ADAPTER_PRESETS: Record<string, Partial<AgentAdapterDescriptor>> = {
       payload: {
         title: 'HomeSense Studio demo',
         source_path: './exports/homesense-demo.mp4',
-        tags: ['HomeSense', 'AI Agent', 'Smart Home'],
+        tags: ['HomeSense', 'Smart Home', 'Workflow'],
         visibility: 'private',
         dry_run: true,
       },
@@ -178,52 +183,13 @@ const AGENT_ADAPTER_PRESETS: Record<string, Partial<AgentAdapterDescriptor>> = {
       execution_mode: 'immediate',
     },
   },
-  a2a_codex: {
-    status: 'planned',
-    input_schema: {
-      task: 'string',
-      payload: 'object',
-      execution_mode: ['deferred'],
-    },
-    sample_dispatch: {
-      task: 'Review the current project state and return implementation notes.',
-      payload: { scope: 'homesense-studio', mode: 'dry_run' },
-      execution_mode: 'deferred',
-    },
-  },
-  a2a_claude_code: {
-    status: 'planned',
-    input_schema: {
-      task: 'string',
-      payload: 'object',
-      execution_mode: ['deferred'],
-    },
-    sample_dispatch: {
-      task: 'Inspect a selected workflow and suggest implementation improvements.',
-      payload: { scope: 'workflow-runtime', mode: 'dry_run' },
-      execution_mode: 'deferred',
-    },
-  },
-  a2a_xiaolongxia: {
-    status: 'planned',
-    input_schema: {
-      task: 'string',
-      payload: 'object',
-      execution_mode: ['deferred', 'immediate'],
-    },
-    sample_dispatch: {
-      task: 'Create a dry-run scheduled task for the HomeSense demo.',
-      payload: { schedule: 'daily 20:00', platform: 'homesense', action: 'preview_watch_bilibili', mode: 'dry_run' },
-      execution_mode: 'deferred',
-    },
-  },
 }
 const { t, locale } = useLocale()
 const routeWorkflowId = computed(() => parseWorkflowRouteId(route.params.id as string | string[] | undefined))
 const workflowsLoaded = ref(false)
 const isZh = computed(() => locale.value === 'zh')
 
-type WorkflowShowcaseLane = 'home' | 'studio' | 'agent'
+type WorkflowShowcaseLane = 'home' | 'studio' | 'memory'
 
 type WorkflowShowcaseCard = Workflow & {
   lane: WorkflowShowcaseLane
@@ -233,29 +199,47 @@ type WorkflowShowcaseCard = Workflow & {
 }
 
 const WORKFLOW_SHOWCASE: Record<string, Omit<WorkflowShowcaseCard, keyof Workflow>> = {
+  'Device Capability Rehearsal Demo': {
+    lane: 'home',
+    badge: 'Capability',
+    eyebrow: 'Sandbox Rehearsal',
+    priority: 0,
+  },
   'Watch Bilibili On Toshiba TV Demo': {
     lane: 'home',
     badge: 'Hero',
     eyebrow: 'Family Entertainment',
-    priority: 0,
-  },
-  'Bilibili CLI Demo': {
-    lane: 'studio',
-    badge: 'Studio',
-    eyebrow: 'Content Pipeline',
     priority: 1,
+  },
+  'Bilibili Media Dispatch Demo': {
+    lane: 'studio',
+    badge: 'Adapter',
+    eyebrow: 'Local Capability',
+    priority: 4,
+  },
+  'DLNA Cast Demo': {
+    lane: 'studio',
+    badge: 'DLNA',
+    eyebrow: 'Casting',
+    priority: 2,
+  },
+  'Speaker Cast Demo': {
+    lane: 'studio',
+    badge: 'Speaker',
+    eyebrow: 'Casting',
+    priority: 3,
   },
   'Bilibili Subflow Demo': {
     lane: 'studio',
     badge: 'Subflow',
     eyebrow: 'Reusable Runtime',
-    priority: 2,
+    priority: 5,
   },
-  'A2A Agent Dispatch Demo': {
-    lane: 'agent',
-    badge: 'A2A',
-    eyebrow: 'Agent Hub',
-    priority: 3,
+  'Candidate Plan Routing Demo': {
+    lane: 'memory',
+    badge: 'Memory',
+    eyebrow: 'Candidate Routing',
+    priority: 6,
   },
 }
 
@@ -272,6 +256,7 @@ const {
   createWorkflow,
   reseedDefaults,
   saveWorkflow,
+  setWorkflowPublished,
   runWorkflow,
   previewWorkflow,
   deleteWorkflow,
@@ -285,11 +270,19 @@ const selectedNodeIndex = ref<number | null>(null)
 const showObs = ref(false)
 const latestRun = ref<WorkflowRunResult | null>(null)
 const latestPreview = ref<WorkflowPreviewResult | null>(null)
+const workflowRunHistory = ref<WorkflowRun[]>([])
+const workflowRunPresets = ref<WorkflowRunPreset[]>([])
+const workflowRunMemoryStatus = ref<Record<number, 'saving' | 'saved' | 'error'>>({})
+const workflowRunMemoryErrors = ref<Record<number, string>>({})
 const activeRunId = ref<number | null>(null)
 const availablePlans = ref<Array<Record<string, unknown>>>([])
 const availableExecutors = ref<ExecutorDescriptor[]>([])
 const availableAgentAdapters = ref<AgentAdapterDescriptor[]>([])
 const availableCLIExecutors = ref<CLIExecutorDescriptor[]>([])
+const runtimeDeviceManifest = ref<DeviceRuntimeManifestItem[]>([])
+const runtimeDeviceManifestLoading = ref(false)
+const selectedRunDeviceId = ref<number | null>(null)
+const selectedRunCapabilityId = ref('')
 const selectedVariableTarget = ref('')
 const executorParamsText = ref('{}')
 const runInputsText = ref('{}')
@@ -509,8 +502,8 @@ const variableFieldTargets = computed(() => {
     targets.push({ id: 'config:inputs', label: label('子流程输入', 'Subflow Inputs'), mode: 'json' })
   } else if (selectedNode.value.type === 'executor_call') {
     if (selectedExecutorName.value === 'agent.dispatch') {
-      targets.push({ id: 'executor:task', label: label('智能体任务', 'Agent Task'), mode: 'text' })
-      targets.push({ id: 'executor:payload', label: label('智能体载荷', 'Agent Payload'), mode: 'json' })
+      targets.push({ id: 'executor:task', label: label('能力任务', 'Capability Task'), mode: 'text' })
+      targets.push({ id: 'executor:payload', label: label('能力载荷', 'Capability Payload'), mode: 'json' })
     } else if (selectedExecutorName.value === 'cli.invoke') {
       targets.push({ id: 'executor:params', label: label('CLI 动作参数', 'CLI Action Params'), mode: 'json' })
     } else if (selectedExecutorName.value === 'workflow.run') {
@@ -796,6 +789,145 @@ const runtimeAgentAdapters = computed(() =>
   }),
 )
 
+const selectedRunDevice = computed(() =>
+  runtimeDeviceManifest.value.find((device) => device.id === selectedRunDeviceId.value) ?? null,
+)
+
+const selectedRunCapabilities = computed(() =>
+  (selectedRunDevice.value?.capabilities ?? []) as DeviceRuntimeManifestCapabilitySummary[],
+)
+
+const selectedRunCapability = computed(() =>
+  selectedRunCapabilities.value.find((capability) => capability.capability_id === selectedRunCapabilityId.value)
+    ?? selectedRunCapabilities.value[0]
+    ?? null,
+)
+
+function tryParseJsonObject(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(raw || '{}')
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null
+  } catch {
+    return null
+  }
+}
+
+function startNodeInputsForWorkflow(): Record<string, unknown> {
+  const startNode = workflowNodes.value.find((node) => node.type === 'start')
+  const inputs = startNode?.config?.inputs
+  if (!inputs || typeof inputs !== 'object' || Array.isArray(inputs)) return {}
+  return JSON.parse(JSON.stringify(inputs)) as Record<string, unknown>
+}
+
+function syncRunInputsFromWorkflowDefaults() {
+  const defaults = startNodeInputsForWorkflow()
+  runInputsText.value = JSON.stringify(defaults, null, 2)
+  syncRunSelectionFromInputs()
+}
+
+async function loadWorkflowRunHistory() {
+  if (!currentWorkflow.value) {
+    workflowRunHistory.value = []
+    return
+  }
+  try {
+    const result = await workflowApi.runs(currentWorkflow.value.id)
+    workflowRunHistory.value = result.runs ?? []
+  } catch {
+    workflowRunHistory.value = []
+  }
+}
+
+async function loadWorkflowRunPresets() {
+  if (!currentWorkflow.value) {
+    workflowRunPresets.value = []
+    return
+  }
+  try {
+    const result = await memoryAssetsApi.list()
+    workflowRunPresets.value = buildWorkflowRunPresets(currentWorkflow.value, result.assets ?? [])
+  } catch {
+    workflowRunPresets.value = []
+  }
+}
+
+function syncRunSelectionFromInputs() {
+  if (runtimeDeviceManifest.value.length === 0) {
+    selectedRunDeviceId.value = null
+    selectedRunCapabilityId.value = ''
+    return
+  }
+
+  const inputs = tryParseJsonObject(runInputsText.value)
+  const deviceId = Number(inputs?.device_id)
+  if (Number.isFinite(deviceId) && runtimeDeviceManifest.value.some((device) => device.id === deviceId)) {
+    selectedRunDeviceId.value = deviceId
+  } else if (runtimeDeviceManifest.value.length > 0) {
+    selectedRunDeviceId.value = runtimeDeviceManifest.value[0].id
+  }
+
+  const activeDevice = runtimeDeviceManifest.value.find((device) => device.id === selectedRunDeviceId.value) ?? null
+  const capabilities = (activeDevice?.capabilities ?? []) as DeviceRuntimeManifestCapabilitySummary[]
+  const capabilityId = String(inputs?.capability_id ?? '')
+  if (capabilityId && capabilities.some((capability) => capability.capability_id === capabilityId)) {
+    selectedRunCapabilityId.value = capabilityId
+    return
+  }
+
+  if (!capabilities.some((capability) => capability.capability_id === selectedRunCapabilityId.value)) {
+    selectedRunCapabilityId.value = capabilities[0]?.capability_id ?? ''
+  }
+}
+
+function loadRuntimeDeviceManifest() {
+  runtimeDeviceManifestLoading.value = true
+  return api.userDevices.runtimeManifest({ online: true, capabilities: 'summary', limit: 20 })
+    .then((result) => {
+      runtimeDeviceManifest.value = result.manifest.devices ?? []
+      syncRunSelectionFromInputs()
+    })
+    .catch(() => {
+      runtimeDeviceManifest.value = []
+    })
+    .finally(() => {
+      runtimeDeviceManifestLoading.value = false
+    })
+}
+
+function applyRunSelectionToInputs() {
+  const inputs = tryParseJsonObject(runInputsText.value) ?? {}
+  if (selectedRunDeviceId.value != null) {
+    inputs.device_id = selectedRunDeviceId.value
+  }
+  if (selectedRunCapability.value) {
+    inputs.capability_id = selectedRunCapability.value.capability_id
+    for (const [key, value] of Object.entries(selectedRunCapability.value.sample_arguments ?? {})) {
+      if (inputs[key] == null || inputs[key] === '') {
+        inputs[key] = value
+      }
+    }
+  }
+  runInputsText.value = JSON.stringify(inputs, null, 2)
+  runInputError.value = ''
+}
+
+function handleSelectRunDevice(id: number | null) {
+  selectedRunDeviceId.value = id
+  const device = runtimeDeviceManifest.value.find((item) => item.id === id) ?? null
+  const capabilities = (device?.capabilities ?? []) as DeviceRuntimeManifestCapabilitySummary[]
+  if (capabilities.length === 0) {
+    selectedRunCapabilityId.value = ''
+    return
+  }
+  if (!capabilities.some((capability) => capability.capability_id === selectedRunCapabilityId.value)) {
+    selectedRunCapabilityId.value = capabilities[0].capability_id
+  }
+}
+
+function handleSelectRunCapability(capabilityId: string) {
+  selectedRunCapabilityId.value = capabilityId
+}
+
 onConnect((params: Connection) => {
   const sourceIdx = Number(params.source.replace('node_', ''))
   const targetIdx = Number(params.target.replace('node_', ''))
@@ -885,6 +1017,9 @@ async function selectWorkflow(id: number) {
   selectedNodeIndex.value = null
   await loadWorkflow(id)
   syncEditorState()
+  syncRunInputsFromWorkflowDefaults()
+  await loadWorkflowRunHistory()
+  await loadWorkflowRunPresets()
   const nextRoute = replaceWorkflowRouteId(route.path, id)
   if (route.path !== nextRoute) {
     await router.push(nextRoute)
@@ -895,6 +1030,19 @@ async function handleSave() {
   await saveWorkflow()
 }
 
+async function handleTogglePublish() {
+  if (!currentWorkflow.value) return
+  const nextPublished = !Boolean(currentWorkflow.value.published)
+  if (isDirty.value) {
+    await saveWorkflow()
+  }
+  try {
+    await setWorkflowPublished(nextPublished)
+  } catch (error) {
+    window.alert((error as Error).message)
+  }
+}
+
 async function handleRun() {
   const inputs = parseRunInputs()
   if (!inputs) return
@@ -903,6 +1051,7 @@ async function handleRun() {
   if (result?.data) {
     latestRun.value = result.data
     activeRunId.value = result.data.run_id
+    await loadWorkflowRunHistory()
   }
 }
 
@@ -926,6 +1075,47 @@ function parseRunInputs(): Record<string, unknown> | null {
   }
 }
 
+function handleReuseRunInputs(run: WorkflowRun) {
+  const inputs = tryParseJsonObject(run.inputs_json || '{}')
+  if (!inputs) {
+    runInputError.value = t('studio.inputsJsonError')
+    return
+  }
+  runInputsText.value = JSON.stringify(inputs, null, 2)
+  runInputError.value = ''
+  syncRunSelectionFromInputs()
+}
+
+function handleApplyRunPreset(preset: WorkflowRunPreset) {
+  runInputsText.value = JSON.stringify(preset.inputs, null, 2)
+  runInputError.value = ''
+  syncRunSelectionFromInputs()
+}
+
+async function handleSaveRunMemory(run: WorkflowRun) {
+  if (!currentWorkflow.value) return
+  if (workflowRunMemoryStatus.value[run.id] === 'saving' || workflowRunMemoryStatus.value[run.id] === 'saved') return
+
+  const payload = buildWorkflowRunExperiencePayload(currentWorkflow.value, run)
+  if (!payload) {
+    workflowRunMemoryStatus.value = { ...workflowRunMemoryStatus.value, [run.id]: 'error' }
+    workflowRunMemoryErrors.value = { ...workflowRunMemoryErrors.value, [run.id]: t('studio.inputsJsonError') }
+    return
+  }
+
+  workflowRunMemoryStatus.value = { ...workflowRunMemoryStatus.value, [run.id]: 'saving' }
+  workflowRunMemoryErrors.value = { ...workflowRunMemoryErrors.value, [run.id]: '' }
+  try {
+    const result = await memoryAssetsApi.recordExperiencePath(payload)
+    if (result.status !== 'success') throw new Error(result.message || 'Save failed')
+    workflowRunMemoryStatus.value = { ...workflowRunMemoryStatus.value, [run.id]: 'saved' }
+    await loadWorkflowRunPresets()
+  } catch (err) {
+    workflowRunMemoryStatus.value = { ...workflowRunMemoryStatus.value, [run.id]: 'error' }
+    workflowRunMemoryErrors.value = { ...workflowRunMemoryErrors.value, [run.id]: (err as Error).message }
+  }
+}
+
 async function handleDelete() {
   if (!currentWorkflow.value) return
   if (!window.confirm(t('studio.deleteConfirm'))) return
@@ -933,6 +1123,8 @@ async function handleDelete() {
   latestRun.value = null
   latestPreview.value = null
   activeRunId.value = null
+  workflowRunHistory.value = []
+  workflowRunPresets.value = []
   if (workflowShowcase.value.length > 0) {
     await selectWorkflow(workflowShowcase.value[0].id)
     return
@@ -1254,6 +1446,7 @@ const selectedCLIParamEntries = computed(() =>
 const selectedAgentTargets = computed(() => {
   return runtimeAgentAdapters.value
     .filter((adapter) => adapter.enabled)
+    .filter((adapter) => adapter.category !== 'coding')
     .map((adapter) => adapter.id)
 })
 
@@ -1297,12 +1490,21 @@ const workflowHeaderChips = computed(() => {
 
 const mainlineHeading = computed(() => buildWorkflowSectionHeading('mainline', workflowShowcase.value.length, label))
 const workbenchHeading = computed(() => buildWorkflowSectionHeading('workbench', workbenchWorkflows.value.length, label))
+const currentGraphWorkflowRunHistory = computed(() =>
+  filterWorkflowRunsForGraph(workflowRunHistory.value, currentWorkflow.value?.graph_hash, currentWorkflow.value?.graph_updated_at),
+)
 const workflowEditorSummaryItems = computed(() => buildWorkflowEditorSummaryItems({
   nodeCount: workflowNodes.value.length,
   edgeCount: workflowEdges.value.length,
   previewExecutable: latestPreview.value?.executable,
-  latestRunStatus: latestRun.value?.status,
+  latestRunStatus: latestRun.value?.status ?? currentGraphWorkflowRunHistory.value[0]?.status,
+  successCount: currentGraphWorkflowRunHistory.value.filter((run) => run.status === 'succeeded').length,
+  failureCount: currentGraphWorkflowRunHistory.value.filter((run) => run.status === 'failed').length,
 }, label))
+
+const workflowPublishEvidence = computed(() =>
+  buildWorkflowPublishEvidence(workflowRunHistory.value, label, currentWorkflow.value?.graph_hash, currentWorkflow.value?.graph_updated_at),
+)
 
 const availableSubflowWorkflows = computed(() =>
   workflows.value.filter((workflow) => workflow.id !== currentWorkflow.value?.id),
@@ -1310,12 +1512,16 @@ const availableSubflowWorkflows = computed(() =>
 
 function workflowDescription(workflow: Workflow | WorkflowShowcaseCard): string {
   const descriptionMap: Record<string, string> = {
+    'Device Capability Rehearsal Demo': t('studio.deviceCapabilityDemo.description' as any),
     'Watch Bilibili On Toshiba TV Demo': workflow.name === 'Watch Bilibili On Toshiba TV Demo'
       ? t('studio.hero.description' as any)
       : '',
     'Bilibili CLI Demo': t('studio.biliCli.description' as any),
+    'DLNA Cast Demo': label('通过 dlna-cast-cli 验证 DLNA 设备发现、媒体解析和投屏链路。', 'Validate DLNA discovery, media resolution, and casting through dlna-cast-cli.'),
+    'Speaker Cast Demo': label('通过 speaker-cast-cli 验证音箱列表、音乐推送和播放控制链路。', 'Validate speaker listing, music push, and playback control through speaker-cast-cli.'),
+    'Bilibili Media Dispatch Demo': t('studio.mediaDispatch.description' as any),
     'Bilibili Subflow Demo': t('studio.subflow.description' as any),
-    'A2A Agent Dispatch Demo': t('studio.a2a.description' as any),
+    'Candidate Plan Routing Demo': t('studio.candidateRouting.description' as any),
   }
   return descriptionMap[workflow.name] || workflow.description || t('studio.selectOrCreate')
 }
@@ -1405,9 +1611,10 @@ onMounted(async () => {
   } catch {
     availablePlans.value = []
   }
-})
 
-import { onUnmounted } from 'vue'
+  await loadRuntimeDeviceManifest()
+  syncRunSelectionFromInputs()
+})
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
 })
@@ -1442,11 +1649,21 @@ onUnmounted(() => {
       :node-types-map="nodeTypesMap"
       :latest-run="latestRun"
       :latest-preview="latestPreview"
+      :workflow-run-history="workflowRunHistory"
+      :workflow-run-presets="workflowRunPresets"
+      :workflow-run-memory-status="workflowRunMemoryStatus"
+      :workflow-run-memory-errors="workflowRunMemoryErrors"
       :active-run-id="activeRunId"
       v-model:run-inputs-text="runInputsText"
       :run-input-error="runInputError"
+      :runtime-device-manifest="runtimeDeviceManifest"
+      :runtime-device-manifest-loading="runtimeDeviceManifestLoading"
+      :selected-run-device-id="selectedRunDeviceId"
+      :selected-run-capability-id="selectedRunCapabilityId"
+      :selected-run-capabilities="selectedRunCapabilities"
       :workflow-header-chips="workflowHeaderChips"
       :workflow-editor-summary-items="workflowEditorSummaryItems"
+      :workflow-publish-evidence="workflowPublishEvidence"
       :is-dirty="isDirty"
       :t="t"
       :label="label"
@@ -1460,9 +1677,17 @@ onUnmounted(() => {
       @node-drag-stop="onNodeDragStop"
       @show-obs="showObs = true"
       @save="handleSave"
+      @toggle-publish="handleTogglePublish"
       @preview="handlePreview"
       @run="handleRun"
       @delete="handleDelete"
+      @select-run-device="handleSelectRunDevice"
+      @select-run-capability="handleSelectRunCapability"
+      @apply-run-device-inputs="applyRunSelectionToInputs"
+      @refresh-runtime-device-manifest="loadRuntimeDeviceManifest"
+      @reuse-run-inputs="handleReuseRunInputs"
+      @apply-run-preset="handleApplyRunPreset"
+      @save-run-memory="handleSaveRunMemory"
       @select-trace-node="handleSelectTraceNode"
       @update-active-steps="activeStepNodeIds = $event"
     />
@@ -1492,6 +1717,8 @@ onUnmounted(() => {
       :selected-cli-param-entries="selectedCLIParamEntries"
       :selected-agent-targets="selectedAgentTargets"
       :selected-agent-adapter="selectedAgentAdapter"
+      :runtime-device-manifest="runtimeDeviceManifest"
+      :runtime-device-manifest-loading="runtimeDeviceManifestLoading"
       :available-subflow-workflows="availableSubflowWorkflows"
       :workflows="workflows"
       v-model:executor-params-text="executorParamsText"
@@ -1509,6 +1736,7 @@ onUnmounted(() => {
       @apply-cli-action="applyCLIActionChoice"
       @apply-agent-adapter="applyAgentAdapterChoice"
       @apply-agent-sample="applyAgentSampleDispatch"
+      @refresh-runtime-device-manifest="loadRuntimeDeviceManifest"
       @update-cli-param="updateCLIActionParam"
       @update-cli-json-param="updateCLIActionJsonParam"
       @update-node-object-config="updateNodeObjectConfig"

@@ -3,15 +3,16 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import StudioDetailLayout from '@/components/studio/StudioDetailLayout.vue'
 import WorkflowGraphPreview from '@/components/studio/WorkflowGraphPreview.vue'
-import type { WorkflowGraphSnapshot } from '@/features/studio/assets'
+import type { WorkflowGraphSnapshot } from '@/features/studio/workflowGraph'
 import { buildWorkflowDetailTabs } from '@/features/studio/detailNavigation'
 import { useLocale } from '@/composables/useLocale'
-import { workflowApi, type Workflow } from '@/api/workflow'
+import { workflowApi, type Workflow, type WorkflowRunQuality } from '@/api/workflow'
 
 const route = useRoute()
 const { locale } = useLocale()
 
 const workflow = ref<Workflow | null>(null)
+const runQuality = ref<WorkflowRunQuality | null>(null)
 const graph = ref<WorkflowGraphSnapshot>({ nodes: [], edges: [] })
 const loading = ref(false)
 
@@ -31,6 +32,7 @@ async function loadWorkflow(id: number) {
   try {
     const result = await workflowApi.get(id)
     workflow.value = result.workflow
+    runQuality.value = result.run_quality
     graph.value = {
       nodes: (result.nodes ?? []).map((node: any) => ({
         id: node.id,
@@ -55,6 +57,38 @@ function label(zh: string, en: string) {
 }
 
 const tabs = computed(() => buildWorkflowDetailTabs(workflowId.value, label))
+
+function evidenceLabel(status?: WorkflowRunQuality['evidence_status']) {
+  if (status === 'proven') return label('最近成功', 'Last run succeeded')
+  if (status === 'regressed') return label('曾成功，最近失败', 'Previously succeeded, last run failed')
+  if (status === 'failing') return label('最近失败', 'Last run failed')
+  if (status === 'running') return label('运行中', 'Running')
+  return label('还没有运行证据', 'No run evidence yet')
+}
+
+function evidenceHint(status?: WorkflowRunQuality['evidence_status']) {
+  if (status === 'proven') return label('这个流程已有成功运行记录，适合发布给 Chat 候选。', 'This workflow has a successful run and is suitable for Chat candidates.')
+  if (status === 'regressed') return label('这个流程曾经成功，但最近失败；发布前建议重新跑通。', 'This workflow has succeeded before, but the latest run failed; rerun it before publishing.')
+  if (status === 'failing') return label('这个流程还没有成功记录；建议先修复再发布。', 'This workflow has no successful run yet; fix it before publishing.')
+  if (status === 'running') return label('当前有运行中的记录，等待结果后再判断。', 'A run is in progress; wait for the result before judging readiness.')
+  return label('先在 Studio 预演并运行一次，成功后再让 Chat 复用它。', 'Preview and run it in Studio once before letting Chat reuse it.')
+}
+
+function lastSuccessInputKeys() {
+  return runQuality.value?.last_success_input_keys?.length
+    ? runQuality.value.last_success_input_keys.join(', ')
+    : '-'
+}
+
+function lastSuccessInputsText() {
+  const raw = runQuality.value?.last_success_inputs_json
+  if (!raw) return ''
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2)
+  } catch {
+    return raw
+  }
+}
 </script>
 
 <template>
@@ -96,6 +130,41 @@ const tabs = computed(() => buildWorkflowDetailTabs(workflowId.value, label))
           <span>{{ graph.edges.length }}</span>
         </div>
       </section>
+      <section class="panel quality">
+        <h3>{{ label('发布证据', 'Publish Evidence') }}</h3>
+        <div class="quality-status">
+          <span :class="['quality-badge', runQuality?.evidence_status || 'untested']">
+            {{ evidenceLabel(runQuality?.evidence_status) }}
+          </span>
+          <p>{{ evidenceHint(runQuality?.evidence_status) }}</p>
+        </div>
+        <div class="quality-grid">
+          <div>
+            <label>{{ label('成功', 'Success') }}</label>
+            <strong>{{ runQuality?.success_count ?? 0 }}</strong>
+          </div>
+          <div>
+            <label>{{ label('失败', 'Failure') }}</label>
+            <strong>{{ runQuality?.failure_count ?? 0 }}</strong>
+          </div>
+          <div>
+            <label>{{ label('最近运行', 'Last Run') }}</label>
+            <strong>{{ runQuality?.last_run_status || '-' }}</strong>
+          </div>
+          <div>
+            <label>{{ label('最近成功', 'Last Success') }}</label>
+            <strong>{{ runQuality?.last_success_at || '-' }}</strong>
+          </div>
+          <div>
+            <label>{{ label('成功输入键', 'Success Input Keys') }}</label>
+            <strong>{{ lastSuccessInputKeys() }}</strong>
+          </div>
+        </div>
+        <div v-if="lastSuccessInputsText()" class="quality-inputs">
+          <label>{{ label('最近成功输入', 'Last Successful Inputs') }}</label>
+          <pre>{{ lastSuccessInputsText() }}</pre>
+        </div>
+      </section>
     </div>
   </StudioDetailLayout>
 </template>
@@ -106,6 +175,10 @@ const tabs = computed(() => buildWorkflowDetailTabs(workflowId.value, label))
   grid-template-columns: minmax(0, 1fr) 380px;
   gap: 32px;
   min-height: 100%;
+}
+
+.workflow-layout .quality {
+  grid-column: 1 / -1;
 }
 
 .panel {
@@ -181,5 +254,105 @@ const tabs = computed(() => buildWorkflowDetailTabs(workflowId.value, label))
 .status-badge.published {
   background: rgba(16, 185, 129, 0.1);
   color: #10b981;
+}
+
+.quality-status {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  margin-bottom: 28px;
+}
+
+.quality-status p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.quality-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.1);
+  color: #475569;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.quality-badge.proven {
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+}
+
+.quality-badge.regressed,
+.quality-badge.failing {
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+}
+
+.quality-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.quality-grid div {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid rgba(229, 231, 235, 0.72);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.quality-grid label {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.quality-grid strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.quality-inputs {
+  margin-top: 20px;
+}
+
+.quality-inputs label {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.quality-inputs pre {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 18px;
+  border-radius: 18px;
+  background: #111827;
+  color: #e5e7eb;
+  font-size: 13px;
+  line-height: 1.6;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 </style>

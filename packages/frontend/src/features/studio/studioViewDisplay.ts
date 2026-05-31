@@ -3,21 +3,26 @@ type Labeler = (zh: string, en: string) => string
 const SHOWCASE_BADGES: Record<string, [string, string]> = {
   Hero: ['主线', 'Hero'],
   Studio: ['工作台', 'Studio'],
+  Capability: ['设备能力', 'Capability'],
   Subflow: ['子流程', 'Subflow'],
-  A2A: ['A2A', 'A2A'],
+  Adapter: ['本地能力', 'Adapter'],
+  Memory: ['记忆', 'Memory'],
 }
 
 const SHOWCASE_EYEBROWS: Record<string, [string, string]> = {
   'Family Entertainment': ['家庭娱乐', 'Family Entertainment'],
   'Content Pipeline': ['内容流水线', 'Content Pipeline'],
   'Reusable Runtime': ['可复用运行时', 'Reusable Runtime'],
-  'Agent Hub': ['Agent 中枢', 'Agent Hub'],
+  'Local Capability': ['本地能力', 'Local Capability'],
+  'Sandbox Rehearsal': ['沙箱演练', 'Sandbox Rehearsal'],
+  'Candidate Routing': ['候选路由', 'Candidate Routing'],
 }
 
 const VARIABLE_SOURCES: Record<string, [string, string]> = {
   'workflow input': ['工作流输入', 'Workflow Input'],
   start: ['开始节点', 'Start Node'],
   device_control: ['设备控制', 'Device Control'],
+  device_capability: ['设备能力', 'Device Capability'],
   xiaoai: ['小爱音箱', 'XiaoAi'],
   ir_control: ['红外控制', 'IR Control'],
   llm: ['LLM', 'LLM'],
@@ -26,12 +31,13 @@ const VARIABLE_SOURCES: Record<string, [string, string]> = {
   parallel: ['并行', 'Parallel'],
   subflow: ['子流程', 'Subflow'],
   code: ['代码节点', 'Code'],
-  executor_call: ['执行器调用', 'Executor Call'],
+  executor_call: ['高级调用', 'Advanced Call'],
   answer: ['回答节点', 'Answer'],
 }
 
 const CAPABILITIES: Record<string, [string, string]> = {
-  agent: ['智能体', 'Agent'],
+  agent: ['能力适配', 'Capability'],
+  adapter: ['适配器', 'Adapter'],
   delegation: ['委派', 'Delegation'],
   dry_run: ['演练', 'Dry Run'],
   packages: ['包列表', 'Packages'],
@@ -49,7 +55,7 @@ const EXECUTION_MODES: Record<string, [string, string]> = {
 
 const BINDING_KINDS: Record<string, [string, string]> = {
   cli: ['CLI', 'CLI'],
-  a2a: ['A2A', 'A2A'],
+  a2a: ['远程桥接', 'Remote Bridge'],
   none: ['未绑定', 'None'],
 }
 

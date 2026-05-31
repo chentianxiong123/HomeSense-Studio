@@ -18,10 +18,22 @@ describe('test-support · createInMemoryDb', () => {
     expect(names).toContain('memory_entities')
     expect(names).toContain('memory_triples')
     expect(names).toContain('memory_attributes')
+    expect(names).toContain('memory_items')
+    expect(names).toContain('memory_experience_paths')
+    expect(names).toContain('memory_items_fts')
     expect(names).toContain('experiences')
     expect(names).toContain('skills')
     expect(names).toContain('compiled_knowledge_items')
+    expect(names).toContain('graph_nodes')
+    expect(names).toContain('graph_edges')
     expect(names).toContain('conversations')
+
+    const pathColumns = db
+      .prepare("PRAGMA table_info('memory_experience_paths')")
+      .all() as Array<{ name: string }>
+    const pathColumnNames = pathColumns.map((column) => column.name)
+    expect(pathColumnNames).toContain('skill_refs_json')
+    expect(pathColumnNames).toContain('device_refs_json')
   })
 
   it('starts each database empty (test isolation)', () => {

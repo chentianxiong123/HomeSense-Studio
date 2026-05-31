@@ -2,11 +2,15 @@
 import { ref, computed, onMounted } from 'vue'
 import { api, type LLMProviderConfig, type LLMModel, type LLMUsageTotals } from '@/api'
 
-const activeTab = ref<'chat' | 'embedding' | 'rerank' | 'usage'>('chat')
+type ProviderCategory = 'chat' | 'embedding' | 'rerank' | 'vision'
+type ActiveTab = ProviderCategory | 'usage'
+
+const activeTab = ref<ActiveTab>('chat')
 const tabs = [
   { key: 'chat' as const, label: '对话模型' },
   { key: 'embedding' as const, label: '嵌入模型' },
   { key: 'rerank' as const, label: '重排序模型' },
+  { key: 'vision' as const, label: '识图模型' },
   { key: 'usage' as const, label: '使用统计' },
 ]
 
@@ -29,12 +33,12 @@ async function loadProviders() {
   loading.value = true
   errorMessage.value = ''
   try {
-    const res = await api.llm.listProviders()
+    const filterCategory = activeTab.value === 'usage' ? undefined : activeTab.value
+    const res = await api.llm.listProviders(filterCategory)
     providers.value = res.providers
     // Load models for each provider
     modelsMap.value = {}
     for (const p of res.providers) {
-      const filterCategory = activeTab.value === 'usage' ? undefined : activeTab.value
       const mres = await api.llm.listModels(p.id, filterCategory)
       modelsMap.value[p.id] = mres.models
     }
@@ -86,10 +90,12 @@ async function saveProvider() {
       })
       showSuccess('更新成功')
     } else {
+      const cat = activeTab.value === 'usage' ? 'chat' : activeTab.value
       await api.llm.createProvider({
         name: providerForm.value.name,
         api_base: providerForm.value.api_base,
         api_key: providerForm.value.api_key,
+        category: cat,
         enabled: true,
         extra_config: {},
       })
@@ -268,7 +274,7 @@ function formatTokens(n: number): string {
   return String(n)
 }
 
-function switchTab(key: 'chat' | 'embedding' | 'rerank' | 'usage') {
+function switchTab(key: ActiveTab) {
   activeTab.value = key
   if (key === 'usage') {
     loadUsage()
@@ -281,6 +287,7 @@ const categoryLabel: Record<string, string> = {
   chat: '对话',
   embedding: '嵌入',
   rerank: '重排序',
+  vision: '识图',
 }
 
 onMounted(loadProviders)

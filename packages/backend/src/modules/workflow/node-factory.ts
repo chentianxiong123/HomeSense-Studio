@@ -4,6 +4,7 @@ import {
   CodeWorkflowNode,
   CandidatePlanResolveWorkflowNode,
   DelayWorkflowNode,
+  DeviceCapabilityWorkflowNode,
   DeviceControlWorkflowNode,
   ExecutorCallWorkflowNode,
   AgentDispatchWorkflowNode,
@@ -22,6 +23,7 @@ import { workflowNodeDefinitionRegistry } from './node-definitions.js'
 import { cliBridge } from '../cli-bridge/index.js'
 import { candidatePlanService } from '../candidate-plan/index.js'
 import { executorGateway } from '../executor-gateway/index.js'
+import { executeDeviceAgentTool } from '../device/device-agent-tools.js'
 import { llmService } from '../llm-provider/service.js'
 import { memoryKernel } from '../memory-kernel/index.js'
 import { rerankService } from '../rerank-service/index.js'
@@ -32,7 +34,7 @@ type WorkflowNodeConstructor = new (node: WorkflowNode, deps: WorkflowNodeDepend
 class WorkflowNodeFactory {
   private readonly registry = new Map<string, WorkflowNodeConstructor>()
 
-  constructor(private readonly deps: WorkflowNodeDependencies = defaultDependencies()) {}
+  constructor(private deps: WorkflowNodeDependencies = defaultDependencies()) {}
 
   register(type: string, ctor: WorkflowNodeConstructor): void {
     this.registry.set(type, ctor)
@@ -50,22 +52,38 @@ class WorkflowNodeFactory {
   getDeps(): WorkflowNodeDependencies {
     return this.deps
   }
+
+  setDeps(deps: WorkflowNodeDependencies): void {
+    this.deps = deps
+  }
 }
 
 function defaultDependencies(): WorkflowNodeDependencies {
   return {
     cliBridge,
     get executorGateway() { return executorGateway },
+    deviceAgentTools: { execute: executeDeviceAgentTool },
     llmService,
     memoryKernel,
     candidatePlanService,
     rerankService,
+    workflowRuntime: {
+      runWorkflow: async (workflowId, inputs, options) => {
+        const { workflowRuntime } = await import('./run-workflow.js')
+        return workflowRuntime.runWorkflow(workflowId, inputs, options)
+      },
+      runWorkflowByName: async (workflowName, inputs, options) => {
+        const { workflowRuntime } = await import('./run-workflow.js')
+        return workflowRuntime.runWorkflowByName(workflowName, inputs, options)
+      },
+    },
   }
 }
 
 export const workflowNodeFactory = new WorkflowNodeFactory()
 
 workflowNodeFactory.register('start', StartWorkflowNode)
+workflowNodeFactory.register('device_capability', DeviceCapabilityWorkflowNode)
 workflowNodeFactory.register('device_control', DeviceControlWorkflowNode)
 workflowNodeFactory.register('xiaoai', XiaoAiWorkflowNode)
 workflowNodeFactory.register('ir_control', IRControlWorkflowNode)

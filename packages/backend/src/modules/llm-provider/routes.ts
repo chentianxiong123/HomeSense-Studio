@@ -1,11 +1,12 @@
 import type { FastifyInstance } from 'fastify'
-import { llmService } from './service.js'
+import { llmService, type LLMProviderCategory, type LLMVisionImageInput } from './service.js'
 
 export async function llmProviderRoutes(app: FastifyInstance) {
   // ── Provider CRUD ──
 
-  app.get('/api/llm/providers', async () => {
-    return { providers: llmService.listProviders() }
+  app.get('/api/llm/providers', async (request) => {
+    const q = request.query as { category?: string }
+    return { providers: llmService.listProviders(q.category || undefined) }
   })
 
   app.post('/api/llm/providers', async (request) => {
@@ -14,6 +15,7 @@ export async function llmProviderRoutes(app: FastifyInstance) {
       name: String(body.name ?? ''),
       api_base: String(body.api_base ?? ''),
       api_key: String(body.api_key ?? ''),
+      category: (body.category as LLMProviderCategory) ?? 'chat',
       enabled: body.enabled !== false,
       extra_config: (body.extra_config as Record<string, unknown>) ?? {},
     })
@@ -133,6 +135,30 @@ export async function llmProviderRoutes(app: FastifyInstance) {
     }
   })
 
+  app.post('/api/llm/vision', async (request) => {
+    const body = request.body as {
+      model_id?: number
+      prompt?: string
+      images?: LLMVisionImageInput[]
+      system?: string
+      temperature?: number
+      max_tokens?: number
+    }
+    try {
+      const result = await llmService.vision({
+        model_id: body.model_id,
+        prompt: String(body.prompt ?? ''),
+        images: Array.isArray(body.images) ? body.images : [],
+        system: body.system,
+        temperature: body.temperature,
+        max_tokens: body.max_tokens,
+      })
+      return { status: 'success', data: result }
+    } catch (err) {
+      return { status: 'error', error: 'VISION_ERROR', message: (err as Error).message }
+    }
+  })
+
   // ── Usage ──
 
   app.get('/api/llm/usage/totals', async () => {
@@ -152,7 +178,7 @@ export async function llmProviderRoutes(app: FastifyInstance) {
   })
 
   app.get('/api/llm/chat-models', async () => {
-    const providers = llmService.listProviders()
+    const providers = llmService.listProviders('chat')
     const result: Array<{ id: number; provider_name: string; model_name: string; is_default: boolean }> = []
     for (const p of providers) {
       const models = llmService.listModels(p.id, 'chat')

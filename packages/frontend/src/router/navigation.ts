@@ -8,11 +8,12 @@ const ROUTE_PATTERNS = [
   /^\/devices$/,
   /^\/integrations$/,
   /^\/mi$/,
-  /^\/settings$/,
   /^\/studio\/workflows\/[^/]+\/(overview|editor|runs)$/,
+  /^\/assets\/device-skills\/[^/]+\/overview$/,
   /^\/assets\/skills\/[^/]+\/(overview|prompt)$/,
   /^\/assets\/manifests\/[^/]+\/overview$/,
   /^\/assets\/plans\/[^/]+\/overview$/,
+  /^\/assets\/memory\/[^/]+\/overview$/,
   /^\/assets\/agents\/[^/]+\/overview$/,
 ]
 

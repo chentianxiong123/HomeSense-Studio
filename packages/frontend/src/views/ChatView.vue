@@ -1,10 +1,19 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
-import DeviceSidebar from '../components/DeviceSidebar.vue'
-import { useChat } from '../composables/useChat'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
+import ContextPanel from '../components/ContextPanel.vue'
+import RulePanel from '../components/RulePanel.vue'
+import ChatMessageBubble from '../components/chat/ChatMessageBubble.vue'
+import { useChat, type DisplayMessage } from '../composables/useChat'
 import { useLocale } from '../composables/useLocale'
 import { api } from '../api'
-import type { DeviceInfo } from '../api'
+import { memoryAssetsApi } from '../api/memoryAssets'
+import { workflowApi } from '../api/workflow'
+import { buildExperiencePathPayload } from '../features/chat/experiencePathTools'
+import { buildWorkflowDraftFromExperiencePath } from '../features/chat/workflowPromotionTools'
+import { normalizePersistedMessages } from '../features/chat/persistedMessages'
+import { buildWorkflowRoute } from '../features/studio/workflowEditorRoute'
+import { formatChinaTime } from '../utils/chinaTime'
 
 const {
   messages,
@@ -16,12 +25,83 @@ const {
 
 const inputText = ref('')
 const textarea = ref<HTMLTextAreaElement | null>(null)
-const selectedDevice = ref<DeviceInfo | null>(null)
 const { locale } = useLocale()
+const router = useRouter()
+const rulePanelRef = ref<InstanceType<typeof RulePanel> | null>(null)
+const contextPanelRef = ref<{ refresh?: () => Promise<void> | void } | null>(null)
+const showRuntimeTrace = ref(true)
+function openRuleModal() { rulePanelRef.value?.openModal() }
+
+const latestContextTrace = computed(() => {
+  for (let messageIndex = messages.value.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const trace = messages.value[messageIndex]?.runtimeTrace ?? []
+    for (let traceIndex = trace.length - 1; traceIndex >= 0; traceIndex -= 1) {
+      const item = trace[traceIndex]
+      if (item.stage === 'runtime.context' && isRecord(item.data?.context_usage)) return item
+    }
+  }
+  return undefined
+})
+
+const toolbarContextUsage = computed(() => {
+  const usage = latestContextTrace.value?.data?.context_usage
+  if (!isRecord(usage)) return null
+  const used = Number(usage.used_tokens)
+  const max = Number(usage.max_tokens)
+  if (!Number.isFinite(used) || !Number.isFinite(max) || max <= 0) return null
+  return { used: Math.max(0, Math.round(used)), max: Math.round(max) }
+})
+
+const toolbarContextUsageLabel = computed(() => {
+  const usage = toolbarContextUsage.value
+  return usage ? `Context ${usage.used}/${usage.max}` : ''
+})
+
+const toolbarContextUsagePercent = computed(() => {
+  const usage = toolbarContextUsage.value
+  if (!usage) return 0
+  return Math.min(100, Math.round((usage.used / usage.max) * 100))
+})
+
+const toolbarContextTitle = computed(() => {
+  const data = latestContextTrace.value?.data
+  if (!data) return ''
+  const turns = Number(data.max_turns)
+  const ttlMs = Number(data.ttl_ms)
+  const hits = Number(data.retrieval_limit)
+  const parts = [
+    Number.isFinite(turns) ? `${turns} turns` : '',
+    Number.isFinite(ttlMs) ? `${Math.round(ttlMs / 60000)}m TTL` : '',
+    Number.isFinite(hits) ? `${hits} retrieval hits` : '',
+  ].filter(Boolean)
+  return parts.join(' / ')
+})
+
+// ── Models for right sidebar ──
+interface ChatModel { id: number; provider_name: string; model_name: string; is_default: boolean }
+const models = ref<ChatModel[]>([])
+async function loadModels() {
+  try {
+    const r = await api.llm.chatModels()
+    models.value = r.models
+  } catch {}
+}
+async function selectModel(id: number) {
+  try {
+    await api.llm.selectModel(id)
+    models.value.forEach(m => m.is_default = m.id === id)
+  } catch {}
+}
+onMounted(loadModels)
 
 // ── Sidebar resize ──
-const leftWidth = ref(320)
-const rightWidth = ref(320)
+const COLLAPSE_THRESHOLD = 70
+const COLLAPSED_WIDTH = 52
+
+const leftWidth = ref(260)
+const rightWidth = ref(260)
+const leftCollapsed = ref(false)
+const rightCollapsed = ref(false)
 const resizing = ref<'left' | 'right' | null>(null)
 
 function onResizeStart(side: 'left' | 'right', e: MouseEvent) {
@@ -36,9 +116,14 @@ function onResizeStart(side: 'left' | 'right', e: MouseEvent) {
 function onResizeMove(e: MouseEvent) {
   if (!resizing.value) return
   if (resizing.value === 'left') {
-    leftWidth.value = Math.max(200, Math.min(600, e.clientX))
+    leftWidth.value = Math.max(COLLAPSED_WIDTH, Math.min(400, e.clientX))
+    leftCollapsed.value = leftWidth.value < COLLAPSE_THRESHOLD
+    if (leftCollapsed.value) leftWidth.value = COLLAPSED_WIDTH
   } else {
-    rightWidth.value = Math.max(200, Math.min(600, window.innerWidth - e.clientX))
+    const w = window.innerWidth - e.clientX
+    rightWidth.value = Math.max(COLLAPSED_WIDTH, Math.min(400, w))
+    rightCollapsed.value = rightWidth.value < COLLAPSE_THRESHOLD
+    if (rightCollapsed.value) rightWidth.value = COLLAPSED_WIDTH
   }
 }
 
@@ -50,40 +135,13 @@ function onResizeEnd() {
   document.body.style.userSelect = ''
 }
 
+function toggleLeft() { leftCollapsed.value = !leftCollapsed.value; leftWidth.value = leftCollapsed.value ? COLLAPSED_WIDTH : 260 }
+function toggleRight() { rightCollapsed.value = !rightCollapsed.value; rightWidth.value = rightCollapsed.value ? COLLAPSED_WIDTH : 260 }
+
 onUnmounted(() => {
   document.removeEventListener('mousemove', onResizeMove)
   document.removeEventListener('mouseup', onResizeEnd)
 })
-
-// ── LLM models ──
-interface ChatModel {
-  id: number
-  provider_name: string
-  model_name: string
-  is_default: boolean
-}
-const models = ref<ChatModel[]>([])
-const currentModel = ref<string>('')
-
-async function loadModels() {
-  try {
-    const result = await api.llm.chatModels()
-    models.value = result.models
-    const def = models.value.find(m => m.is_default)
-    if (def) currentModel.value = `${def.provider_name} / ${def.model_name}`
-  } catch {}
-}
-
-async function onSelectModel(id: number) {
-  try {
-    await api.llm.selectModel(id)
-    models.value.forEach(m => m.is_default = m.id === id)
-    const sel = models.value.find(m => m.id === id)
-    if (sel) currentModel.value = `${sel.provider_name} / ${sel.model_name}`
-  } catch {}
-}
-
-onMounted(loadModels)
 
 // ── Conversation + lazy load ──
 const conversationId = ref<number | undefined>()
@@ -93,34 +151,9 @@ const PAGE_SIZE = 30
 
 onMounted(async () => {
   try {
-    const resp = await fetch('/api/chat/messages?limit=' + PAGE_SIZE)
-    const data = await resp.json()
+    const data = await api.chat.messages(undefined, PAGE_SIZE)
     if (data && 'messages' in data) {
-      messages.value = data.messages.map((m: any) => {
-        let toolCalls = []
-        if (m.tool_calls_json) {
-          try {
-            const parsed = JSON.parse(m.tool_calls_json)
-            toolCalls = parsed.map((tc: any) => ({
-              call_id: tc.id,
-              name: tc.function?.name || tc.name,
-              args: JSON.parse(tc.function?.arguments || '{}'),
-              status: 'success' as const,
-              expanded: false,
-            }))
-          } catch {}
-        }
-        return {
-          id: `msg_${m.id}`,
-          role: m.role as 'user' | 'assistant' | 'system',
-          content: m.content,
-          thinking: '',
-          thinkingExpanded: false,
-          status: 'final' as const,
-          timestamp: new Date(m.created_at),
-          toolCalls,
-        }
-      })
+      messages.value = normalizePersistedMessages(data.messages)
       hasMore.value = data.hasMore ?? false
     }
     nextTick(scrollToBottom)
@@ -143,19 +176,9 @@ async function onScrollTop() {
   const oldestId = messages.value.length > 0 ? Number(messages.value[0].id.replace('msg_', '')) : undefined
 
   try {
-    const url = '/api/chat/messages?cursor=' + oldestId + '&limit=' + PAGE_SIZE
-    const resp = await fetch(url)
-    const data = await resp.json()
+    const data = await api.chat.messages(oldestId, PAGE_SIZE)
     if (data && 'messages' in data && data.messages.length > 0) {
-      const older = data.messages.map((m: any) => ({
-        id: `msg_${m.id}`,
-        role: m.role as 'user' | 'assistant' | 'system',
-        content: m.content,
-        thinking: '',
-        thinkingExpanded: false,
-        status: 'final' as const,
-        timestamp: new Date(m.created_at),
-      }))
+      const older = normalizePersistedMessages(data.messages)
       messages.value = [...older, ...messages.value]
       hasMore.value = data.hasMore ?? false
       nextTick(() => { el.scrollTop = el.scrollHeight - prevHeight })
@@ -183,7 +206,9 @@ function onSend() {
   const text = inputText.value
   inputText.value = ''
   if (textarea.value) textarea.value.style.height = 'auto'
-  sendMessage(text)
+  void sendMessage(text).finally(() => {
+    void contextPanelRef.value?.refresh?.()
+  })
 }
 
 function onKeydown(event: KeyboardEvent) {
@@ -194,11 +219,10 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 function formatTime(date: Date) {
-  return date.toLocaleTimeString(locale.value === 'zh' ? 'zh-CN' : 'en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  return formatChinaTime(date)
 }
+
+const CONTEXT_TTL_MS = 30 * 60 * 1000
 
 function shouldShowTime(msg: any, idx?: number): boolean {
   if (idx == null) idx = messages.value.indexOf(msg)
@@ -206,27 +230,129 @@ function shouldShowTime(msg: any, idx?: number): boolean {
   const prev = messages.value[idx - 1]
   if (!prev?.timestamp) return true
   const diff = msg.timestamp.getTime() - prev.timestamp.getTime()
-  return diff > 30 * 60 * 1000
+  return diff > CONTEXT_TTL_MS
 }
+
+async function saveExperiencePath(msg: DisplayMessage, msgIdx: number) {
+  if (msg.pathSaveStatus === 'saving' || msg.pathSaveStatus === 'saved') return
+
+  const payload = buildExperiencePathPayload({
+    message: msg,
+    messageIndex: msgIdx,
+    history: messages.value,
+    locale: locale.value,
+  })
+  if (!payload) {
+    msg.pathSaveStatus = 'error'
+    msg.pathSaveError = locale.value === 'zh' ? '没有可沉淀的成功执行步骤' : 'No successful executable step'
+    return
+  }
+
+  msg.pathSaveStatus = 'saving'
+  msg.pathSaveError = ''
+  try {
+    const result = await memoryAssetsApi.recordExperiencePath(payload)
+    if (result.status !== 'success') throw new Error(result.message || 'Save failed')
+    msg.pathSaveStatus = 'saved'
+  } catch (error) {
+    msg.pathSaveStatus = 'error'
+    msg.pathSaveError = (error as Error).message
+  }
+}
+
+async function saveWorkflowFromPath(msg: DisplayMessage, msgIdx: number) {
+  if (msg.workflowSaveStatus === 'saving' || msg.workflowSaveStatus === 'saved') return
+
+  const pathPayload = buildExperiencePathPayload({
+    message: msg,
+    messageIndex: msgIdx,
+    history: messages.value,
+    locale: locale.value,
+  })
+  const workflowDraft = pathPayload ? buildWorkflowDraftFromExperiencePath(pathPayload) : null
+  if (!workflowDraft) {
+    msg.workflowSaveStatus = 'error'
+    msg.workflowSaveError = locale.value === 'zh' ? '没有可提升的成功步骤' : 'No successful step to promote'
+    return
+  }
+
+  msg.workflowSaveStatus = 'saving'
+  msg.workflowSaveError = ''
+  try {
+    const result = await workflowApi.create(workflowDraft)
+    const workflowId = result.data?.id
+    if (!workflowId) throw new Error('Create workflow failed')
+    msg.workflowId = workflowId
+    msg.workflowSaveStatus = 'saved'
+  } catch (error) {
+    msg.workflowSaveStatus = 'error'
+    msg.workflowSaveError = (error as Error).message
+  }
+}
+
+function openWorkflowFromMessage(msg: DisplayMessage) {
+  if (!msg.workflowId) return
+  void router.push(buildWorkflowRoute(msg.workflowId, 'editor'))
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
 </script>
 
 <template>
   <div class="chat-view">
-    <!-- Left sidebar: devices -->
-    <aside class="left-pane" :style="{ width: leftWidth + 'px' }">
-      <div class="pane-head">{{ locale === 'zh' ? '设备' : 'Devices' }}</div>
-      <div class="pane-body">
-        <DeviceSidebar @select="(device) => (selectedDevice = device)" />
-      </div>
+    <!-- Left sidebar: context -->
+    <aside class="side-pane left" :class="{ collapsed: leftCollapsed }" :style="{ width: leftWidth + 'px' }">
+      <template v-if="leftCollapsed">
+        <div class="icon-strip">
+          <span class="strip-icon" title="展开" @click="toggleLeft">🏠</span>
+          <span class="strip-icon">📱</span>
+          <span class="strip-icon">🧠</span>
+        </div>
+      </template>
+      <template v-else>
+        <div class="pane-head">
+          <span>{{ locale === 'zh' ? '上下文' : 'Context' }}</span>
+          <button class="collapse-btn" @click="toggleLeft" title="折叠">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+          </button>
+        </div>
+        <div class="pane-body">
+          <ContextPanel ref="contextPanelRef" />
+          <div class="sidebar-rule-btn" @click="openRuleModal">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg>
+            <span>{{ locale === 'zh' ? '规则引擎' : 'Rule Engine' }}</span>
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          </div>
+        </div>
+      </template>
     </aside>
-
     <div class="resize-handle" @mousedown="(e) => onResizeStart('left', e)"></div>
 
     <!-- Center: chat -->
     <section class="center-pane">
       <div class="chat-toolbar">
-        <div v-if="currentModel" class="model-chip">{{ currentModel }}</div>
-        <div v-if="selectedDevice" class="device-chip">{{ selectedDevice.name }}</div>
+        <button
+          type="button"
+          class="trace-toggle-btn"
+          :class="{ active: showRuntimeTrace }"
+          @click="showRuntimeTrace = !showRuntimeTrace"
+        >
+          {{ locale === 'zh' ? '过程' : 'Trace' }}
+          <span>{{ showRuntimeTrace ? 'ON' : 'OFF' }}</span>
+        </button>
+        <div
+          v-if="toolbarContextUsageLabel"
+          class="context-usage-chip"
+          :title="toolbarContextTitle"
+        >
+          <span>{{ toolbarContextUsageLabel }}</span>
+          <span class="context-usage-meter">
+            <span :style="{ width: toolbarContextUsagePercent + '%' }"></span>
+          </span>
+        </div>
         <button v-if="loading" class="stop-btn" @click="stopStreaming">
           {{ locale === 'zh' ? '停止' : 'Stop' }}
         </button>
@@ -244,56 +370,17 @@ function shouldShowTime(msg: any, idx?: number): boolean {
 
         <div v-for="(msg, msgIdx) in messages" :key="msg.id" :class="['msg-row', msg.role]">
           <div v-if="shouldShowTime(msg, msgIdx)" class="time-divider">{{ formatTime(msg.timestamp) }}</div>
-          <div :class="['bubble', msg.role, msg.status]">
-            <!-- Thinking Section -->
-            <div v-if="msg.thinking" class="think-card" :class="{ collapsed: !msg.thinkingExpanded }">
-            <button class="think-toggle" @click="msg.thinkingExpanded = !msg.thinkingExpanded">
-                <svg :style="{ transform: msg.thinkingExpanded ? 'rotate(90deg)' : '' }" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
-                <span>{{ msg.status === 'streaming' ? (locale === 'zh' ? '思考中...' : 'Thinking...') : (locale === 'zh' ? '思考过程' : 'Thinking') }}</span>
-              </button>
-              <div v-show="msg.thinkingExpanded" class="think-content">{{ msg.thinking }}</div>
-            </div>
-
-            <!-- Tool Calls Section -->
-            <div v-if="msg.toolCalls && msg.toolCalls.length > 0" class="tool-calls-container">
-              <div
-                v-for="tc in msg.toolCalls"
-                :key="tc.call_id"
-                :class="['tool-card', tc.status, { collapsed: !tc.expanded }]"
-              >
-                <div class="tool-header" @click="tc.expanded = !tc.expanded">
-                  <span class="tool-status-icon">
-                    <span v-if="tc.status === 'running'" class="tool-spinner"></span>
-                    <span v-else-if="tc.status === 'success'" class="tool-success-check">✓</span>
-                    <span v-else class="tool-error-cross">✗</span>
-                  </span>
-                  <span class="tool-name">{{ tc.name }}</span>
-                  <span class="tool-toggle-icon">
-                    <svg :style="{ transform: tc.expanded ? 'rotate(90deg)' : '' }" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
-                  </span>
-                </div>
-                <div v-show="tc.expanded" class="tool-body">
-                  <div class="tool-section">
-                    <div class="tool-section-title">Arguments</div>
-                    <pre class="tool-code">{{ JSON.stringify(tc.args, null, 2) }}</pre>
-                  </div>
-                  <div v-if="tc.result" class="tool-section">
-                    <div class="tool-section-title">Result</div>
-                    <pre class="tool-code">{{ JSON.stringify(tc.result, null, 2) }}</pre>
-                  </div>
-                  <div v-if="tc.error" class="tool-section error">
-                    <div class="tool-section-title">Error</div>
-                    <pre class="tool-code error">{{ tc.error }}</pre>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div v-if="msg.content" class="content">{{ msg.content }}</div>
-            <div v-else-if="msg.status === 'streaming' && msg.role === 'assistant' && !msg.thinking && (!msg.toolCalls || msg.toolCalls.length === 0)" class="typing">
-              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-            </div>
-          </div>
+          <ChatMessageBubble
+            :msg="msg"
+            :locale="locale"
+            :show-runtime-trace="showRuntimeTrace"
+            @toggle-thinking="msg.thinkingExpanded = !msg.thinkingExpanded"
+            @toggle-trace="msg.traceExpanded = !msg.traceExpanded"
+            @toggle-tool="(tc) => { tc.expanded = !tc.expanded }"
+            @save-path="saveExperiencePath(msg, msgIdx)"
+            @save-workflow="saveWorkflowFromPath(msg, msgIdx)"
+            @open-workflow="openWorkflowFromMessage(msg)"
+          />
         </div>
       </div>
 
@@ -322,22 +409,35 @@ function shouldShowTime(msg: any, idx?: number): boolean {
     <div class="resize-handle" @mousedown="(e) => onResizeStart('right', e)"></div>
 
     <!-- Right sidebar: models -->
-    <aside class="right-pane" :style="{ width: rightWidth + 'px' }">
-      <div class="pane-head">{{ locale === 'zh' ? '模型' : 'Models' }}</div>
-      <div class="pane-body">
-        <div v-if="models.length === 0" class="empty">{{ locale === 'zh' ? '暂无模型' : 'No models' }}</div>
-        <div
-          v-for="m in models"
-          :key="m.id"
-          :class="['model-item', { active: m.is_default }]"
-          @click="onSelectModel(m.id)"
-        >
-          <div class="model-provider">{{ m.provider_name }}</div>
-          <div class="model-name">{{ m.model_name }}</div>
-          <div v-if="m.is_default" class="model-badge">DEFAULT</div>
+    <aside class="side-pane right" :class="{ collapsed: rightCollapsed }" :style="{ width: rightWidth + 'px' }">
+      <template v-if="rightCollapsed">
+        <div class="icon-strip">
+          <span class="strip-icon" title="展开" @click="toggleRight">🧠</span>
         </div>
-      </div>
+      </template>
+      <template v-else>
+        <div class="pane-head">
+          <span>{{ locale === 'zh' ? '模型' : 'Models' }}</span>
+          <button class="collapse-btn" @click="toggleRight" title="折叠">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          </button>
+        </div>
+        <div class="pane-body">
+          <div v-if="models.length === 0" class="empty-hint">{{ locale === 'zh' ? '暂无模型' : 'No models' }}</div>
+          <div
+            v-for="m in models" :key="m.id"
+            :class="['model-item', { active: m.is_default }]"
+            @click="selectModel(m.id)"
+          >
+            <div class="model-provider">{{ m.provider_name }}</div>
+            <div class="model-name">{{ m.model_name }}</div>
+            <div v-if="m.is_default" class="model-badge">DEFAULT</div>
+          </div>
+        </div>
+      </template>
     </aside>
+
+    <RulePanel ref="rulePanelRef" :showEntry="false" />
   </div>
 </template>
 
@@ -349,7 +449,7 @@ function shouldShowTime(msg: any, idx?: number): boolean {
   overflow: hidden;
 }
 
-.left-pane, .right-pane {
+.side-pane {
   flex-shrink: 0;
   background: rgba(255, 255, 255, 0.5);
   backdrop-filter: blur(48px);
@@ -357,10 +457,37 @@ function shouldShowTime(msg: any, idx?: number): boolean {
   flex-direction: column;
   overflow: hidden;
   z-index: 60;
+  transition: width 0.2s ease;
 }
+.side-pane.left { border-right: 1px solid rgba(229, 231, 235, 0.4); }
+.side-pane.right { border-left: 1px solid rgba(229, 231, 235, 0.4); }
+.side-pane.collapsed { width: 52px !important; }
 
-.left-pane { border-right: 1px solid rgba(229, 231, 235, 0.4); }
-.right-pane { border-left: 1px solid rgba(229, 231, 235, 0.4); }
+.icon-strip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 0;
+}
+.strip-icon {
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.strip-icon:hover { background: rgba(16, 185, 129, 0.1); }
+
+.collapse-btn {
+  width: 24px; height: 24px;
+  display: flex; align-items: center; justify-content: center;
+  border: none; background: none; cursor: pointer;
+  color: var(--text-tertiary); border-radius: 6px;
+  transition: all 0.15s;
+}
+.collapse-btn:hover { background: rgba(0,0,0,0.05); color: var(--text-primary); }
 
 .resize-handle {
   width: 4px;
@@ -373,7 +500,7 @@ function shouldShowTime(msg: any, idx?: number): boolean {
 .resize-handle:hover { background: #10b981; }
 
 .pane-head {
-  padding: 16px 20px;
+  padding: 12px 16px;
   font-size: 13px;
   font-weight: 900;
   color: var(--text-tertiary);
@@ -381,6 +508,9 @@ function shouldShowTime(msg: any, idx?: number): boolean {
   letter-spacing: 0.2em;
   border-bottom: 1px solid rgba(229, 231, 235, 0.4);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .pane-body {
@@ -409,24 +539,81 @@ function shouldShowTime(msg: any, idx?: number): boolean {
   z-index: 50;
 }
 
-.model-chip, .device-chip {
+.trace-toggle-btn {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.65);
+  color: var(--text-tertiary);
+  cursor: pointer;
   font-size: 12px;
   font-weight: 900;
-  padding: 6px 16px;
-  border-radius: 99px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
+  transition: all 0.2s;
 }
 
-.model-chip {
-  background: rgba(124, 58, 237, 0.1);
-  color: #7c3aed;
+.trace-toggle-btn span {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
 }
 
-.device-chip {
-  background: rgba(16, 185, 129, 0.1);
-  color: #10b981;
+.trace-toggle-btn.active {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(236, 253, 245, 0.8);
+  color: #059669;
 }
+
+.trace-toggle-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.context-usage-chip {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.context-usage-meter {
+  width: 58px;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.22);
+}
+
+.context-usage-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #10b981, #0ea5e9);
+}
+
+/* ── Sidebar rule button ── */
+.sidebar-rule-btn {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 14px; margin: 0 8px 8px; border-radius: 10px;
+  cursor: pointer; transition: all 0.15s; user-select: none;
+  border: 1px solid rgba(229, 231, 235, 0.3);
+}
+.sidebar-rule-btn:hover { background: rgba(16, 185, 129, 0.06); border-color: rgba(16, 185, 129, 0.2); }
+.sidebar-rule-btn svg:first-child { color: #10b981; flex-shrink: 0; }
+.sidebar-rule-btn span { flex: 1; font-size: 13px; font-weight: 700; color: var(--text-primary); }
+.sidebar-rule-btn svg:last-child { color: var(--text-tertiary); flex-shrink: 0; }
 
 .stop-btn {
   margin-left: auto;
@@ -448,10 +635,11 @@ function shouldShowTime(msg: any, idx?: number): boolean {
 /* ── Messages ── */
 .message-list {
   flex: 1;
-  padding: 48px 0;
+  padding: 24px 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .loading-older { display: flex; justify-content: center; gap: 8px; padding: 16px 0; }
@@ -485,204 +673,6 @@ function shouldShowTime(msg: any, idx?: number): boolean {
 .msg-row.user { align-items: flex-end; }
 .msg-row.assistant { align-items: flex-start; }
 
-.bubble {
-  max-width: min(85%, 800px);
-  padding: 24px 36px;
-  line-height: 1.8;
-  font-size: 15px;
-  font-weight: 700;
-  word-break: break-word;
-  letter-spacing: -0.01em;
-}
-.bubble.user {
-  color: var(--text-primary);
-  border-bottom-right-radius: 10px;
-}
-.bubble.assistant {
-  color: var(--text-primary);
-  border-bottom-left-radius: 10px;
-}
-.bubble.error {
-  color: #ef4444;
-}
-.bubble.streaming {
-  border: 2px dashed rgba(16, 185, 129, 0.4);
-  background: rgba(255, 255, 255, 0.4);
-  animation: borderPulse 2s infinite;
-}
-
-@keyframes borderPulse {
-  0%, 100% { border-color: rgba(16, 185, 129, 0.2); }
-  50% { border-color: rgba(16, 185, 129, 0.8); }
-}
-
-.content { white-space: pre-wrap; }
-
-/* ── Tool Cards ── */
-.tool-calls-container {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
-.tool-card {
-  border-radius: 16px;
-  overflow: hidden;
-  border: 1px solid rgba(229, 231, 235, 0.3);
-  background: transparent;
-  transition: all 0.3s;
-}
-
-.tool-card.running {
-  border-color: rgba(59, 130, 246, 0.3);
-  background: rgba(59, 130, 246, 0.03);
-}
-
-.tool-card.success {
-  border-color: rgba(16, 185, 129, 0.3);
-  background: rgba(16, 185, 129, 0.03);
-}
-
-.tool-card.error {
-  border-color: rgba(239, 68, 68, 0.3);
-  background: rgba(239, 68, 68, 0.03);
-}
-
-.tool-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  cursor: pointer;
-  user-select: none;
-}
-.tool-header:hover {
-  background: rgba(0, 0, 0, 0.02);
-}
-
-.tool-status-icon {
-  width: 16px;
-  height: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.tool-spinner {
-  width: 12px;
-  height: 12px;
-  border: 2px solid rgba(59, 130, 246, 0.2);
-  border-top-color: #3b82f6;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-.tool-success-check {
-  color: #10b981;
-  font-weight: bold;
-  font-size: 14px;
-}
-
-.tool-error-cross {
-  color: #ef4444;
-  font-weight: bold;
-  font-size: 14px;
-}
-
-.tool-name {
-  font-size: 12px;
-  font-weight: 800;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  color: var(--text-primary);
-  flex: 1;
-}
-
-.tool-toggle-icon {
-  display: flex;
-  align-items: center;
-  color: var(--text-tertiary);
-  transition: transform 0.2s;
-}
-
-.tool-body {
-  padding: 0 14px 14px;
-  border-top: 1px solid rgba(0, 0, 0, 0.03);
-}
-
-.tool-section {
-  margin-top: 10px;
-}
-
-.tool-section-title {
-  font-size: 10px;
-  font-weight: 900;
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  margin-bottom: 4px;
-}
-
-.tool-code {
-  margin: 0;
-  padding: 10px;
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.03);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-secondary);
-  white-space: pre-wrap;
-  overflow-x: auto;
-}
-
-.tool-code.error {
-  background: rgba(239, 68, 68, 0.05);
-  color: #ef4444;
-}
-
-.think-card {
-  background: rgba(124, 58, 237, 0.04);
-  border: 1px solid rgba(124, 58, 237, 0.12);
-  border-radius: 16px;
-  overflow: hidden;
-  margin-bottom: 12px;
-}
-
-.think-card.collapsed .think-content { display: none; }
-
-.think-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 10px 14px;
-  border: none;
-  background: transparent;
-  color: #7c3aed;
-  font-size: 12px;
-  font-weight: 900;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-.think-toggle:hover { background: rgba(124, 58, 237, 0.06); }
-.think-toggle svg { flex-shrink: 0; transition: transform 0.2s; }
-
-.think-content {
-  padding: 0 14px 14px;
-  font-size: 13px;
-  line-height: 1.7;
-  color: var(--text-secondary);
-  font-weight: 600;
-  white-space: pre-wrap;
-  max-height: 400px;
-  overflow-y: auto;
-  opacity: 0.8;
-}
-
 .time-divider {
   text-align: center;
   padding: 16px 0;
@@ -705,26 +695,10 @@ function shouldShowTime(msg: any, idx?: number): boolean {
 .time-divider::before { left: 0; }
 .time-divider::after { right: 0; }
 
-.typing { display: flex; gap: 8px; align-items: center; padding: 16px 4px; }
-.dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: #10b981; opacity: 0.6;
-  animation: typing 1.2s infinite both;
-}
-.dot:nth-child(2) { animation-delay: 0.2s; }
-.dot:nth-child(3) { animation-delay: 0.4s; }
-
 /* ── Input ── */
 .input-area {
-  padding: 24px 64px 64px;
-  position: relative;
-}
-.input-area::before {
-  content: '';
-  position: absolute;
-  top: -100px; left: 0; right: 0; height: 100px;
-  background: linear-gradient(to top, #f7f9fa, transparent);
-  pointer-events: none;
+  padding: 0 64px 24px;
+  flex-shrink: 0;
 }
 
 .input-wrap {
@@ -734,7 +708,7 @@ function shouldShowTime(msg: any, idx?: number): boolean {
   background: rgba(255, 255, 255, 0.6);
   backdrop-filter: blur(64px);
   border: 1px solid rgba(255, 255, 255, 0.5);
-  border-radius: 32px;
+  border-radius: 16px;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.1);
   transition: all 0.4s;
   max-width: 900px;
@@ -798,9 +772,10 @@ function shouldShowTime(msg: any, idx?: number): boolean {
   animation: spin 1s linear infinite;
 }
 
+@keyframes spin { to { transform: rotate(360deg); } }
 /* ── Model list ── */
 .model-item {
-  padding: 14px 20px;
+  padding: 12px 16px;
   cursor: pointer;
   border-bottom: 1px solid rgba(229, 231, 235, 0.3);
   transition: all 0.2s;
@@ -811,47 +786,25 @@ function shouldShowTime(msg: any, idx?: number): boolean {
   border-left: 3px solid #7c3aed;
 }
 .model-provider {
-  font-size: 11px;
-  font-weight: 900;
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
+  font-size: 11px; font-weight: 900; color: var(--text-tertiary);
+  text-transform: uppercase; letter-spacing: 0.15em;
 }
 .model-name {
-  font-size: 14px;
-  font-weight: 800;
-  color: var(--text-primary);
-  margin-top: 2px;
+  font-size: 14px; font-weight: 800; color: var(--text-primary); margin-top: 2px;
 }
 .model-badge {
-  display: inline-block;
-  margin-top: 4px;
-  font-size: 10px;
-  font-weight: 900;
-  padding: 2px 8px;
-  border-radius: 6px;
-  background: rgba(124, 58, 237, 0.1);
-  color: #7c3aed;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+  display: inline-block; margin-top: 4px; font-size: 10px; font-weight: 900;
+  padding: 2px 8px; border-radius: 6px;
+  background: rgba(124, 58, 237, 0.1); color: #7c3aed;
+  text-transform: uppercase; letter-spacing: 0.1em;
 }
-
-.empty {
-  padding: 40px 20px;
-  text-align: center;
-  color: var(--text-tertiary);
-  font-size: 14px;
-  font-weight: 600;
-}
-
-@keyframes spin { to { transform: rotate(360deg); } }
-@keyframes typing {
-  0%, 80%, 100% { opacity: 0.2; transform: translateY(0); }
-  40% { opacity: 1; transform: translateY(-6px); }
+.empty-hint {
+  padding: 40px 16px; text-align: center;
+  color: var(--text-tertiary); font-size: 14px; font-weight: 600;
 }
 
 @media (max-width: 1200px) {
   .msg-row { padding: 0 36px; }
-  .input-area { padding: 20px 36px 48px; }
+  .input-area { padding: 0 36px 20px; }
 }
 </style>

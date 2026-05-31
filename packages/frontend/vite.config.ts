@@ -5,6 +5,8 @@ import { resolve } from 'path'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, '')
   const port = Number(env.VITE_DEV_PORT || 43173)
+  const backendTarget = env.VITE_PROXY_TARGET || env.VITE_API_BASE || 'http://localhost:3000'
+  const backendWsTarget = backendTarget.replace(/^http/, 'ws')
 
   return {
     plugins: [vue()],
@@ -17,11 +19,11 @@ export default defineConfig(({ mode }) => {
       port,
       proxy: {
         '/api': {
-          target: 'http://localhost:3000',
+          target: backendTarget,
           changeOrigin: true,
         },
         '/ws': {
-          target: 'ws://localhost:3000',
+          target: backendWsTarget,
           ws: true,
         },
       },

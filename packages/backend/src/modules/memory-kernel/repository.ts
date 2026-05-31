@@ -64,6 +64,42 @@ export interface EmbeddingProfileRow {
   updated_at: string
 }
 
+export interface GraphNodeRow {
+  id: string
+  type: string
+  label: string
+  scope: string
+  embedding_ref: string
+  metadata_json: string
+  created_at: string
+  updated_at: string
+}
+
+export interface GraphEdgeRow {
+  id: number
+  from_node_id: string
+  to_node_id: string
+  relation: string
+  weight: number
+  confidence: number
+  valid_from: string
+  valid_to: string | null
+  source_type: string
+  source_ref: string
+  metadata_json: string
+  created_at: string
+  updated_at: string
+}
+
+export type GraphNeighborRow = GraphEdgeRow & {
+  neighbor_id: string
+  neighbor_type: string
+  neighbor_label: string
+  neighbor_scope: string
+  neighbor_metadata_json: string
+  direction: 'out' | 'in'
+}
+
 export interface MemoryRepository {
   // entities
   upsertEntity(input: {
@@ -167,6 +203,31 @@ export interface MemoryRepository {
     wing: string
     room: string
   }>
+
+  // graph substrate
+  upsertGraphNode(input: {
+    id: string
+    type: string
+    label: string
+    scope: string
+    embeddingRef: string
+    metadataJson: string
+  }): void
+  upsertGraphEdge(input: {
+    fromNodeId: string
+    toNodeId: string
+    relation: string
+    weight: number
+    confidence: number
+    validFrom: string
+    validTo: string | null
+    sourceType: string
+    sourceRef: string
+    metadataJson: string
+  }): number
+  getGraphNodeById(id: string): GraphNodeRow | undefined
+  searchGraphNodesByLike(keywords: string[], limit: number): GraphNodeRow[]
+  listGraphNeighbors(nodeId: string, limit: number): GraphNeighborRow[]
 
   // embedding profiles
   getCanonicalEmbeddingProfile(): EmbeddingProfileRow | undefined
@@ -553,6 +614,124 @@ export class SqlMemoryRepository implements MemoryRepository {
       wing: string
       room: string
     }>
+  }
+
+  // graph substrate -------------------------------------------------
+
+  upsertGraphNode(input: {
+    id: string
+    type: string
+    label: string
+    scope: string
+    embeddingRef: string
+    metadataJson: string
+  }): void {
+    this.getDb()
+      .prepare(
+        `INSERT INTO graph_nodes (id, type, label, scope, embedding_ref, metadata_json)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           type=excluded.type,
+           label=excluded.label,
+           scope=excluded.scope,
+           embedding_ref=excluded.embedding_ref,
+           metadata_json=excluded.metadata_json,
+           updated_at=datetime('now')`,
+      )
+      .run(input.id, input.type, input.label, input.scope, input.embeddingRef, input.metadataJson)
+  }
+
+  upsertGraphEdge(input: {
+    fromNodeId: string
+    toNodeId: string
+    relation: string
+    weight: number
+    confidence: number
+    validFrom: string
+    validTo: string | null
+    sourceType: string
+    sourceRef: string
+    metadataJson: string
+  }): number {
+    this.getDb()
+      .prepare(
+        `INSERT INTO graph_edges (
+           from_node_id, to_node_id, relation, weight, confidence,
+           valid_from, valid_to, source_type, source_ref, metadata_json
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(from_node_id, to_node_id, relation) DO UPDATE SET
+           weight=excluded.weight,
+           confidence=excluded.confidence,
+           valid_from=excluded.valid_from,
+           valid_to=excluded.valid_to,
+           source_type=excluded.source_type,
+           source_ref=excluded.source_ref,
+           metadata_json=excluded.metadata_json,
+           updated_at=datetime('now')`,
+      )
+      .run(
+        input.fromNodeId,
+        input.toNodeId,
+        input.relation,
+        input.weight,
+        input.confidence,
+        input.validFrom,
+        input.validTo,
+        input.sourceType,
+        input.sourceRef,
+        input.metadataJson,
+      )
+
+    const row = this.getDb()
+      .prepare(
+        `SELECT id FROM graph_edges
+         WHERE from_node_id = ? AND to_node_id = ? AND relation = ?
+         LIMIT 1`,
+      )
+      .get(input.fromNodeId, input.toNodeId, input.relation) as { id: number } | undefined
+    return row ? Number(row.id) : 0
+  }
+
+  getGraphNodeById(id: string): GraphNodeRow | undefined {
+    return this.getDb().prepare('SELECT * FROM graph_nodes WHERE id = ? LIMIT 1').get(id) as GraphNodeRow | undefined
+  }
+
+  searchGraphNodesByLike(keywords: string[], limit: number): GraphNodeRow[] {
+    if (keywords.length === 0) return []
+    const conds = keywords.map(() => '(id LIKE ? OR label LIKE ? OR type LIKE ? OR scope LIKE ? OR metadata_json LIKE ?)').join(' OR ')
+    const params: unknown[] = []
+    for (const keyword of keywords) {
+      const pattern = `%${keyword}%`
+      params.push(pattern, pattern, pattern, pattern, pattern)
+    }
+    params.push(limit)
+    return this.getDb()
+      .prepare(`SELECT * FROM graph_nodes WHERE ${conds} ORDER BY updated_at DESC LIMIT ?`)
+      .all(...params) as GraphNodeRow[]
+  }
+
+  listGraphNeighbors(nodeId: string, limit: number): GraphNeighborRow[] {
+    const rows = this.getDb()
+      .prepare(
+        `SELECT e.*, n.id AS neighbor_id, n.type AS neighbor_type, n.label AS neighbor_label,
+                n.scope AS neighbor_scope, n.metadata_json AS neighbor_metadata_json,
+                'out' AS direction
+         FROM graph_edges e
+         JOIN graph_nodes n ON n.id = e.to_node_id
+         WHERE e.from_node_id = ?
+         UNION ALL
+         SELECT e.*, n.id AS neighbor_id, n.type AS neighbor_type, n.label AS neighbor_label,
+                n.scope AS neighbor_scope, n.metadata_json AS neighbor_metadata_json,
+                'in' AS direction
+         FROM graph_edges e
+         JOIN graph_nodes n ON n.id = e.from_node_id
+         WHERE e.to_node_id = ?
+         ORDER BY weight DESC, updated_at DESC
+         LIMIT ?`,
+      )
+      .all(nodeId, nodeId, limit) as GraphNeighborRow[]
+    return rows
   }
 
   // embedding profiles ---------------------------------------------

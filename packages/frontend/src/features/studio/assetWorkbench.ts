@@ -22,17 +22,17 @@ const STATUS_LABELS: Record<string, [string, string]> = {
 }
 
 const KIND_LABELS: Record<AssetKind, [string, string]> = {
-  workflow: ['工作流', 'Workflow'],
+  device_skill: ['设备技能', 'Device Skill'],
   skill: ['技能', 'Skill'],
-  manifest: ['执行清单', 'Manifest'],
+  manifest: ['记忆项', 'Memory Item'],
   plan: ['计划', 'Plan'],
-  agent: ['智能体', 'Agent'],
+  agent: ['遗留配置', 'Legacy Config'],
 }
 
 export function buildFilterCounts(assets: AssetRecord[]): Record<AssetFilter, number> {
   return {
     all: assets.length,
-    workflow: countKind(assets, 'workflow'),
+    device_skill: countKind(assets, 'device_skill'),
     skill: countKind(assets, 'skill'),
     manifest: countKind(assets, 'manifest'),
     plan: countKind(assets, 'plan'),
@@ -64,14 +64,14 @@ export function buildAssetPreviewFacts(
     { label: label('状态', 'Status'), value: formatAssetStatus(asset.status, label) },
   ]
 
-  if (asset.kind === 'workflow') {
+  if (asset.kind === 'device_skill') {
     facts.push({
-      label: label('触发方式', 'Trigger'),
-      value: String(asset.meta?.triggerType ?? '-'),
+      label: label('设备类型', 'Device Type'),
+      value: String(asset.meta?.deviceType ?? '-'),
     })
     facts.push({
-      label: label('节点 / 边', 'Nodes / Edges'),
-      value: `${asset.workflowGraph?.nodes.length ?? 0} / ${asset.workflowGraph?.edges.length ?? 0}`,
+      label: label('触发词', 'Triggers'),
+      value: String(Array.isArray(asset.meta?.triggers) ? asset.meta.triggers.length : 0),
     })
   } else if (asset.kind === 'skill') {
     facts.push({
@@ -123,15 +123,6 @@ export function buildAssetActionLinks(
   asset: AssetRecord,
   label: (zh: string, en: string) => string,
 ): AssetActionLink[] {
-  if (asset.kind === 'workflow') {
-    const workflowId = asset.id.replace('workflow:', '')
-    return [
-      { label: label('概览', 'Overview'), route: `/studio/workflows/${workflowId}/overview` },
-      { label: label('编排器', 'Editor'), route: `/studio/workflows/${workflowId}/editor` },
-      { label: label('运行记录', 'Runs'), route: `/studio/workflows/${workflowId}/runs` },
-    ]
-  }
-
   return [{ label: label('进入详情', 'Open Detail'), route: asset.route }]
 }
 

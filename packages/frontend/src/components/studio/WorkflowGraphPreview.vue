@@ -4,7 +4,7 @@ import { Background } from '@vue-flow/background'
 import { VueFlow } from '@vue-flow/core'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
-import type { WorkflowGraphSnapshot } from '@/features/studio/assets'
+import type { WorkflowGraphSnapshot } from '@/features/studio/workflowGraph'
 
 const props = defineProps<{
   graph: WorkflowGraphSnapshot

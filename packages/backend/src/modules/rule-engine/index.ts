@@ -33,7 +33,7 @@ export interface RuleMatch {
   confidence: number
 }
 
-class RuleEngine {
+export class RuleEngine {
   private rules = new Map<number, Rule>()
 
   constructor(
@@ -128,14 +128,8 @@ class RuleEngine {
             confidence = 0.8
           }
         } catch {}
-      } else {
-        const patternChars = [...pattern]
-        const inputChars = [...trimmed]
-        let matchCount = 0
-        for (const ch of patternChars) {
-          if (inputChars.includes(ch)) matchCount++
-        }
-        const ratio = matchCount / patternChars.length
+      } else if (!/\s/.test(pattern)) {
+        const ratio = countCharacterOverlap(pattern, trimmed)
         if (ratio >= 0.7) {
           matched = true
           confidence = ratio * 0.7
@@ -143,7 +137,8 @@ class RuleEngine {
       }
 
       if (matched) {
-        if (!bestMatch || rule.priority > (this.rules.get(bestMatch.rule_id)?.priority ?? 0) || confidence > bestMatch.confidence) {
+        const bestPriority = bestMatch ? this.rules.get(bestMatch.rule_id)?.priority ?? 0 : 0
+        if (!bestMatch || confidence > bestMatch.confidence || (confidence === bestMatch.confidence && rule.priority > bestPriority)) {
           bestMatch = {
             rule_id: rule.id,
             trigger_pattern: rule.trigger_pattern,
@@ -174,6 +169,21 @@ class RuleEngine {
   listRules(): Rule[] {
     return Array.from(this.rules.values())
   }
+}
+
+function countCharacterOverlap(pattern: string, input: string): number {
+  if (!pattern) return 0
+  const remaining = [...input]
+  let matchCount = 0
+
+  for (const ch of pattern) {
+    const index = remaining.indexOf(ch)
+    if (index === -1) continue
+    matchCount += 1
+    remaining.splice(index, 1)
+  }
+
+  return matchCount / [...pattern].length
 }
 
 export const ruleEngine = new RuleEngine()

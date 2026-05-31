@@ -1,5 +1,7 @@
 import { WorkflowNodeBase, type NodeExecutionContext } from './node-base.js'
-import type { WorkflowNodeRunOutcome } from './types.js'
+import type { NodeTrace, WorkflowNodeRunOutcome } from './types.js'
+
+const MAX_SUBFLOW_CALL_DEPTH = 6
 
 export class StartWorkflowNode extends WorkflowNodeBase {
   protected runInternal(context: NodeExecutionContext): WorkflowNodeRunOutcome {
@@ -110,6 +112,64 @@ export class SceneExecuteWorkflowNode extends WorkflowNodeBase {
   }
 }
 
+export class DeviceCapabilityWorkflowNode extends WorkflowNodeBase {
+  protected async runInternal(context: NodeExecutionContext): Promise<WorkflowNodeRunOutcome> {
+    const config = context.node.config
+    const deviceId = Number(context.resolveValue(config.device_id))
+    const capabilityId = String(context.resolveValue(config.capability_id ?? '') ?? '').trim()
+    const capability = String(context.resolveValue(config.capability ?? '') ?? '').trim()
+    const args = asRecord(context.resolveValue(config.arguments ?? {}))
+
+    if (!Number.isFinite(deviceId) || deviceId <= 0) {
+      return { status: 'failed', outputs: {}, error: 'Device capability requires device_id' }
+    }
+    if (!capabilityId && !capability) {
+      return { status: 'failed', outputs: {}, error: 'Device capability requires capability_id or capability' }
+    }
+
+    const rehearsal = await this.deps.deviceAgentTools.execute('rehearse_device_capability', {
+      device_id: deviceId,
+      ...(capabilityId ? { capability_id: capabilityId } : {}),
+      ...(capability ? { capability } : {}),
+      arguments: args,
+    })
+    const rehearsalData = rehearsal.data as { ok?: boolean; executable?: boolean } | undefined
+    const rehearsalPassed = rehearsal.status === 'success' && rehearsalData?.ok !== false && rehearsalData?.executable !== false
+    if (!rehearsalPassed) {
+      context.variables.set(`node.${context.node.id}.rehearsal`, rehearsal)
+      return {
+        status: 'failed',
+        outputs: {
+          rehearsal,
+          trigger: false,
+        },
+        error: rehearsal.error ?? rehearsal.message ?? 'Device capability rehearsal failed',
+      }
+    }
+
+    const execution = await this.deps.deviceAgentTools.execute('execute_device_capability', {
+      device_id: deviceId,
+      ...(capabilityId ? { capability_id: capabilityId } : {}),
+      ...(capability ? { capability } : {}),
+      arguments: args,
+    })
+
+    context.variables.set(`node.${context.node.id}.rehearsal`, rehearsal)
+    context.variables.set(`node.${context.node.id}.result`, execution)
+
+    const success = execution.status === 'success'
+    return {
+      status: success ? 'succeeded' : 'failed',
+      outputs: {
+        rehearsal,
+        result: success ? execution.data : execution,
+        trigger: success,
+      },
+      error: success ? undefined : execution.error ?? execution.message ?? 'Device capability execution failed',
+    }
+  }
+}
+
 export class LLMWorkflowNode extends WorkflowNodeBase {
   protected async runInternal(context: NodeExecutionContext): Promise<WorkflowNodeRunOutcome> {
     const config = context.node.config
@@ -179,11 +239,25 @@ export class SubflowWorkflowNode extends WorkflowNodeBase {
     if (!hasWorkflowId && !workflowName) {
       return { status: 'failed', outputs: {}, error: 'Subflow requires workflow_id or workflow_name' }
     }
+    if (context.runtime_state.run_context.call_depth >= MAX_SUBFLOW_CALL_DEPTH) {
+      return {
+        status: 'failed',
+        outputs: {
+          trigger: false,
+          subflow: {
+            workflow_id: hasWorkflowId ? workflowId : undefined,
+            workflow_name: workflowName || undefined,
+            status: 'blocked',
+            depth: context.runtime_state.run_context.call_depth,
+          },
+        },
+        error: `Subflow call depth exceeded ${MAX_SUBFLOW_CALL_DEPTH}`,
+      }
+    }
 
-    const { workflowRuntime } = await import('./run-workflow.js')
     const childResult = hasWorkflowId
-      ? await workflowRuntime.runWorkflow(Number(workflowId), inputs, { parentState: context.runtime_state })
-      : await workflowRuntime.runWorkflowByName(workflowName, inputs, { parentState: context.runtime_state })
+      ? await this.deps.workflowRuntime.runWorkflow(Number(workflowId), inputs, { parentState: context.runtime_state })
+      : await this.deps.workflowRuntime.runWorkflowByName(workflowName, inputs, { parentState: context.runtime_state })
 
     context.variables.set(`node.${context.node.id}.subflow`, childResult)
 
@@ -194,6 +268,7 @@ export class SubflowWorkflowNode extends WorkflowNodeBase {
         status: childResult.status,
         outputs: childResult.outputs,
         trace_count: childResult.trace.length,
+        trace: summarizeSubflowTrace(childResult.trace),
       },
       trigger: childResult.status === 'succeeded',
     }
@@ -206,7 +281,7 @@ export class SubflowWorkflowNode extends WorkflowNodeBase {
     return {
       status: childResult.status === 'succeeded' ? 'succeeded' : 'failed',
       outputs,
-      error: childResult.error,
+      error: childResult.status === 'succeeded' ? undefined : childResult.error ?? 'Subflow failed',
     }
   }
 }
@@ -261,6 +336,15 @@ export class ExecutorCallWorkflowNode extends WorkflowNodeBase {
         status: 'failed',
         outputs: { result },
         error: result.message ?? result.error,
+      }
+    }
+
+    const nestedResult = asRecord(result.data)
+    if (nestedResult.status === 'error') {
+      return {
+        status: 'failed',
+        outputs: { result: result.data, gateway_result: result },
+        error: String(nestedResult.message ?? nestedResult.error ?? 'Executor returned an error'),
       }
     }
 
@@ -438,4 +522,39 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {}
+}
+
+function summarizeSubflowTrace(trace: NodeTrace[]): Array<Record<string, unknown>> {
+  return trace.map((step) => ({
+    node_id: step.node_id,
+    node_type: step.node_type,
+    status: step.status,
+    duration_ms: step.duration_ms,
+    error: step.error,
+    outputs: summarizeTraceOutputs(step.outputs),
+  }))
+}
+
+function summarizeTraceOutputs(outputs: Record<string, unknown>): Record<string, unknown> {
+  const summary: Record<string, unknown> = {}
+  if (Object.prototype.hasOwnProperty.call(outputs, 'answer')) summary.answer = outputs.answer
+  if (Object.prototype.hasOwnProperty.call(outputs, 'value')) summary.value = outputs.value
+  if (Object.prototype.hasOwnProperty.call(outputs, 'trigger')) summary.trigger = outputs.trigger
+
+  const result = asRecord(outputs.result)
+  if (result.status) summary.result_status = result.status
+  if (result.capability_id) summary.capability_id = result.capability_id
+  if (result.capability) summary.capability = result.capability
+
+  const subflow = asRecord(outputs.subflow)
+  if (Object.keys(subflow).length > 0) {
+    summary.subflow = {
+      workflow_id: subflow.workflow_id,
+      run_id: subflow.run_id,
+      status: subflow.status,
+      trace_count: subflow.trace_count,
+    }
+  }
+
+  return summary
 }

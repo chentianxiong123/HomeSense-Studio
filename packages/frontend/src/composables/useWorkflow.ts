@@ -80,11 +80,30 @@ export function useWorkflow() {
 
   async function saveWorkflow() {
     if (!currentWorkflow.value) return
+    if (!isDirty.value) return
+    const workflowId = currentWorkflow.value.id
     await workflowApi.update(currentWorkflow.value.id, {
       nodes: nodes.value,
       edges: edges.value,
     })
     isDirty.value = false
+    await loadWorkflows()
+    await loadWorkflow(workflowId)
+  }
+
+  async function setWorkflowPublished(published: boolean) {
+    if (!currentWorkflow.value) return
+    const result = await workflowApi.update(currentWorkflow.value.id, {
+      published: published ? 1 : 0,
+    })
+    if (result.status !== 'success') {
+      throw new Error((result as { message?: string }).message || 'Publish failed')
+    }
+    currentWorkflow.value = {
+      ...currentWorkflow.value,
+      published: published ? 1 : 0,
+    }
+    await loadWorkflows()
   }
 
   async function runWorkflow(inputs?: Record<string, unknown>) {
@@ -177,6 +196,7 @@ export function useWorkflow() {
     createWorkflow,
     reseedDefaults,
     saveWorkflow,
+    setWorkflowPublished,
     runWorkflow,
     previewWorkflow,
     deleteWorkflow,

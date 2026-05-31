@@ -40,7 +40,6 @@ function isActive(target: string) {
           <button :class="['locale-btn', { active: locale === 'zh' }]" @click="setLocale('zh')">中</button>
           <button :class="['locale-btn', { active: locale === 'en' }]" @click="setLocale('en')">EN</button>
         </div>
-        <button class="settings-btn" @click="router.push('/settings')">{{ t('app.settings') }}</button>
       </div>
     </header>
     <main class="app-main">

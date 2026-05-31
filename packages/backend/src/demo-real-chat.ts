@@ -60,7 +60,6 @@ async function main() {
     console.log(`\n[User] ${message}`)
 
     const stream = llmService.chatStream({
-      slot: 'planner',
       messages: messages as Array<{ role: string; content: string }>,
       tools: TOOLS,
     })

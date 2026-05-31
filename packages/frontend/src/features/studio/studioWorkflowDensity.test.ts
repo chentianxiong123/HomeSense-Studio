@@ -83,11 +83,14 @@ describe('buildWorkflowEditorSummaryItems', () => {
       edgeCount: 6,
       previewExecutable: true,
       latestRunStatus: latestRun.status,
+      successCount: 2,
+      failureCount: 1,
     }, label)).toEqual([
       { label: '节点|Nodes', value: '7' },
       { label: '连线|Edges', value: '6' },
       { label: '预演|Preview', value: '就绪|Ready' },
       { label: '最近运行|Last Run', value: '成功|Succeeded' },
+      { label: '运行证据|Run Evidence', value: '成功 2|Success 2 · 失败 1|Failure 1' },
     ])
   })
 
@@ -100,6 +103,7 @@ describe('buildWorkflowEditorSummaryItems', () => {
       { label: '连线|Edges', value: '0' },
       { label: '预演|Preview', value: '未预演|Not Previewed' },
       { label: '最近运行|Last Run', value: '未运行|No Runs Yet' },
+      { label: '运行证据|Run Evidence', value: '尚无记录|No evidence yet' },
     ])
   })
 })
