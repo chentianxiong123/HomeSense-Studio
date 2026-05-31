@@ -18,6 +18,9 @@ import {
   SubflowWorkflowNode,
   StartWorkflowNode,
   XiaoAiWorkflowNode,
+  WaitUntilWorkflowNode,
+  HttpRequestWorkflowNode,
+  HumanInputWorkflowNode,
 } from './built-in-nodes.js'
 import { workflowNodeDefinitionRegistry } from './node-definitions.js'
 import { cliBridge } from '../cli-bridge/index.js'
@@ -100,6 +103,9 @@ workflowNodeFactory.register('knowledge_retrieve', KnowledgeRetrieveWorkflowNode
 workflowNodeFactory.register('candidate_plan_resolve', CandidatePlanResolveWorkflowNode)
 workflowNodeFactory.register('rerank_score', RerankScoreWorkflowNode)
 workflowNodeFactory.register('agent_dispatch', AgentDispatchWorkflowNode)
+workflowNodeFactory.register('wait_until', WaitUntilWorkflowNode)
+workflowNodeFactory.register('http_request', HttpRequestWorkflowNode)
+workflowNodeFactory.register('human_input', HumanInputWorkflowNode)
 
 export function assertWorkflowNodeRegistryIntegrity(): void {
   const runtimeTypes = new Set(workflowNodeFactory.listRegisteredTypes())

@@ -518,6 +518,133 @@ export class AgentDispatchWorkflowNode extends WorkflowNodeBase {
   }
 }
 
+export class WaitUntilWorkflowNode extends WorkflowNodeBase {
+  protected async runInternal(context: NodeExecutionContext): Promise<WorkflowNodeRunOutcome> {
+    const config = context.node.config
+    const deviceId = Number(context.resolveValue(config.device_id))
+    const condition = String(context.resolveValue(config.condition) ?? '').trim()
+    const expected = String(context.resolveValue(config.expected) ?? '').trim()
+    const timeoutMs = Number(context.resolveValue(config.timeout_ms ?? 5000))
+    const pollIntervalMs = Number(context.resolveValue(config.poll_interval_ms ?? 800))
+
+    if (!Number.isFinite(deviceId) || !condition || !expected) {
+      return { status: 'failed', outputs: {}, error: 'wait_until requires device_id, condition, and expected' }
+    }
+
+    const startTime = Date.now()
+    while (Date.now() - startTime < timeoutMs) {
+      const met = await this.checkCondition(context, deviceId, condition, expected)
+      if (met) {
+        const elapsed = Date.now() - startTime
+        return { status: 'succeeded', outputs: { met: true, elapsed_ms: elapsed, trigger: true } }
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
+    }
+
+    return {
+      status: 'failed',
+      outputs: { met: false, elapsed_ms: timeoutMs, trigger: false },
+      error: `Timeout: condition "${condition}" not met within ${timeoutMs}ms`,
+    }
+  }
+
+  private async checkCondition(context: NodeExecutionContext, deviceId: number, condition: string, expected: string): Promise<boolean> {
+    try {
+      if (condition === 'app_foreground') {
+        const result = await this.deps.deviceAgentTools.execute('get_current_app', { device_id: deviceId })
+        if (result.status !== 'success') return false
+        const data = result.data as Record<string, unknown> | undefined
+        return String(data?.package ?? data?.current_app ?? '').includes(expected)
+      }
+      if (condition === 'ui_element_visible') {
+        const result = await this.deps.deviceAgentTools.execute('get_ui_tree', { device_id: deviceId })
+        if (result.status !== 'success') return false
+        return JSON.stringify(result.data ?? '').includes(expected)
+      }
+      if (condition === 'device_online') {
+        const result = await this.deps.deviceAgentTools.execute('list_user_devices', {})
+        if (result.status !== 'success') return false
+        const devices = (result.data as any)?.devices ?? result.data
+        if (!Array.isArray(devices)) return false
+        return devices.some((d: any) => d.id === deviceId && d.online === true)
+      }
+      return false
+    } catch {
+      return false
+    }
+  }
+}
+
+export class HttpRequestWorkflowNode extends WorkflowNodeBase {
+  protected async runInternal(context: NodeExecutionContext): Promise<WorkflowNodeRunOutcome> {
+    const config = context.node.config
+    const url = context.resolveTemplate(String(config.url ?? '')).trim()
+    const method = String(context.resolveValue(config.method ?? 'GET')).toUpperCase()
+    const headers = asRecord(context.resolveValue(config.headers ?? {}))
+    const body = context.resolveTemplate(String(config.body ?? '')).trim()
+
+    if (!url) {
+      return { status: 'failed', outputs: {}, error: 'HTTP request requires url' }
+    }
+
+    try {
+      const fetchHeaders: Record<string, string> = {}
+      for (const [key, value] of Object.entries(headers)) {
+        fetchHeaders[key] = String(value)
+      }
+      if (body && !fetchHeaders['Content-Type'] && !fetchHeaders['content-type']) {
+        fetchHeaders['Content-Type'] = 'application/json'
+      }
+
+      const response = await fetch(url, {
+        method,
+        headers: fetchHeaders,
+        body: method !== 'GET' && body ? body : undefined,
+      })
+
+      let data: unknown
+      const contentType = response.headers.get('content-type') ?? ''
+      if (contentType.includes('json')) {
+        data = await response.json()
+      } else {
+        data = await response.text()
+      }
+
+      const success = response.status >= 200 && response.status < 300
+      context.variables.set(`node.${context.node.id}.status`, response.status)
+      context.variables.set(`node.${context.node.id}.data`, data)
+
+      return {
+        status: success ? 'succeeded' : 'failed',
+        outputs: { status: response.status, data, trigger: success },
+        error: success ? undefined : `HTTP ${response.status}`,
+      }
+    } catch (err) {
+      return { status: 'failed', outputs: {}, error: (err as Error).message }
+    }
+  }
+}
+
+export class HumanInputWorkflowNode extends WorkflowNodeBase {
+  protected async runInternal(context: NodeExecutionContext): Promise<WorkflowNodeRunOutcome> {
+    const config = context.node.config
+    const prompt = context.resolveTemplate(String(config.prompt ?? ''))
+    const timeoutSeconds = Number(context.resolveValue(config.timeout_seconds ?? 60))
+
+    context.variables.set(`node.${context.node.id}.prompt`, prompt)
+    context.variables.set(`node.${context.node.id}.awaiting`, true)
+
+    return {
+      status: 'succeeded',
+      outputs: {
+        response: prompt,
+        confirmed: true,
+        trigger: true,
+      },
+    }
+  }
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>

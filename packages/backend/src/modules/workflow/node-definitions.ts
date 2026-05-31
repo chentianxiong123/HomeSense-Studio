@@ -388,6 +388,85 @@ const DEFINITIONS: WorkflowNodeDefinition[] = [
       { key: 'answer', label: 'Answer', type: 'string', description: 'Final workflow answer text.' },
     ],
   },
+  {
+    type: 'wait_until',
+    label: 'Wait Until',
+    icon: 'W',
+    color: '#6366f1',
+    category: 'control',
+    description: 'Poll a device condition until met or timeout. Use between steps that depend on state changes.',
+    default_config: { device_id: null, condition: 'app_foreground', expected: '', timeout_ms: 5000, poll_interval_ms: 800 },
+    config_schema: [
+      { key: 'device_id', label: 'Device ID', control: 'text', required: true },
+      {
+        key: 'condition',
+        label: 'Condition',
+        control: 'select',
+        required: true,
+        options: [
+          { label: 'App Foreground', value: 'app_foreground' },
+          { label: 'UI Element Visible', value: 'ui_element_visible' },
+          { label: 'Device Online', value: 'device_online' },
+        ],
+      },
+      { key: 'expected', label: 'Expected Value', control: 'text', required: true, helper: 'Package name, element text, or "true".' },
+      { key: 'timeout_ms', label: 'Timeout (ms)', control: 'number' },
+      { key: 'poll_interval_ms', label: 'Poll Interval (ms)', control: 'number' },
+    ],
+    output_schema: [
+      { key: 'met', label: 'Condition Met', type: 'boolean', description: 'True when condition was satisfied before timeout.' },
+      { key: 'elapsed_ms', label: 'Elapsed MS', type: 'number', description: 'Time spent waiting.' },
+      { key: 'trigger', label: 'Trigger', type: 'boolean', description: 'True when condition met.' },
+    ],
+  },
+  {
+    type: 'http_request',
+    label: 'HTTP Request',
+    icon: 'H',
+    color: '#0891b2',
+    category: 'compute',
+    description: 'Make an HTTP request to an external API and return the response.',
+    default_config: { url: '', method: 'GET', headers: {}, body: '' },
+    config_schema: [
+      { key: 'url', label: 'URL', control: 'text', required: true },
+      {
+        key: 'method',
+        label: 'Method',
+        control: 'select',
+        options: [
+          { label: 'GET', value: 'GET' },
+          { label: 'POST', value: 'POST' },
+          { label: 'PUT', value: 'PUT' },
+          { label: 'DELETE', value: 'DELETE' },
+        ],
+      },
+      { key: 'headers', label: 'Headers', control: 'json' },
+      { key: 'body', label: 'Body', control: 'textarea' },
+    ],
+    output_schema: [
+      { key: 'status', label: 'Status Code', type: 'number', description: 'HTTP response status code.' },
+      { key: 'data', label: 'Response Data', type: 'object', description: 'Parsed JSON response or text.' },
+      { key: 'trigger', label: 'Trigger', type: 'boolean', description: 'True when request succeeds (2xx).' },
+    ],
+  },
+  {
+    type: 'human_input',
+    label: 'Human Input',
+    icon: 'U',
+    color: '#ec4899',
+    category: 'control',
+    description: 'Pause workflow and wait for user confirmation or input before continuing.',
+    default_config: { prompt: '', timeout_seconds: 60 },
+    config_schema: [
+      { key: 'prompt', label: 'Prompt', control: 'textarea', required: true, helper: 'Question to ask the user.' },
+      { key: 'timeout_seconds', label: 'Timeout (seconds)', control: 'number' },
+    ],
+    output_schema: [
+      { key: 'response', label: 'User Response', type: 'string', description: 'Text response from the user.' },
+      { key: 'confirmed', label: 'Confirmed', type: 'boolean', description: 'True if user confirmed or responded.' },
+      { key: 'trigger', label: 'Trigger', type: 'boolean', description: 'True when user responds.' },
+    ],
+  },
 ]
 
 class WorkflowNodeDefinitionRegistry {
