@@ -458,6 +458,31 @@ async function runtimeExecutionNode(state: State): Promise<Partial<State>> {
 
   for (let index = 0; index < steps.length; index += 1) {
     const step = steps[index]
+    const originalStep = selected.steps[index]
+
+    if (index > 0 && originalStep) {
+      if (originalStep.wait_condition) {
+        const waitResult = await executeSystemAgentTool('wait_until', {
+          device_id: step.params.device_id ?? originalStep.params.device_id,
+          condition: originalStep.wait_condition.condition,
+          expected: originalStep.wait_condition.expected,
+          timeout_ms: originalStep.wait_condition.timeout_ms ?? 5000,
+        })
+        if (waitResult.status === 'error') {
+          failures.push(waitResult.message ?? waitResult.error ?? 'wait_until timeout')
+          toolMessages.push({
+            role: 'tool',
+            tool_call_id: toolCalls[index].id,
+            name: step.executorName,
+            content: JSON.stringify({ error: waitResult.message ?? waitResult.error ?? 'wait_until timeout' }),
+          })
+          break
+        }
+      } else if (originalStep.delay_ms && originalStep.delay_ms > 0) {
+        await new Promise((resolve) => setTimeout(resolve, Math.min(originalStep.delay_ms!, 10000)))
+      }
+    }
+
     const result = await invokeResolvedStep(step, turnId)
     if (result.status === 'error') {
       failures.push(result.message ?? result.error ?? `${step.executorName}.${step.action} failed`)

@@ -5,6 +5,12 @@ export interface PlanStepDefinition {
   tool: string
   action: string
   params: Record<string, unknown>
+  delay_ms?: number
+  wait_condition?: {
+    condition: 'app_foreground' | 'ui_element_visible' | 'device_online'
+    expected: string
+    timeout_ms?: number
+  }
 }
 
 export interface CompiledPlanDefinition {
