@@ -924,6 +924,7 @@ onMounted(() => loadFilesystem(''))
   flex-direction: column;
   gap: 28px;
   background: #f7f9fa;
+  --workspace-mobile-tabs-height: 76px;
 }
 
 .workspace-head {
@@ -2013,7 +2014,7 @@ h1 {
 
 @media (max-width: 1100px) {
   .remote-page {
-    padding: 24px 18px 96px;
+    padding: 24px 18px calc(96px + env(safe-area-inset-bottom, 0px));
   }
 
   .workspace-head,
@@ -2064,9 +2065,9 @@ h1 {
 
   .workspace-tabs {
     position: fixed;
-    left: 12px;
-    right: 12px;
-    bottom: 12px;
+    left: calc(12px + env(safe-area-inset-left, 0px));
+    right: calc(12px + env(safe-area-inset-right, 0px));
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
     top: auto;
     grid-template-columns: repeat(6, minmax(0, 1fr));
     border-radius: 18px;
@@ -2120,7 +2121,7 @@ h1 {
   }
 
   .terminal-output {
-    height: calc(100dvh - 310px);
+    height: calc(100dvh - 310px - var(--workspace-mobile-tabs-height) - env(safe-area-inset-bottom, 0px));
     min-height: 300px;
   }
 }
