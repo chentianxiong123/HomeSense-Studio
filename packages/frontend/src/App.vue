@@ -10,6 +10,7 @@ const { locale, setLocale, t } = useLocale()
 const navItems = computed(() => [
   { key: 'chat', label: t('app.chat'), route: '/chat' },
   { key: 'studio', label: t('app.studio'), route: '/studio' },
+  { key: 'workspace', label: locale.value === 'zh' ? '远程' : 'Remote', route: '/workspace' },
   { key: 'assets', label: locale.value === 'zh' ? '资产' : 'Assets', route: '/assets' },
   { key: 'providers', label: locale.value === 'zh' ? '供应商' : 'Providers', route: '/providers' },
   { key: 'devices', label: locale.value === 'zh' ? '设备' : 'Devices', route: '/devices' },

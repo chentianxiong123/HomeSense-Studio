@@ -27,6 +27,12 @@ import {
   isSystemAgentTool,
 } from '../../system-tools/index.js'
 import type { L3Agent, ChatGraphState } from './types.js'
+import {
+  describeToolPolicy,
+  filterToolDefinitionsForPolicy,
+  isToolAllowedByPolicy,
+  type L3ToolPolicyKind,
+} from './tool-policy.js'
 import type { RuntimeTraceEvent } from '../graph.js'
 
 type GraphMessage = {
@@ -47,7 +53,8 @@ export class PiL3Agent implements L3Agent {
   async inference(state: ChatGraphState): Promise<Partial<ChatGraphState>> {
     const runtimeTrace: RuntimeTraceEvent[] = []
     const priorMessages = buildPriorAgentMessages(state)
-    const agentTools = buildPiAgentTools()
+    const toolPolicy = resolveL3ToolPolicyKind(state)
+    const agentTools = buildPiAgentTools(toolPolicy)
     const agent = new Agent({
       initialState: {
         systemPrompt: buildPiSystemPrompt(state),
@@ -83,6 +90,8 @@ export class PiL3Agent implements L3Agent {
               data: {
                 input: state.input,
                 message_count: graphMessages.length,
+                tool_policy: toolPolicy,
+                tool_count: agentTools.length,
               },
             },
           ],
@@ -109,14 +118,17 @@ export class PiL3Agent implements L3Agent {
 export const piL3Agent = new PiL3Agent()
 
 function buildPiSystemPrompt(state: ChatGraphState): string {
+  const toolPolicy = resolveL3ToolPolicyKind(state)
   return [
     'You are HomeSense, one unified smart-home assistant inside a smart-home studio.',
     'Answer the latest user message first. Keep greetings and small talk brief.',
     `Lightweight intent hint: ${state.lightIntent?.kind ?? 'unknown'}. Treat it as a routing hint, not as the user intent itself.`,
+    `Current L3 tool policy: ${toolPolicy}. ${describeToolPolicy(toolPolicy)}`,
     'Use only the provided device-management, workflow, and system tools. Do not invent shell or file-system tools.',
-    'For ordinary reversible smart-home actions, use the device tools directly when the target is clear.',
-    'When a device action is uncertain, first rehearse it before attempting the real action.',
-    'For reusable multi-step routines, prefer list_workflows -> preview_workflow -> run_workflow.',
+    'If the policy is read_only, only inspect and explain. Do not rehearse, execute, run workflows, write memory, or set timers.',
+    'If the policy is preview_only, use read-only tools plus rehearsal and preview tools only. Do not call execute_device_capability or run_workflow.',
+    'If the policy is execute_allowed, use direct execution only for short clear commands and rehearse uncertain device actions before attempting the real action.',
+    'For reusable multi-step routines, prefer list_workflows -> preview_workflow, and run_workflow only when the policy allows execution and the preview is executable.',
     `Active runtime context: ${JSON.stringify(state.runtimeContext?.working_context ?? {})}`,
     `Small retrieved context: ${JSON.stringify(state.runtimeContext?.retrieval_hits ?? [])}`,
     `Device inventory snapshot: ${JSON.stringify(state.deviceInventory ?? [])}`,
@@ -168,12 +180,13 @@ function trimMessagesBeforeCurrentInput(
   return messages
 }
 
-function buildPiAgentTools(): any[] {
-  return [
+function buildPiAgentTools(policy: L3ToolPolicyKind): any[] {
+  const toolDefinitions = filterToolDefinitionsForPolicy([
     ...DEVICE_AGENT_TOOL_DEFINITIONS,
     ...WORKFLOW_AGENT_TOOL_DEFINITIONS,
     ...SYSTEM_AGENT_TOOL_DEFINITIONS,
-  ].map((definition) => {
+  ], policy)
+  return toolDefinitions.map((definition) => {
     const name = definition.function.name
     return {
       name,
@@ -182,7 +195,7 @@ function buildPiAgentTools(): any[] {
       parameters: definition.function.parameters,
       executionMode: 'parallel' as const,
       execute: async (_toolCallId: string, params: Record<string, unknown>) => {
-        const result = await executeHomesenseTool(name, params)
+        const result = await executeHomesenseTool(name, params, policy)
         if (result.status !== 'success') {
           throw new Error(result.message ?? result.error ?? `Tool ${name} failed`)
         }
@@ -195,7 +208,15 @@ function buildPiAgentTools(): any[] {
   })
 }
 
-async function executeHomesenseTool(name: string, params: Record<string, unknown>) {
+async function executeHomesenseTool(name: string, params: Record<string, unknown>, policy: L3ToolPolicyKind) {
+  if (!isToolAllowedByPolicy(name, policy)) {
+    return {
+      status: 'error' as const,
+      executor: name,
+      error: 'TOOL_POLICY_BLOCKED',
+      message: `Tool ${name} is not allowed under ${policy}.`,
+    }
+  }
   if (isDeviceAgentTool(name)) return executeDeviceToolWithRehearsal(name, params)
   if (isWorkflowAgentTool(name)) return executeWorkflowAgentTool(name, params)
   if (isSystemAgentTool(name)) return executeSystemAgentTool(name, params)
@@ -372,6 +393,12 @@ function buildPiTraceEvents(event: { type: string; [key: string]: unknown }): Ru
   }
 
   return []
+}
+
+function resolveL3ToolPolicyKind(state: ChatGraphState): L3ToolPolicyKind {
+  if (state.lightIntent?.tool_policy) return state.lightIntent.tool_policy
+  if (state.lightIntent?.allow_tools) return 'execute_allowed'
+  return 'none'
 }
 
 function piUsage(promptTokens: number, completionTokens: number): Usage {

@@ -91,7 +91,7 @@ const SMOKE_SEQUENCE: Array<Omit<SmokeStep, 'status' | 'duration_ms' | 'result' 
   { order: 4, label: 'List sandbox installed packages', tool: 'sandbox-adb-cli', action: 'list_packages', params: { keyword: 'bili' } },
   { order: 5, label: 'Launch Bilibili TV in sandbox', tool: 'sandbox-adb-cli', action: 'launch_app', params: { package: 'com.xiaodianshi.tv.yst' } },
   { order: 6, label: 'Notify via Feishu (channel)', tool: 'service:channel.feishu.send', action: 'invoke', params: { text: 'Smoke test passed: Toshiba TV Bilibili ready' } },
-  { order: 7, label: 'Prepare Bilibili dry-run upload', tool: 'bilibili-cli', action: 'prepare_upload', params: { title: 'HomeSense smoke', source_path: './exports/smoke.mp4', dry_run: true } },
+  { order: 7, label: 'Check real Bilibili CLI bridge', tool: 'bilibili-cli', action: 'health', params: {} },
 ]
 
 export async function devtestRoutes(app: FastifyInstance) {

@@ -219,7 +219,9 @@ describe('chat graph context policy', () => {
     })
 
     expect(matchCommandMock).not.toHaveBeenCalled()
-    expect(capturedTools).toBeUndefined()
+    const toolNames = ((capturedTools as any[]) ?? []).map((tool) => tool?.function?.name).filter(Boolean)
+    expect(toolNames).not.toContain('execute_device_capability')
+    expect(toolNames).not.toContain('run_workflow')
     expect(capturedMessages.map((message) => message.content).join('\n')).toContain('先别操作设备')
   })
 
@@ -253,7 +255,9 @@ describe('chat graph context policy', () => {
     })
 
     expect(matchCommandMock).not.toHaveBeenCalled()
-    expect(capturedTools).toBeUndefined()
+    const toolNames = ((capturedTools as any[]) ?? []).map((tool) => tool?.function?.name).filter(Boolean)
+    expect(toolNames).not.toContain('execute_device_capability')
+    expect(toolNames).not.toContain('run_workflow')
   })
 
   it('keeps questions and complex action sentences out of the L1 reflex matcher', async () => {
@@ -368,7 +372,7 @@ describe('chat graph context policy', () => {
     expect(capturedTools).toBeDefined()
   })
 
-  it('exposes workflow tools together with device tools for executable routines', async () => {
+  it('keeps workflow requests in preview mode instead of exposing direct execution tools', async () => {
     await runGraph('执行看电视流程')
 
     const toolNames = ((capturedTools as any[]) ?? [])
@@ -378,7 +382,7 @@ describe('chat graph context policy', () => {
     expect(toolNames).toContain('list_user_devices')
     expect(toolNames).toContain('list_workflows')
     expect(toolNames).toContain('preview_workflow')
-    expect(toolNames).toContain('run_workflow')
+    expect(toolNames).not.toContain('run_workflow')
   })
 
   it('adds structured workflow tool data to runtime execution trace', async () => {

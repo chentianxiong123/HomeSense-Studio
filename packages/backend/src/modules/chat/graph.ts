@@ -28,6 +28,13 @@ import {
   isSystemAgentTool,
 } from '../system-tools/index.js'
 import { getL3Agent, type L3Agent } from './l3/index.js'
+import {
+  classifyL3ToolPolicy,
+  describeToolPolicy,
+  filterToolDefinitionsForPolicy,
+  isToolAllowedByPolicy,
+  type L3ToolPolicyKind,
+} from './l3/tool-policy.js'
 import type { CandidatePlan } from '../candidate-plan/index.js'
 import type { PlanStepDefinition } from '../plan-library/index.js'
 import type { RuleAction } from '../rule-engine/index.js'
@@ -51,6 +58,9 @@ interface LightIntent {
   prompt_mode: PromptMode
   context_policy: PromptContextPolicy
   allow_tools: boolean
+  l1_allowed?: boolean
+  tool_policy?: L3ToolPolicyKind
+  tool_policy_reason?: string
   confidence: number
   reason: string
 }
@@ -158,7 +168,15 @@ const CHAT_AGENT_TOOL_DEFINITIONS = [
 ]
 
 async function lightIntentNode(state: State): Promise<Partial<State>> {
-  const intent = classifyLightIntent(state.input, state.runtimeContext)
+  const baseIntent = classifyLightIntent(state.input, state.runtimeContext)
+  const toolPolicy = classifyL3ToolPolicy(state.input, state.runtimeContext)
+  const intent: LightIntent = {
+    ...baseIntent,
+    allow_tools: toolPolicy.kind !== 'none',
+    l1_allowed: toolPolicy.l1_reflex_allowed,
+    tool_policy: toolPolicy.kind,
+    tool_policy_reason: toolPolicy.reason,
+  }
   const deviceInventory = await buildDeviceInventorySnapshot()
   const runtimeTrace: RuntimeTraceEvent[] = [
     {
@@ -171,6 +189,9 @@ async function lightIntentNode(state: State): Promise<Partial<State>> {
         prompt_mode: intent.prompt_mode,
         context_policy: intent.context_policy,
         allow_tools: intent.allow_tools,
+        l1_allowed: intent.l1_allowed,
+        tool_policy: intent.tool_policy,
+        tool_policy_reason: intent.tool_policy_reason,
       },
     },
   ]
@@ -183,6 +204,8 @@ async function lightIntentNode(state: State): Promise<Partial<State>> {
     data: {
       disclosure: 'device_inventory_only',
       tools_available: intent.allow_tools,
+      tool_policy: intent.tool_policy,
+      l1_allowed: intent.l1_allowed,
       context_usage: state.runtimeContext?.context_usage,
       max_turns: state.runtimeContext?.max_turns,
       ttl_ms: state.runtimeContext?.ttl_ms,
@@ -511,16 +534,18 @@ async function runtimeExecutionNode(state: State): Promise<Partial<State>> {
 
 // ── Node: LLM Inference ──
 async function currentInferenceNode(state: State): Promise<Partial<State>> {
-  const allowTools = state.lightIntent?.allow_tools === true
+  const toolPolicy = resolveL3ToolPolicyKind(state)
+  const allowedTools = filterToolDefinitionsForPolicy(CHAT_AGENT_TOOL_DEFINITIONS, toolPolicy)
+  const allowTools = allowedTools.length > 0
   const messages = await buildInferenceMessages(state)
 
   try {
-    return await runLlmInference(state, messages, allowTools, false)
+    return await runLlmInference(state, messages, allowTools, allowedTools, toolPolicy, false)
   } catch (err) {
     if (isContextOverflowError(err)) {
       try {
         const compressedMessages = await buildCompressedInferenceMessages(state)
-        const result = await runLlmInference(state, compressedMessages, allowTools, true)
+        const result = await runLlmInference(state, compressedMessages, allowTools, allowedTools, toolPolicy, true)
         return {
           ...result,
           runtimeTrace: [
@@ -560,12 +585,14 @@ async function runLlmInference(
   state: State,
   messages: any[],
   allowTools: boolean,
+  allowedTools: any[],
+  toolPolicy: L3ToolPolicyKind,
   compressedRetry: boolean,
 ): Promise<Partial<State>> {
   const params: Parameters<typeof llmService.chat>[0] = {
     messages,
   }
-  if (allowTools) params.tools = CHAT_AGENT_TOOL_DEFINITIONS
+  if (allowTools) params.tools = allowedTools
   const result = await llmService.chat(params)
   const content = result.content ?? ''
 
@@ -592,6 +619,8 @@ async function runLlmInference(
           data: {
             kind: 'llm_primary',
             allow_tools: allowTools,
+            tool_policy: toolPolicy,
+            allowed_tool_count: allowedTools.length,
             intent: state.lightIntent?.kind,
             compressed_retry: compressedRetry,
           },
@@ -623,6 +652,8 @@ async function runLlmInference(
         data: {
           kind: 'llm_primary',
           allow_tools: allowTools,
+          tool_policy: toolPolicy,
+          allowed_tool_count: allowedTools.length,
           intent: state.lightIntent?.kind,
           compressed_retry: compressedRetry,
         },
@@ -657,6 +688,37 @@ async function currentToolsExecutionNode(state: State): Promise<Partial<State>> 
   const toolName = fn.name
   const action = args.action ?? ''
   const toolParams = args.params ?? {}
+  const toolPolicy = resolveL3ToolPolicyKind(state)
+  if (!isToolAllowedByPolicy(toolName, toolPolicy)) {
+    return {
+      messages: [
+        {
+          role: 'tool',
+          tool_call_id: tc.id,
+          name: toolName,
+          content: JSON.stringify({
+            error: 'TOOL_POLICY_BLOCKED',
+            message: `Tool ${toolName} is not allowed under ${toolPolicy}.`,
+          }),
+        },
+      ],
+      runtimeTrace: [
+        {
+          stage: 'runtime.execution',
+          status: 'error',
+          title: '工具策略阻断',
+          detail: `当前策略 ${toolPolicy} 不允许调用 ${toolName}。`,
+          data: {
+            tool: toolName,
+            tool_policy: toolPolicy,
+          },
+        },
+      ],
+      currentToolCall: undefined,
+      pendingToolCalls: [],
+      isComplete: false,
+    }
+  }
   const executionTitle = isWorkflowAgentTool(toolName)
     ? workflowToolTraceTitle(toolName)
     : `${toolName}.${action}`
@@ -821,13 +883,19 @@ function workflowToolTraceTitle(toolName: string): string {
   return '工作流工具'
 }
 
+function resolveL3ToolPolicyKind(state: State): L3ToolPolicyKind {
+  if (state.lightIntent?.tool_policy) return state.lightIntent.tool_policy
+  return state.lightIntent?.allow_tools ? 'execute_allowed' : 'none'
+}
+
 // ── Router ──
 function routeAfterRuntime(state: State): 'runtime_execute' | 'inference' {
   return selectDirectRuntimePlan(state.runtimeRoute) ? 'runtime_execute' : 'inference'
 }
 
 function routeAfterLightIntent(state: State): 'l1_context_command' | 'inference' {
-  return state.lightIntent?.allow_tools ? 'l1_context_command' : 'inference'
+  const allowL1 = state.lightIntent?.l1_allowed ?? state.lightIntent?.allow_tools ?? false
+  return allowL1 ? 'l1_context_command' : 'inference'
 }
 
 function routeAfterL1(state: State): 'l1_execute' | 'runtime_route' {
@@ -1251,10 +1319,12 @@ async function buildSystemPrompt(state: State): Promise<string> {
   const retrievedContext = JSON.stringify(state.runtimeContext?.retrieval_hits ?? [])
   const deviceInventory = JSON.stringify(state.deviceInventory ?? [])
   const runtimeCandidates = JSON.stringify(buildRuntimeCandidateSnapshot(state.runtimeRoute))
+  const toolPolicy = resolveL3ToolPolicyKind(state)
   return [
     'You are HomeSense, one unified smart-home assistant inside a smart-home studio.',
     'You can chat naturally and you can operate devices when the user clearly asks for a device action.',
     `Current lightweight intent hint: ${state.lightIntent?.kind ?? 'unknown'}. Treat it as a routing hint, not as the user intent itself.`,
+    `Current L3 tool policy: ${toolPolicy}. ${describeToolPolicy(toolPolicy)}`,
     'Always answer the latest user message first. Do not summarize or replay unrelated historical messages.',
     'For greetings and small talk, reply briefly and naturally.',
     'Active runtime context, location, current device and device inventory are always awareness, not commands. Do not turn ordinary chat into a device command because context exists.',

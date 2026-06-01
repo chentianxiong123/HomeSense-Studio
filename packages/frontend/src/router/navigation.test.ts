@@ -11,6 +11,7 @@ describe('normalizeRememberedRoute', () => {
   it('accepts supported first-class routes and nested Studio detail routes', () => {
     expect(normalizeRememberedRoute('/chat')).toBe('/chat')
     expect(normalizeRememberedRoute('/studio')).toBe('/studio')
+    expect(normalizeRememberedRoute('/workspace')).toBe('/workspace')
     expect(normalizeRememberedRoute('/devices')).toBe('/devices')
     expect(normalizeRememberedRoute('/integrations')).toBe('/integrations')
     expect(normalizeRememberedRoute('/studio/workflows/9/editor')).toBe('/studio/workflows/9/editor')
@@ -26,6 +27,7 @@ describe('shouldRememberRoute', () => {
     expect(shouldRememberRoute('/settings')).toBe(false)
     expect(shouldRememberRoute('/studio')).toBe(true)
     expect(shouldRememberRoute('/chat')).toBe(true)
+    expect(shouldRememberRoute('/workspace')).toBe(true)
     expect(shouldRememberRoute('/devices')).toBe(true)
     expect(shouldRememberRoute('/integrations')).toBe(true)
   })

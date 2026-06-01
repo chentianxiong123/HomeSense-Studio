@@ -4,6 +4,7 @@ export const LAST_ROUTE_STORAGE_KEY = 'homesense-studio.last-route'
 const ROUTE_PATTERNS = [
   /^\/chat$/,
   /^\/studio$/,
+  /^\/workspace$/,
   /^\/assets$/,
   /^\/devices$/,
   /^\/integrations$/,

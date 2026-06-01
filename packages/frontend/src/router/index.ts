@@ -7,6 +7,7 @@ import DevicesView from '@/views/DevicesView.vue'
 import DeviceDetailView from '@/views/DeviceDetailView.vue'
 import LLMView from '@/views/LLMView.vue'
 import IntegrationsView from '@/views/IntegrationsView.vue'
+import RemoteWorkspaceView from '@/views/RemoteWorkspaceView.vue'
 import MiCliDetailView from '@/views/MiCliDetailView.vue'
 import AdbCliDetailView from '@/views/AdbCliDetailView.vue'
 import MiTestView from '@/views/MiTestView.vue'
@@ -27,6 +28,7 @@ export const router = createRouter({
     },
     { path: '/chat', name: 'chat', component: ChatView },
     { path: '/studio', name: 'studio-home', component: StudioHomeView },
+    { path: '/workspace', name: 'remote-workspace', component: RemoteWorkspaceView },
     { path: '/assets', name: 'assets-home', component: AssetsView },
     { path: '/devices', name: 'devices', component: DevicesView },
     { path: '/providers', name: 'llm-models', component: LLMView },
