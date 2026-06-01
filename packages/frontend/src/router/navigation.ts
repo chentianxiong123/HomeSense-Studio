@@ -1,7 +1,8 @@
-export const APP_DEFAULT_ROUTE = '/studio'
+export const APP_DEFAULT_ROUTE = '/home'
 export const LAST_ROUTE_STORAGE_KEY = 'homesense-studio.last-route'
 
 const ROUTE_PATTERNS = [
+  /^\/home$/,
   /^\/chat$/,
   /^\/studio$/,
   /^\/workspace$/,

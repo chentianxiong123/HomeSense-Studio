@@ -2,7 +2,7 @@
   "name": "HomeSense Studio",
   "short_name": "HomeSense",
   "description": "Home hub studio for chat, workflows, devices, workspace, and streaming.",
-  "start_url": "/",
+  "start_url": "/home",
   "scope": "/",
   "display": "standalone",
   "background_color": "#f7f9fa",

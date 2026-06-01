@@ -8,6 +8,7 @@ const router = useRouter()
 const { locale, setLocale, t } = useLocale()
 
 const navItems = computed(() => [
+  { key: 'home', label: locale.value === 'zh' ? '首页' : 'Home', route: '/home' },
   { key: 'chat', label: t('app.chat'), route: '/chat' },
   { key: 'studio', label: t('app.studio'), route: '/studio' },
   { key: 'workspace', label: locale.value === 'zh' ? '远程' : 'Remote', route: '/workspace' },

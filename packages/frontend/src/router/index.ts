@@ -8,6 +8,7 @@ import DeviceDetailView from '@/views/DeviceDetailView.vue'
 import LLMView from '@/views/LLMView.vue'
 import IntegrationsView from '@/views/IntegrationsView.vue'
 import RemoteWorkspaceView from '@/views/RemoteWorkspaceView.vue'
+import AppHomeView from '@/views/AppHomeView.vue'
 import MiCliDetailView from '@/views/MiCliDetailView.vue'
 import AdbCliDetailView from '@/views/AdbCliDetailView.vue'
 import MiTestView from '@/views/MiTestView.vue'
@@ -26,6 +27,7 @@ export const router = createRouter({
         return normalizeRememberedRoute(window.localStorage.getItem(LAST_ROUTE_STORAGE_KEY))
       },
     },
+    { path: '/home', name: 'app-home', component: AppHomeView },
     { path: '/chat', name: 'chat', component: ChatView },
     { path: '/studio', name: 'studio-home', component: StudioHomeView },
     { path: '/workspace', name: 'remote-workspace', component: RemoteWorkspaceView },
