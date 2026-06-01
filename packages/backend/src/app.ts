@@ -34,6 +34,9 @@ import { memoryAssetsRoutes } from './modules/memory-assets/routes.js'
 import { runtimeCapabilityMapRoutes } from './modules/runtime-capability-map/routes.js'
 import { externalIntegrationsService } from './modules/external-integrations/index.js'
 import { externalIntegrationRoutes } from './modules/external-integrations/routes.js'
+import { remoteWorkspaceRoutes } from './modules/remote-workspace/routes.js'
+import { remoteWorkspaceService } from './modules/remote-workspace/index.js'
+import { streamingGatewayRoutes } from './modules/streaming-gateway/routes.js'
 import { eventBus } from './modules/event-bus/index.js'
 // import { deviceStatePoller } from './modules/device-state-poller/index.js'
 import { ruleEngine } from './modules/rule-engine/index.js'
@@ -175,6 +178,8 @@ export async function buildApp() {
   app.register(memoryAssetsRoutes)
   app.register(runtimeCapabilityMapRoutes)
   app.register(externalIntegrationRoutes)
+  app.register(remoteWorkspaceRoutes)
+  app.register(streamingGatewayRoutes)
 
   app.register(async (instance) => {
     instance.get('/ws', { websocket: true }, (socket) => {
@@ -268,6 +273,7 @@ export async function buildApp() {
     clearInterval(compensationTimer)
     clearInterval(embeddingRefreshTimer)
     cronService.stop()
+    remoteWorkspaceService.shutdown()
     // deviceStatePoller.stop()
     wsClients.clear()
   })

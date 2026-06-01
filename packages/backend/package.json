@@ -11,13 +11,14 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@fastify/cors": "^10.0.2",
-    "@fastify/websocket": "^11.0.2",
     "@earendil-works/pi-agent-core": "file:../../../HomeSense/References/pi/packages/agent",
     "@earendil-works/pi-ai": "file:../../../HomeSense/References/pi/packages/ai",
+    "@fastify/cors": "^10.0.2",
+    "@fastify/websocket": "^11.0.2",
     "better-sqlite3": "^11.9.1",
     "dotenv": "^16.4.7",
     "fastify": "^5.3.3",
+    "node-pty": "^1.1.0",
     "openai": "^4.85.0",
     "zod": "^3.24.2"
   },
