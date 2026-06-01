@@ -18,6 +18,14 @@ const navItems = computed(() => [
   { key: 'integrations', label: locale.value === 'zh' ? '集成' : 'Integrations', route: '/integrations' },
 ])
 
+const mobileNavItems = computed(() => [
+  { key: 'home', label: locale.value === 'zh' ? '首页' : 'Home', route: '/home', marker: 'H' },
+  { key: 'chat', label: t('app.chat'), route: '/chat', marker: 'AI' },
+  { key: 'studio', label: t('app.studio'), route: '/studio', marker: 'WF' },
+  { key: 'workspace', label: locale.value === 'zh' ? '工作台' : 'Work', route: '/workspace', marker: 'NAS' },
+  { key: 'devices', label: locale.value === 'zh' ? '设备' : 'Devices', route: '/devices', marker: 'DEV' },
+])
+
 function isActive(target: string) {
   return route.path === target || route.path.startsWith(`${target}/`)
 }
@@ -47,6 +55,17 @@ function isActive(target: string) {
     <main class="app-main">
       <RouterView />
     </main>
+    <nav class="mobile-bottom-nav" :aria-label="locale === 'zh' ? '主导航' : 'Primary navigation'">
+      <button
+        v-for="item in mobileNavItems"
+        :key="item.key"
+        :class="['mobile-nav-btn', { active: isActive(item.route) }]"
+        @click="router.push(item.route)"
+      >
+        <span>{{ item.marker }}</span>
+        <strong>{{ item.label }}</strong>
+      </button>
+    </nav>
   </div>
 </template>
 
@@ -72,6 +91,7 @@ function isActive(target: string) {
   --app-safe-right: env(safe-area-inset-right, 0px);
   --app-safe-bottom: env(safe-area-inset-bottom, 0px);
   --app-safe-left: env(safe-area-inset-left, 0px);
+  --app-mobile-nav-height: 72px;
 }
 
 * {
@@ -272,6 +292,10 @@ html, body, #app {
   -webkit-overflow-scrolling: touch;
 }
 
+.mobile-bottom-nav {
+  display: none;
+}
+
 /* Base styles for modern scrollbars */
 ::-webkit-scrollbar {
   width: 8px;
@@ -342,23 +366,7 @@ html, body, #app {
   }
 
   .tab-nav {
-    flex: 1;
-    gap: 6px;
-    padding: 0 2px;
-  }
-
-  .tab-btn {
-    height: 42px;
-    min-width: 70px;
-    padding: 0 12px;
-    border-radius: 12px;
-    font-size: 12px;
-    letter-spacing: 0.03em;
-  }
-
-  .tab-btn.active::after {
-    left: 14px;
-    right: 14px;
+    display: none;
   }
 
   .header-actions {
@@ -377,7 +385,63 @@ html, body, #app {
   }
 
   .app-main {
-    padding-bottom: var(--app-safe-bottom);
+    padding-bottom: calc(var(--app-mobile-nav-height) + var(--app-safe-bottom));
+  }
+
+  .mobile-bottom-nav {
+    position: fixed;
+    left: calc(10px + var(--app-safe-left));
+    right: calc(10px + var(--app-safe-right));
+    bottom: calc(10px + var(--app-safe-bottom));
+    z-index: 120;
+    height: var(--app-mobile-nav-height);
+    padding: 7px;
+    border: 1px solid rgba(226, 232, 240, 0.92);
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(18px);
+    box-shadow: 0 18px 42px rgba(15, 23, 42, 0.16);
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .mobile-nav-btn {
+    min-width: 0;
+    border: 1px solid transparent;
+    border-radius: 14px;
+    background: transparent;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+  }
+
+  .mobile-nav-btn span {
+    color: inherit;
+    font-size: 10px;
+    font-weight: 950;
+    line-height: 1;
+  }
+
+  .mobile-nav-btn strong {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: inherit;
+    font-size: 11px;
+    font-weight: 900;
+    line-height: 1.1;
+    white-space: nowrap;
+  }
+
+  .mobile-nav-btn.active {
+    border-color: rgba(16, 185, 129, 0.18);
+    background: rgba(16, 185, 129, 0.1);
+    color: #0f766e;
   }
 }
 </style>
