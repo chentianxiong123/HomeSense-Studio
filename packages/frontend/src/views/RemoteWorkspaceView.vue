@@ -1,10 +1,18 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
-import { FitAddon } from '@xterm/addon-fit'
-import { Terminal } from '@xterm/xterm'
-import '@xterm/xterm/css/xterm.css'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { externalIntegrationApi, type ExternalIntegrationRecord } from '@/api/externalIntegrations'
+import LaneGrid from '@/components/remote-workspace/LaneGrid.vue'
+import LocalTerminalPanel from '@/components/remote-workspace/LocalTerminalPanel.vue'
+import LocalFilesystemPanel from '@/components/remote-workspace/LocalFilesystemPanel.vue'
+import NetworkAccessPanel from '@/components/remote-workspace/NetworkAccessPanel.vue'
+import OptionalWorkspaceViewport from '@/components/remote-workspace/OptionalWorkspaceViewport.vue'
+import RemoteHostsPanel from '@/components/remote-workspace/RemoteHostsPanel.vue'
+import RuntimeStatusPanel from '@/components/remote-workspace/RuntimeStatusPanel.vue'
+import StreamingGatewayPanel from '@/components/remote-workspace/StreamingGatewayPanel.vue'
+import WorkspaceHeader from '@/components/remote-workspace/WorkspaceHeader.vue'
+import WorkspaceModuleTabs from '@/components/remote-workspace/WorkspaceModuleTabs.vue'
+import WorkspaceSummaryStrip from '@/components/remote-workspace/WorkspaceSummaryStrip.vue'
 import {
   remoteWorkspaceApi,
   type RemoteWorkspaceFileEntry,
@@ -48,6 +56,8 @@ type StreamingGatewaySpec = {
   capabilities: string[]
 }
 
+type WorkspacePanelKey = 'overview' | 'terminal' | 'files' | 'network' | 'streaming' | 'remote'
+
 const router = useRouter()
 const { locale } = useLocale()
 const integrations = ref<ExternalIntegrationRecord[]>([])
@@ -68,14 +78,6 @@ const targetLabel = ref('')
 const targetEndpoint = ref('')
 const targetRoot = ref('')
 const targetAuthMode = ref('ssh_key_or_agent')
-const terminalTargetId = ref('local:shell')
-const terminalOutput = ref('')
-const terminalInput = ref('')
-const terminalConnected = ref(false)
-const terminalConnecting = ref(false)
-const terminalError = ref('')
-const terminalSessionId = ref('')
-const terminalElement = ref<HTMLElement | null>(null)
 const filesystemTargetId = ref('local:source')
 const filesystemPath = ref('')
 const filesystemList = ref<RemoteWorkspaceFileList | null>(null)
@@ -106,16 +108,22 @@ const streamingHostBasePort = ref('47989')
 const streamingHostMac = ref('')
 const streamingHostRoom = ref('')
 const streamingHostNetworkPath = ref('lan')
-let terminalSocket: WebSocket | null = null
-let terminalInstance: Terminal | null = null
-let terminalFitAddon: FitAddon | null = null
-let terminalResizeObserver: ResizeObserver | null = null
+const activePanel = ref<WorkspacePanelKey>('overview')
 
 const isZh = computed(() => locale.value === 'zh')
 
 function label(zh: string, en: string) {
   return isZh.value ? zh : en
 }
+
+const workspacePanels = computed<Array<{ key: WorkspacePanelKey; label: string; short: string }>>(() => [
+  { key: 'overview', label: label('总览', 'Overview'), short: label('总览', 'Home') },
+  { key: 'terminal', label: label('本机终端', 'Terminal'), short: label('终端', 'TTY') },
+  { key: 'files', label: label('文件系统', 'Files'), short: label('文件', 'Files') },
+  { key: 'network', label: label('网络入口', 'Network'), short: label('网络', 'Net') },
+  { key: 'streaming', label: label('串流网关', 'Streaming'), short: label('串流', 'Stream') },
+  { key: 'remote', label: label('远程扩展', 'Remote'), short: label('远程', 'SSH') },
+])
 
 const laneSpecs = computed<LaneSpec[]>(() => [
   {
@@ -682,141 +690,6 @@ function openTarget(target: RemoteWorkspaceTarget) {
   window.open(target.endpoint, '_blank', 'noopener,noreferrer')
 }
 
-function appendTerminalOutput(value: string) {
-  terminalOutput.value = `${terminalOutput.value}${value}`.slice(-60000)
-  terminalInstance?.write(value)
-}
-
-async function connectTerminal() {
-  disconnectTerminal()
-  terminalConnecting.value = true
-  terminalConnected.value = false
-  terminalError.value = ''
-  terminalOutput.value = ''
-  await ensureTerminalInstance()
-  const size = fitTerminal()
-  terminalInstance?.writeln(`${label('连接终端', 'Connecting terminal')} ${terminalTargetId.value}`)
-  const socket = new WebSocket(remoteWorkspaceApi.terminalUrl({
-    targetId: terminalTargetId.value,
-    sessionId: terminalSessionId.value,
-    cols: size.cols,
-    rows: size.rows,
-  }))
-  terminalSocket = socket
-  socket.onopen = () => {
-    terminalConnecting.value = false
-    terminalConnected.value = true
-    sendTerminalResize()
-  }
-  socket.onmessage = (event) => {
-    try {
-      const message = JSON.parse(String(event.data)) as { type?: string; data?: any }
-      if (message.type === 'session_opened') {
-        terminalSessionId.value = String(message.data?.session_id ?? '')
-        terminalInstance?.writeln(`[${message.data?.label ?? 'terminal'}] ${message.data?.command ?? ''} ${(message.data?.args ?? []).join(' ')}`)
-        return
-      }
-      if (message.type === 'stdout' || message.type === 'stderr') {
-        appendTerminalOutput(String(message.data ?? ''))
-        return
-      }
-      if (message.type === 'exit') {
-        appendTerminalOutput(`\n[exit] code=${message.data?.code ?? ''} signal=${message.data?.signal ?? ''}\n`)
-        return
-      }
-      if (message.type === 'error') {
-        terminalError.value = String(message.data?.message ?? 'terminal error')
-        appendTerminalOutput(`\n[error] ${terminalError.value}\n`)
-      }
-    } catch {
-      appendTerminalOutput(String(event.data))
-    }
-  }
-  socket.onerror = () => {
-    terminalError.value = label('终端连接失败。', 'Terminal connection failed.')
-  }
-  socket.onclose = () => {
-    terminalConnecting.value = false
-    terminalConnected.value = false
-    if (terminalSocket === socket) terminalSocket = null
-  }
-}
-
-function disconnectTerminal() {
-  if (!terminalSocket) return
-  try {
-    terminalSocket.send('close')
-    terminalSocket.close()
-  } catch {}
-  terminalSocket = null
-  terminalConnected.value = false
-  terminalConnecting.value = false
-}
-
-function sendTerminalInput() {
-  if (!terminalSocket || terminalSocket.readyState !== WebSocket.OPEN || !terminalInput.value) return
-  const value = `${terminalInput.value}\n`
-  terminalSocket.send(JSON.stringify({ type: 'input', data: value }))
-  terminalInput.value = ''
-}
-
-async function ensureTerminalInstance() {
-  await nextTick()
-  if (!terminalElement.value) return
-  if (terminalInstance) return
-  terminalInstance = new Terminal({
-    cursorBlink: true,
-    convertEol: true,
-    fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
-    fontSize: 13,
-    lineHeight: 1.25,
-    theme: {
-      background: '#0f172a',
-      foreground: '#d1fae5',
-      cursor: '#34d399',
-      selectionBackground: '#1e40af',
-    },
-  })
-  terminalFitAddon = new FitAddon()
-  terminalInstance.loadAddon(terminalFitAddon)
-  terminalInstance.open(terminalElement.value)
-  terminalInstance.onData((data) => {
-    if (terminalSocket?.readyState === WebSocket.OPEN) {
-      terminalSocket.send(JSON.stringify({ type: 'input', data }))
-    }
-  })
-  terminalResizeObserver = new ResizeObserver(() => {
-    const size = fitTerminal()
-    if (terminalSocket?.readyState === WebSocket.OPEN) {
-      terminalSocket.send(JSON.stringify({ type: 'resize', data: size }))
-    }
-  })
-  terminalResizeObserver.observe(terminalElement.value)
-}
-
-function fitTerminal() {
-  try {
-    terminalFitAddon?.fit()
-  } catch {}
-  return {
-    cols: terminalInstance?.cols || 120,
-    rows: terminalInstance?.rows || 32,
-  }
-}
-
-function sendTerminalResize() {
-  if (!terminalSocket || terminalSocket.readyState !== WebSocket.OPEN) return
-  terminalSocket.send(JSON.stringify({ type: 'resize', data: fitTerminal() }))
-}
-
-function disposeTerminal() {
-  terminalResizeObserver?.disconnect()
-  terminalResizeObserver = null
-  terminalInstance?.dispose()
-  terminalInstance = null
-  terminalFitAddon = null
-}
-
 async function loadFilesystem(path = filesystemPath.value) {
   filesystemLoading.value = true
   filesystemError.value = ''
@@ -882,659 +755,167 @@ onMounted(loadWorkspaceTargets)
 onMounted(loadStreamingHosts)
 onMounted(loadStreamingRuntimeStatus)
 onMounted(() => loadFilesystem(''))
-onUnmounted(() => {
-  disconnectTerminal()
-  disposeTerminal()
-})
 </script>
 
 <template>
   <div class="remote-page">
-    <header class="workspace-head">
-      <div>
-        <span class="eyebrow">{{ label('远程工作台', 'Remote Workspace') }}</span>
-        <h1>{{ label('NAS 本机工作区', 'NAS Local Workspace') }}</h1>
-        <p>
-          {{ label('这是家庭中枢自己的运行区：默认管理 NAS 本机源码、终端、文件和服务；SSH 只是扩展到局域网其他主机的高级能力。', 'This is the home hub workspace: manage the NAS local source, terminal, files, and services by default; SSH is an advanced extension for other LAN hosts.') }}
-        </p>
-      </div>
-      <div class="head-actions">
-        <button class="secondary-btn" @click="loadIntegrations">
-          {{ loading ? label('刷新中', 'Refreshing') : label('刷新状态', 'Refresh') }}
-        </button>
-        <button class="primary-btn" @click="router.push('/integrations')">
-          {{ label('能力登记处', 'Integrations') }}
-        </button>
-      </div>
-    </header>
+    <WorkspaceHeader
+      :loading="loading"
+      :label="label"
+      @refresh="loadIntegrations"
+      @open-integrations="router.push('/integrations')"
+    />
 
-    <section class="summary-strip">
-      <div class="summary-item">
-        <span>{{ label('主路径', 'Primary Path') }}</span>
-        <strong>{{ label('本机 NAS', 'Local NAS') }}</strong>
-      </div>
-      <div class="summary-item">
-        <span>{{ label('文件树', 'Filesystem') }}</span>
-        <strong>{{ filesystemList ? label('已连接', 'Connected') : label('读取中', 'Loading') }}</strong>
-      </div>
-      <div class="summary-item">
-        <span>{{ label('终端内核', 'Terminal Core') }}</span>
-        <strong>PTY</strong>
-      </div>
-      <div class="summary-item">
-        <span>{{ label('远程主机', 'Remote Hosts') }}</span>
-        <strong>{{ readySshTargetCount }}</strong>
-      </div>
-      <div class="summary-item">
-        <span>{{ label('接入分区', 'Lanes') }}</span>
-        <strong>{{ registeredLaneCount }}/{{ lanes.length }}</strong>
-      </div>
-      <div class="summary-item">
-        <span>{{ label('状态', 'Status') }}</span>
-        <strong>{{ loading ? label('检查中', 'Checking') : label('框架已开口', 'Framework opened') }}</strong>
-      </div>
-    </section>
+    <WorkspaceModuleTabs
+      v-model:active-panel="activePanel"
+      :panels="workspacePanels"
+      :label="label"
+    />
 
-    <section class="runtime-panel">
-      <div class="runtime-head">
-        <div>
-          <span class="eyebrow inline">{{ label('运行态', 'Runtime') }}</span>
-          <h2>{{ label('code-server 探测', 'code-server Probe') }}</h2>
-        </div>
-        <div class="runtime-actions">
-          <button class="secondary-btn" @click="loadWorkspaceStatus">
-            {{ workspaceLoading ? label('探测中', 'Probing') : label('重新探测', 'Probe Again') }}
-          </button>
-          <button
-            class="secondary-btn"
-            :disabled="workspaceActionLoading || !workspaceStatus?.endpoint.reachable || !workspaceOpenUrl"
-            @click="openWorkspace"
-          >
-            {{ label('打开工作台', 'Open Workspace') }}
-          </button>
-          <button
-            v-if="workspaceStatus?.endpoint.reachable"
-            class="danger-btn"
-            :disabled="workspaceActionLoading"
-            @click="stopWorkspace"
-          >
-            {{ workspaceActionLoading ? label('处理中', 'Working') : label('停止侧车', 'Stop') }}
-          </button>
-          <button
-            v-else
-            class="primary-btn"
-            :disabled="workspaceActionLoading || !workspaceStatus"
-            @click="startWorkspace"
-          >
-            {{ workspaceActionLoading ? label('处理中', 'Working') : label('启动侧车', 'Start') }}
-          </button>
-        </div>
-      </div>
-      <p v-if="workspaceError" class="error-line">{{ workspaceError }}</p>
-      <p v-if="workspaceActionMessage" class="info-line">{{ workspaceActionMessage }}</p>
-      <div v-if="workspaceStatus" class="runtime-grid">
-        <article class="runtime-card">
-          <span>{{ label('接入状态', 'Integration') }}</span>
-          <strong>{{ workspaceStatus.integration_state }}</strong>
-          <small>{{ workspaceStatus.integration?.description || label('未登记能力', 'Capability not registered') }}</small>
-        </article>
-        <article class="runtime-card">
-          <span>{{ label('健康检查', 'Health') }}</span>
-          <strong :class="{ ok: workspaceStatus.endpoint.reachable }">
-            {{ workspaceStatus.endpoint.reachable ? (workspaceStatus.endpoint.state || `OK ${workspaceStatus.endpoint.status_code ?? ''}`) : label('不可达', 'Offline') }}
-          </strong>
-          <small>{{ workspaceStatus.endpoint.url }}</small>
-        </article>
-        <article class="runtime-card">
-          <span>{{ label('CLI', 'CLI') }}</span>
-          <strong :class="{ ok: workspaceStatus.cli.available }">
-            {{ workspaceStatus.cli.available ? (workspaceStatus.cli.version || 'found') : label('未找到', 'Missing') }}
-          </strong>
-          <small>{{ [workspaceStatus.cli.command, ...workspaceStatus.cli.args].join(' ') }}</small>
-          <small v-if="!workspaceStatus.cli.available">{{ workspaceStatus.cli.install_hint }}</small>
-          <div v-if="workspaceStatus.cli.candidates.length > 0" class="candidate-list">
-            <span v-for="candidate in workspaceStatus.cli.candidates.slice(0, 4)" :key="candidate">
-              {{ candidate }}
-            </span>
-          </div>
-        </article>
-        <article class="runtime-card">
-          <span>{{ label('SSH 客户端', 'SSH Client') }}</span>
-          <strong :class="{ ok: workspaceStatus.ssh.available }">
-            {{ workspaceStatus.ssh.available ? (workspaceStatus.ssh.version || 'found') : label('未找到', 'Missing') }}
-          </strong>
-          <small>{{ [workspaceStatus.ssh.command, ...workspaceStatus.ssh.args].join(' ') }}</small>
-          <small v-if="!workspaceStatus.ssh.available">{{ workspaceStatus.ssh.install_hint }}</small>
-          <div v-if="workspaceStatus.ssh.candidates.length > 0" class="candidate-list">
-            <span v-for="candidate in workspaceStatus.ssh.candidates.slice(0, 4)" :key="candidate">
-              {{ candidate }}
-            </span>
-          </div>
-        </article>
-        <article class="runtime-card">
-          <span>{{ label('源码内核', 'Source Kernel') }}</span>
-          <strong :class="{ ok: workspaceStatus.kernel.available }">
-            {{ workspaceStatus.kernel.available ? workspaceStatus.kernel.name : label('待接入', 'Pending') }}
-          </strong>
-          <small>{{ workspaceStatus.kernel.source_path }}</small>
-          <small>{{ label('模式', 'Mode') }}: {{ workspaceStatus.kernel.mode }} · {{ label('状态', 'Status') }}: {{ workspaceStatus.kernel.status }}</small>
-          <small v-if="workspaceStatus.kernel.error">{{ workspaceStatus.kernel.error }}</small>
-          <div v-if="workspaceStatus.kernel.notes.length > 0" class="note-list">
-            <small v-for="note in workspaceStatus.kernel.notes" :key="note">{{ note }}</small>
-          </div>
-        </article>
-        <article class="runtime-card span-two">
-          <span>{{ label('启动命令', 'Launch Command') }}</span>
-          <code>{{ workspaceStatus.launch.command }}</code>
-          <small>{{ workspaceStatus.launch.cwd }}</small>
-          <div v-if="workspaceStatus.launch.notes.length > 0" class="note-list">
-            <small v-for="note in workspaceStatus.launch.notes" :key="note">{{ note }}</small>
-          </div>
-        </article>
-        <article class="runtime-card span-two">
-          <span>{{ label('独立认证', 'Auth') }}</span>
-          <strong>{{ workspaceStatus.auth.mode }}</strong>
-          <small>{{ workspaceStatus.auth.owner }} · {{ workspaceStatus.auth.notes }}</small>
-        </article>
-      </div>
-      <div v-else class="empty-line">{{ label('没有探测结果。', 'No probe result yet.') }}</div>
-    </section>
+    <WorkspaceSummaryStrip
+      v-show="activePanel === 'overview'"
+      :filesystem-ready="Boolean(filesystemList)"
+      :ready-ssh-target-count="readySshTargetCount"
+      :registered-lane-count="registeredLaneCount"
+      :lane-count="lanes.length"
+      :loading="loading"
+      :label="label"
+      @go-files="activePanel = 'files'"
+      @go-terminal="activePanel = 'terminal'"
+      @go-remote="activePanel = 'remote'"
+    />
 
-    <details class="remote-hosts-panel">
+    <RuntimeStatusPanel
+      v-show="activePanel === 'overview'"
+      :status="workspaceStatus"
+      :loading="workspaceLoading"
+      :action-loading="workspaceActionLoading"
+      :error="workspaceError"
+      :message="workspaceActionMessage"
+      :open-url="workspaceOpenUrl"
+      :label="label"
+      @probe="loadWorkspaceStatus"
+      @open="openWorkspace"
+      @start="startWorkspace"
+      @stop="stopWorkspace"
+    />
+
+    <details v-show="activePanel === 'remote'" class="remote-hosts-panel" open>
       <summary>
         <span>{{ label('远程主机扩展', 'Remote Host Extensions') }}</span>
         <strong>{{ readySshTargetCount }}/{{ workspaceTargets.length }}</strong>
       </summary>
 
-      <section class="runtime-panel">
-        <div class="runtime-head">
-          <div>
-            <span class="eyebrow inline">{{ label('目标', 'Targets') }}</span>
-            <h2>{{ label('工作区目标登记', 'Workspace Targets') }}</h2>
-          </div>
-          <div class="runtime-actions">
-            <button class="secondary-btn" @click="loadWorkspaceTargets">
-              {{ label('刷新目标', 'Refresh Targets') }}
-            </button>
-            <button class="primary-btn" @click="showTargetForm = !showTargetForm">
-              {{ showTargetForm ? label('收起', 'Close') : label('登记目标', 'Register Target') }}
-            </button>
-          </div>
-        </div>
+      <RemoteHostsPanel
+        v-model:target-label="targetLabel"
+        v-model:target-endpoint="targetEndpoint"
+        v-model:target-root="targetRoot"
+        v-model:target-auth-mode="targetAuthMode"
+        :targets="workspaceTargets"
+        :probes="workspaceTargetProbes"
+        :action-loading="targetActionLoading"
+        :error="targetError"
+        :message="targetMessage"
+        :show-form="showTargetForm"
+        :label="label"
+        :can-open-target="canOpenTarget"
+        @refresh-targets="loadWorkspaceTargets"
+        @toggle-form="showTargetForm = !showTargetForm"
+        @register-target="registerWorkspaceTarget"
+        @probe-target="probeWorkspaceTarget"
+        @remove-target="removeWorkspaceTarget"
+        @open-target="openTarget"
+      />
 
-      <p v-if="targetError" class="error-line">{{ targetError }}</p>
-      <p v-if="targetMessage" class="info-line">{{ targetMessage }}</p>
-
-      <div v-if="showTargetForm" class="target-form">
-        <label>
-          <span>{{ label('名称', 'Label') }}</span>
-          <input v-model="targetLabel" :placeholder="label('例如 客厅 NAS', 'e.g. Living Room NAS')" />
-        </label>
-        <label>
-          <span>{{ label('端点', 'Endpoint') }}</span>
-          <input v-model="targetEndpoint" placeholder="ssh://user@host:22" />
-        </label>
-        <label>
-          <span>{{ label('工作目录', 'Workspace Root') }}</span>
-          <input v-model="targetRoot" :placeholder="label('例如 /srv/workspace', 'e.g. /srv/workspace')" />
-        </label>
-        <label>
-          <span>{{ label('认证', 'Auth') }}</span>
-          <select v-model="targetAuthMode">
-            <option value="ssh_key_or_agent">ssh_key_or_agent</option>
-            <option value="service_session_or_reverse_proxy">service_session_or_reverse_proxy</option>
-            <option value="service_password_or_reverse_proxy">service_password_or_reverse_proxy</option>
-          </select>
-        </label>
-        <button
-          class="primary-btn"
-          :disabled="targetActionLoading || !targetLabel.trim() || !targetEndpoint.trim()"
-          @click="registerWorkspaceTarget"
-        >
-          {{ targetActionLoading ? label('登记中', 'Registering') : label('保存目标', 'Save Target') }}
-        </button>
-      </div>
-
-      <div v-if="workspaceTargets.length > 0" class="target-grid">
-        <article v-for="target in workspaceTargets" :key="target.id" class="target-card">
-          <div class="target-top">
-            <div>
-              <span class="target-kind">{{ target.kind }}</span>
-              <h3>{{ target.label }}</h3>
-            </div>
-            <span :class="['status-chip', target.status === 'ready' ? 'enabled' : target.status === 'registered' ? 'pending' : 'missing']">
-              {{ target.status }}
-            </span>
-          </div>
-          <strong>{{ target.endpoint }}</strong>
-          <small v-if="target.workspace_root">{{ target.workspace_root }}</small>
-          <small>{{ target.auth.mode }} · {{ target.auth.owner }}</small>
-          <div class="chip-row">
-            <span v-for="capability in target.capabilities.slice(0, 5)" :key="capability" class="cap-chip">
-              {{ capability }}
-            </span>
-          </div>
-          <div class="target-actions">
-            <button
-              class="open-link-btn"
-              :disabled="!canOpenTarget(target)"
-              @click="openTarget(target)"
-            >
-              {{ label('打开', 'Open') }}
-            </button>
-            <button
-              class="open-link-btn"
-              :disabled="targetActionLoading"
-              @click="probeWorkspaceTarget(target)"
-            >
-              {{ label('探测', 'Probe') }}
-            </button>
-            <button
-              v-if="target.source !== 'sidecar'"
-              class="open-link-btn danger-inline"
-              :disabled="targetActionLoading"
-              @click="removeWorkspaceTarget(target)"
-            >
-              {{ label('移除', 'Remove') }}
-            </button>
-          </div>
-          <div v-if="workspaceTargetProbes[target.id]" class="target-probe">
-            <small>
-              {{ workspaceTargetProbes[target.id].reachable ? label('探测通过', 'Probe passed') : label('探测失败', 'Probe failed') }}
-            </small>
-            <code v-if="workspaceTargetProbes[target.id].command">{{ workspaceTargetProbes[target.id].command }}</code>
-            <small v-if="workspaceTargetProbes[target.id].output">{{ workspaceTargetProbes[target.id].output }}</small>
-            <small v-if="workspaceTargetProbes[target.id].error">{{ workspaceTargetProbes[target.id].error }}</small>
-          </div>
-        </article>
-      </div>
-      <div v-else class="empty-line">{{ label('还没有工作区目标。', 'No workspace targets yet.') }}</div>
-      </section>
-
-      <p v-if="errorMessage" class="error-line">{{ errorMessage }}</p>
-
-      <section class="lane-grid">
-      <article
-        v-for="lane in lanes"
-        :key="lane.key"
-        :class="['lane-card', { primary: lane.primary }]"
-        :style="{ '--accent': lane.accent }"
-      >
-        <div class="lane-top">
-          <span class="lane-marker">{{ lane.marker }}</span>
-          <span :class="['status-chip', statusClass(lane.integration)]">
-            {{ statusLabel(lane.integration) }}
-          </span>
-        </div>
-        <h2>{{ lane.title }}</h2>
-        <p class="lane-subtitle">{{ lane.subtitle }}</p>
-        <p class="lane-role">{{ lane.role }}</p>
-
-        <div class="endpoint-box">
-          <span>{{ label('端点', 'Endpoint') }}</span>
-          <strong>{{ endpointText(lane.integration) }}</strong>
-          <button
-            v-if="canOpenEndpoint(lane.integration)"
-            class="open-link-btn"
-            @click="openEndpoint(lane.integration)"
-          >
-            {{ label('打开', 'Open') }}
-          </button>
-        </div>
-
-        <div class="lane-block">
-          <span class="block-title">{{ label('能力', 'Capabilities') }}</span>
-          <div class="chip-row">
-            <span v-for="capability in capabilityIds(lane).slice(0, 6)" :key="capability" class="cap-chip">
-              {{ capability }}
-            </span>
-          </div>
-        </div>
-
-        <div class="lane-block">
-          <span class="block-title">{{ label('参考', 'References') }}</span>
-          <div class="chip-row">
-            <span v-for="reference in lane.references" :key="reference" class="ref-chip">{{ reference }}</span>
-          </div>
-        </div>
-
-        <div class="auth-line">{{ formatAuth(lane.integration) }}</div>
-      </article>
-      </section>
+      <LaneGrid
+        :lanes="lanes"
+        :error="errorMessage"
+        :label="label"
+        :status-label="statusLabel"
+        :status-class="statusClass"
+        :endpoint-text="endpointText"
+        :can-open-endpoint="canOpenEndpoint"
+        :capability-ids="capabilityIds"
+        :format-auth="formatAuth"
+        @open-endpoint="openEndpoint"
+      />
     </details>
 
-    <section class="runtime-panel terminal-panel local-workspace-panel">
-      <div class="runtime-head">
-        <div>
-          <span class="eyebrow inline">{{ label('本机终端', 'Local Terminal') }}</span>
-          <h2>{{ label('NAS 源码终端', 'NAS Source Terminal') }}</h2>
-        </div>
-        <div class="runtime-actions">
-          <select v-model="terminalTargetId" class="target-select" :disabled="terminalConnected || terminalConnecting">
-            <option v-for="target in terminalTargets" :key="target.id" :value="target.id">
-              {{ target.label }}
-            </option>
-          </select>
-          <button
-            v-if="terminalConnected || terminalConnecting"
-            class="danger-btn"
-            @click="disconnectTerminal"
-          >
-            {{ label('断开', 'Disconnect') }}
-          </button>
-          <button
-            v-else
-            class="primary-btn"
-            @click="connectTerminal"
-          >
-            {{ terminalConnecting ? label('连接中', 'Connecting') : label('打开终端', 'Open Terminal') }}
-          </button>
-        </div>
-      </div>
-      <p v-if="terminalError" class="error-line">{{ terminalError }}</p>
-      <div ref="terminalElement" class="terminal-output">
-        <span v-if="!terminalConnected && !terminalConnecting && !terminalOutput" class="terminal-placeholder">
-          {{ label('终端尚未连接。', 'Terminal is not connected yet.') }}
-        </span>
-      </div>
-      <div class="terminal-input-row">
-        <input
-          v-model="terminalInput"
-          :disabled="!terminalConnected"
-          :placeholder="label('输入命令后回车', 'Type a command and press Enter')"
-          @keyup.enter="sendTerminalInput"
-        />
-        <button class="secondary-btn" :disabled="!terminalConnected || !terminalInput" @click="sendTerminalInput">
-          {{ label('发送', 'Send') }}
-        </button>
-      </div>
+    <LocalTerminalPanel v-show="activePanel === 'terminal'" :targets="terminalTargets" :label="label" />
+
+    <section v-show="activePanel === 'files'" class="workbench-shell">
+      <LocalFilesystemPanel
+        v-model:target-id="filesystemTargetId"
+        :targets="filesystemTargets"
+        :list="filesystemList"
+        :preview="filesystemPreview"
+        :loading="filesystemLoading"
+        :error="filesystemError"
+        :root-fallback="workspaceStatus?.launch.cwd || ''"
+        :label="label"
+        :format-file-size="formatFileSize"
+        @refresh="refreshFilesystem"
+        @parent="goFilesystemParent"
+        @open-entry="openFilesystemEntry"
+      />
+
+      <OptionalWorkspaceViewport
+        :status="workspaceStatus"
+        :open-url="workspaceOpenUrl"
+        :can-show-frame="canShowWorkspaceFrame"
+        :label="label"
+        @open="openWorkspace"
+      />
     </section>
 
-    <section class="workbench-shell">
-      <aside class="filesystem-shell local-filesystem-shell">
-        <div class="shell-head">
-          <div class="shell-title">
-            <span>{{ label('本机文件系统', 'Local Filesystem') }}</span>
-            <small>{{ filesystemList?.root || workspaceStatus?.launch.cwd || label('本机源码根目录', 'Local source root') }}</small>
-          </div>
-          <div class="runtime-actions">
-            <select v-model="filesystemTargetId" class="target-select" @change="refreshFilesystem">
-              <option v-for="target in filesystemTargets" :key="target.id" :value="target.id">
-                {{ target.label }}
-              </option>
-            </select>
-            <button class="secondary-btn" :disabled="filesystemLoading" @click="goFilesystemParent">
-              {{ label('上级', 'Up') }}
-            </button>
-            <button class="secondary-btn" :disabled="filesystemLoading" @click="refreshFilesystem">
-              {{ label('刷新', 'Refresh') }}
-            </button>
-          </div>
-        </div>
-        <div class="filesystem-pathline">
-          <small>{{ filesystemList?.absolute_path || filesystemList?.root || '' }}</small>
-        </div>
-        <p v-if="filesystemError" class="error-line">{{ filesystemError }}</p>
-        <div v-if="filesystemList" class="filesystem-grid">
-          <div class="filesystem-tree">
-            <button
-              v-for="entry in filesystemList.entries"
-              :key="entry.path"
-              class="filesystem-entry"
-              :class="entry.type"
-              @click="openFilesystemEntry(entry)"
-            >
-              <span class="entry-name">{{ entry.name }}</span>
-              <span class="entry-meta">
-                {{ entry.type }}
-                <template v-if="entry.size != null">· {{ formatFileSize(entry.size) }}</template>
-                <template v-if="entry.modified_at">· {{ entry.modified_at }}</template>
-              </span>
-            </button>
-            <div v-if="filesystemList.truncated" class="filesystem-hint">
-              {{ label('目录条目已截断，先展示前面一部分。', 'Directory entries were truncated to the first slice.') }}
-            </div>
-          </div>
-          <div class="filesystem-preview">
-            <div class="preview-head">
-              <strong>{{ filesystemPreview?.name || label('文件预览', 'File Preview') }}</strong>
-              <small v-if="filesystemPreview">
-                {{ filesystemPreview.encoding }} · {{ formatFileSize(filesystemPreview.size) }}
-                <template v-if="filesystemPreview.truncated">· {{ label('已截断', 'Truncated') }}</template>
-              </small>
-            </div>
-            <pre v-if="filesystemPreview" class="preview-body">{{ filesystemPreview.encoding === 'binary' ? label('二进制文件，不显示文本预览。', 'Binary file, no text preview.') : filesystemPreview.content }}</pre>
-            <div v-else class="shell-body filesystem-note">
-              <span class="prompt">/</span>
-              <span>{{ label('点开一个文件即可查看文本预览。', 'Click a file to view its text preview.') }}</span>
-            </div>
-          </div>
-        </div>
-        <div v-else class="shell-body filesystem-note">
-          <span class="prompt">/</span>
-          <span>
-            {{ label('正在读取真实文件树。这里不放虚构目录。', 'Loading the real file tree. No fabricated directories are shown here.') }}
-          </span>
-        </div>
-      </aside>
+    <NetworkAccessPanel
+      v-show="activePanel === 'network'"
+      :specs="networkAccessSpecs"
+      :registered="Boolean(networkAccessIntegration)"
+      :label="label"
+      @refresh="loadIntegrations"
+      @register="router.push('/integrations')"
+    />
 
-      <div class="workspace-shell optional-viewport-shell">
-        <div class="shell-head">
-          <div class="shell-title">
-            <span>{{ label('可选浏览器工作台', 'Optional Browser Workspace') }}</span>
-            <small>{{ workspaceStatus?.endpoint.reachable ? label('真实 code-server 入口', 'Real code-server entry') : label('本机文件和终端已优先可用', 'Local files and terminal are available first') }}</small>
-          </div>
-          <button
-            class="open-link-btn"
-            :disabled="!workspaceStatus?.endpoint.reachable || !workspaceOpenUrl"
-            @click="openWorkspace"
-          >
-            {{ label('打开', 'Open') }}
-          </button>
-        </div>
-        <div v-if="canShowWorkspaceFrame" class="workspace-frame-wrap">
-          <iframe
-            class="workspace-frame"
-            :src="workspaceOpenUrl"
-            :title="label('code-server 工作台', 'code-server workspace')"
-            loading="lazy"
-            referrerpolicy="no-referrer"
-          />
-        </div>
-        <div v-else class="shell-body">
-          <span class="prompt">#</span>
-          <span>
-            {{
-              workspaceStatus?.endpoint.reachable
-                ? label('工作台已可达，但浏览器内嵌可能被远端响应头限制。可点击右上角打开真实页面。', 'The workspace is reachable, but browser embedding may be blocked by remote headers. Open the real page with the button above.')
-                : label('等待可选工作台可达；这里不会塞虚拟终端。', 'Waiting for the optional workspace to become reachable; no fake terminal is shown here.')
-            }}
-          </span>
-        </div>
-      </div>
-    </section>
-
-    <section class="runtime-panel network-access-panel">
-      <div class="runtime-head">
-        <div>
-          <span class="eyebrow inline">{{ label('网络入口', 'Network Access') }}</span>
-          <h2>{{ label('公网与内网穿透入口', 'Public and Tunnel Access') }}</h2>
-        </div>
-        <div class="runtime-actions">
-          <button class="secondary-btn" @click="loadIntegrations">
-            {{ label('刷新登记', 'Refresh Registry') }}
-          </button>
-          <button class="primary-btn" @click="router.push('/integrations')">
-            {{ label('登记外部入口', 'Register Entry') }}
-          </button>
-        </div>
-      </div>
-      <div class="network-grid">
-        <article v-for="item in networkAccessSpecs" :key="item.key" class="network-card">
-          <div class="network-card-head">
-            <div>
-              <span>{{ item.status }}</span>
-              <h3>{{ item.title }}</h3>
-            </div>
-            <strong>{{ item.key }}</strong>
-          </div>
-          <p>{{ item.subtitle }}</p>
-          <code>{{ item.endpoint }}</code>
-          <div class="chip-row">
-            <span v-for="capability in item.capabilities" :key="capability" class="cap-chip">
-              {{ capability }}
-            </span>
-          </div>
-        </article>
-      </div>
-      <p class="info-line">
-        {{
-          networkAccessIntegration
-            ? label('网络入口已在外部能力登记处出现，后续可以接具体穿透适配器。', 'Network access is registered; concrete tunnel adapters can be wired later.')
-            : label('这里先放接入位置，不启动任何公网服务；后续按工具逐个接入。', 'This is only the entry position for now; no public service is started until adapters are wired.')
-        }}
-      </p>
-    </section>
-
-    <section class="runtime-panel streaming-gateway-panel">
-      <div class="runtime-head">
-        <div>
-          <span class="eyebrow inline">{{ label('串流网关', 'Streaming Gateway') }}</span>
-          <h2>{{ label('Sunshine / Moonlight 管理中心', 'Sunshine / Moonlight Control Center') }}</h2>
-        </div>
-        <div class="runtime-actions">
-          <button class="secondary-btn" @click="loadStreamingHosts">
-            {{ streamingLoading ? label('刷新中', 'Refreshing') : label('刷新主机', 'Refresh Hosts') }}
-          </button>
-          <button class="secondary-btn" @click="loadStreamingRuntimeStatus">
-            {{ label('探测播放器', 'Probe Player') }}
-          </button>
-          <button class="primary-btn" @click="showStreamingHostForm = !showStreamingHostForm">
-            {{ showStreamingHostForm ? label('收起', 'Close') : label('登记 Sunshine 主机', 'Register Sunshine Host') }}
-          </button>
-        </div>
-      </div>
-      <p v-if="streamingError" class="error-line">{{ streamingError }}</p>
-      <p v-if="streamingMessage" class="info-line">{{ streamingMessage }}</p>
-      <div v-if="showStreamingHostForm" class="target-form streaming-host-form">
-        <label>
-          <span>{{ label('名称', 'Label') }}</span>
-          <input v-model="streamingHostLabel" :placeholder="label('例如 游戏电脑', 'e.g. Gaming PC')" />
-        </label>
-        <label>
-          <span>{{ label('主机地址', 'Host') }}</span>
-          <input v-model="streamingHostEndpoint" placeholder="gaming-pc.local" />
-        </label>
-        <label>
-          <span>{{ label('基础端口', 'Base Port') }}</span>
-          <input v-model="streamingHostBasePort" placeholder="47989" />
-        </label>
-        <label>
-          <span>MAC</span>
-          <input v-model="streamingHostMac" placeholder="AA:BB:CC:DD:EE:FF" />
-        </label>
-        <label>
-          <span>{{ label('房间', 'Room') }}</span>
-          <input v-model="streamingHostRoom" :placeholder="label('例如 书房', 'e.g. Study')" />
-        </label>
-        <label>
-          <span>{{ label('网络路径', 'Network Path') }}</span>
-          <select v-model="streamingHostNetworkPath">
-            <option value="lan">lan</option>
-            <option value="vpn">vpn</option>
-            <option value="tunnel">tunnel</option>
-            <option value="public">public</option>
-          </select>
-        </label>
-        <button
-          class="primary-btn"
-          :disabled="streamingActionLoading || !streamingHostLabel.trim() || !streamingHostEndpoint.trim()"
-          @click="registerStreamingHost"
-        >
-          {{ streamingActionLoading ? label('登记中', 'Registering') : label('保存主机', 'Save Host') }}
-        </button>
-      </div>
-      <div v-if="streamingHosts.length > 0" class="streaming-host-grid">
-        <article v-for="host in streamingHosts" :key="host.id" class="streaming-host-card">
-          <div class="streaming-card-head">
-            <div>
-              <span>{{ host.network_path }}</span>
-              <h3>{{ host.label }}</h3>
-            </div>
-            <strong>{{ host.status }}</strong>
-          </div>
-          <code>{{ host.endpoint }}</code>
-          <small>{{ host.room || label('未设置房间', 'No room') }} · {{ host.mac_address || label('无 MAC', 'No MAC') }}</small>
-          <small>{{ label('端口族', 'Ports') }}: TCP {{ host.tcp_ports.join(', ') }} · UDP {{ host.udp_ports.join(', ') }} · Discovery {{ host.discovery_ports.join(', ') }}</small>
-          <div class="target-actions">
-            <button class="open-link-btn" :disabled="streamingActionLoading" @click="probeStreamingHost(host)">
-              {{ label('探测', 'Probe') }}
-            </button>
-            <button class="open-link-btn" :disabled="streamingActionLoading || !host.mac_address" @click="wakeStreamingHost(host)">
-              {{ label('唤醒', 'Wake') }}
-            </button>
-            <button class="open-link-btn danger-inline" :disabled="streamingActionLoading" @click="removeStreamingHost(host)">
-              {{ label('移除', 'Remove') }}
-            </button>
-          </div>
-          <div v-if="streamingHostProbes[host.id]" class="target-probe">
-            <small>
-              {{ streamingHostProbes[host.id].reachable ? label('探测通过', 'Probe passed') : label('探测失败', 'Probe failed') }}
-            </small>
-            <small>{{ streamingHostProbes[host.id].checked_at }}</small>
-            <small v-if="streamingHostProbes[host.id].status_code != null">HTTP {{ streamingHostProbes[host.id].status_code }}</small>
-            <small v-if="streamingHostProbes[host.id].error">{{ streamingHostProbes[host.id].error }}</small>
-            <small v-if="streamingHostProbes[host.id].ports.length > 0">
-              {{ label('端口计划', 'Port plan') }}:
-              {{ streamingHostProbes[host.id].ports.map((port) => `${port.protocol}/${port.port}:${port.role}`).join(' · ') }}
-            </small>
-          </div>
-        </article>
-      </div>
-      <div class="streaming-grid">
-        <article v-for="item in streamingGatewaySpecs" :key="item.key" class="streaming-card">
-          <div class="streaming-card-head">
-            <div>
-              <span>{{ item.status }}</span>
-              <h3>{{ item.title }}</h3>
-            </div>
-            <strong>{{ item.key }}</strong>
-          </div>
-          <p>{{ item.subtitle }}</p>
-          <small>{{ item.detail }}</small>
-          <div class="chip-row">
-            <span v-for="capability in item.capabilities" :key="capability" class="cap-chip">
-              {{ capability }}
-            </span>
-          </div>
-          <div v-if="item.key === 'web-runtime' && streamingRuntimeStatus" class="target-probe">
-            <small>{{ streamingRuntimeStatus.reachable ? label('运行时可达', 'Runtime reachable') : label('运行时不可达', 'Runtime offline') }}</small>
-            <code>{{ streamingRuntimeStatus.endpoint }}</code>
-            <small v-if="streamingRuntimeStatus.status_code != null">HTTP {{ streamingRuntimeStatus.status_code }}</small>
-            <small v-if="streamingRuntimeStatus.error">{{ streamingRuntimeStatus.error }}</small>
-            <button
-              class="open-link-btn"
-              :disabled="!streamingRuntimeStatus.endpoint.startsWith('http')"
-              @click="openStreamingRuntime"
-            >
-              {{ label('打开播放器', 'Open Player') }}
-            </button>
-          </div>
-        </article>
-      </div>
-      <p class="info-line">
-        {{
-          streamingGatewayIntegration
-            ? label('串流网关已在外部能力登记处出现，后续可以接 Sunshine/Moonlight 真实适配器。', 'Streaming gateway is registered; Sunshine/Moonlight adapters can be wired later.')
-            : label('这里是控制平面入口：HomeSense 负责登记、唤醒、探测和生成连接路径，不重写视频流协议。', 'This is the control-plane entry: HomeSense registers, wakes, probes, and prepares connection paths without rewriting media transport.')
-        }}
-      </p>
-    </section>
+    <StreamingGatewayPanel
+      v-show="activePanel === 'streaming'"
+      :specs="streamingGatewaySpecs"
+      :hosts="streamingHosts"
+      :probes="streamingHostProbes"
+      :runtime-status="streamingRuntimeStatus"
+      :registered="Boolean(streamingGatewayIntegration)"
+      :loading="streamingLoading"
+      :action-loading="streamingActionLoading"
+      :error="streamingError"
+      :message="streamingMessage"
+      :show-form="showStreamingHostForm"
+      :host-label="streamingHostLabel"
+      :host-endpoint="streamingHostEndpoint"
+      :host-base-port="streamingHostBasePort"
+      :host-mac="streamingHostMac"
+      :host-room="streamingHostRoom"
+      :host-network-path="streamingHostNetworkPath"
+      :label="label"
+      @refresh-hosts="loadStreamingHosts"
+      @refresh-runtime="loadStreamingRuntimeStatus"
+      @toggle-form="showStreamingHostForm = !showStreamingHostForm"
+      @register-host="registerStreamingHost"
+      @probe-host="probeStreamingHost"
+      @wake-host="wakeStreamingHost"
+      @remove-host="removeStreamingHost"
+      @open-runtime="openStreamingRuntime"
+      @update:host-label="streamingHostLabel = $event"
+      @update:host-endpoint="streamingHostEndpoint = $event"
+      @update:host-base-port="streamingHostBasePort = $event"
+      @update:host-mac="streamingHostMac = $event"
+      @update:host-room="streamingHostRoom = $event"
+      @update:host-network-path="streamingHostNetworkPath = $event"
+    />
 
   </div>
 </template>
 
-<style scoped>
+<style>
 .remote-page {
   height: 100%;
   overflow-y: auto;
@@ -1649,6 +1030,55 @@ h1 {
   gap: 14px;
 }
 
+.workspace-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  padding: 8px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(12px);
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.workspace-tab {
+  min-height: 46px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+}
+
+.workspace-tab span {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.workspace-tab strong {
+  color: inherit;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.workspace-tab.active {
+  border-color: rgba(15, 118, 110, 0.22);
+  background: rgba(15, 118, 110, 0.08);
+  color: #0f766e;
+}
+
 .summary-item {
   min-height: 76px;
   padding: 18px 20px;
@@ -1658,6 +1088,15 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.summary-action {
+  text-align: left;
+  cursor: pointer;
+}
+
+.summary-action:hover {
+  border-color: rgba(15, 118, 110, 0.22);
 }
 
 .summary-item span {
@@ -2573,6 +2012,10 @@ h1 {
 }
 
 @media (max-width: 1100px) {
+  .remote-page {
+    padding: 24px 18px 96px;
+  }
+
   .workspace-head,
   .workbench-shell {
     display: flex;
@@ -2592,6 +2035,93 @@ h1 {
 
   .runtime-card.span-two {
     grid-column: auto;
+  }
+}
+
+@media (max-width: 720px) {
+  .workspace-head {
+    padding: 22px;
+    border-radius: 18px;
+  }
+
+  .workspace-head p {
+    display: none;
+  }
+
+  h1 {
+    font-size: 24px;
+  }
+
+  .head-actions {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .head-actions .primary-btn,
+  .head-actions .secondary-btn {
+    flex: 1;
+  }
+
+  .workspace-tabs {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    top: auto;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    border-radius: 18px;
+    box-shadow: 0 14px 38px rgba(15, 23, 42, 0.18);
+  }
+
+  .workspace-tab {
+    min-height: 52px;
+    padding: 6px 4px;
+    align-items: center;
+    text-align: center;
+  }
+
+  .workspace-tab span {
+    font-size: 10px;
+  }
+
+  .workspace-tab strong {
+    display: none;
+  }
+
+  .runtime-head,
+  .shell-head {
+    flex-direction: column;
+    align-items: stretch;
+    height: auto;
+    padding-top: 14px;
+    padding-bottom: 14px;
+  }
+
+  .runtime-actions {
+    width: 100%;
+  }
+
+  .runtime-actions .primary-btn,
+  .runtime-actions .secondary-btn,
+  .runtime-actions .danger-btn,
+  .runtime-actions .target-select {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .filesystem-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .filesystem-tree {
+    border-right: 0;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.85);
+    max-height: 300px;
+  }
+
+  .terminal-output {
+    height: calc(100dvh - 310px);
+    min-height: 300px;
   }
 }
 </style>
