@@ -11,8 +11,8 @@
     "test:watch": "vitest",
     "check:isolation": "node ../../scripts/check-module-isolation.mjs --by-source",
     "check:isolation:strict": "node ../../scripts/check-module-isolation.mjs --strict --by-source",
-    "dev:nest": "tsx watch src/nest-main.ts",
-    "start:nest": "tsx src/nest-main.ts"
+    "dev:nest": "tsc --outDir dist-nest --watch & node --watch dist-nest/nest-main.js",
+    "start:nest": "tsc --outDir dist-nest && node dist-nest/nest-main.js"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "file:../../../HomeSense/References/pi/packages/agent",
@@ -27,6 +27,8 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@swc-node/register": "^1.11.1",
+    "@swc/core": "^1.15.40",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.19.19",
     "@types/ws": "^8.18.1",
