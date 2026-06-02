@@ -13,5 +13,11 @@
     "resolveJsonModule": true,
     "isolatedModules": true
   },
-  "exclude": ["node_modules", "dist", "packages/frontend"]
+  "exclude": [
+    "**/_archive/**/*",
+    "dist",
+    "node_modules",
+    "packages/backend/src/_archive/**/*",
+    "packages/frontend"
+  ]
 }
