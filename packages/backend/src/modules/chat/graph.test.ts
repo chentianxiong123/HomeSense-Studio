@@ -46,7 +46,7 @@ vi.mock('../llm-provider/service.js', () => ({
   },
 }))
 
-vi.mock('../intent-router/index.js', () => ({
+vi.mock('../intent/index.js', () => ({
   intentRouter: {
     route: routeMock,
   },

@@ -1,5 +1,5 @@
 import fs from 'fs'
-import type { ContextCompletionResult } from '../context-completer/index.js'
+import type { ContextCompletionResult } from '../intent/index.js'
 
 export interface PlanStepDefinition {
   tool: string
