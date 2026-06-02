@@ -1,19 +1,21 @@
 import 'reflect-metadata'
 import { NestFactory } from '@nestjs/core'
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify'
+import { initDb } from './db/index.js'
 import { AppModule } from './nest/app.module.js'
 
 const port = Number(process.env.NEST_PORT) || 3100
 const host = '0.0.0.0'
 
 async function start() {
+  initDb()
+
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({ logger: true }),
     { bodyParser: false },
   )
 
-  // Re-enable body parsers (NestJS 11 default is bodyParser: false on Fastify).
   app.useBodyParser('application/json')
   app.useBodyParser('application/x-www-form-urlencoded')
 
