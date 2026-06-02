@@ -3,7 +3,6 @@ import { llmService } from '../llm-provider/service.js'
 import { executorGateway } from '../executor-gateway/index.js'
 import type { ExecutorInvokeResult } from '../executor-gateway/index.js'
 import { intentRouter, type IntentRouterResult } from '../intent/index.js'
-import { approvalRegistry, isHighRiskCliCall } from '../approval/index.js'
 import { matchCommand } from '../integration/command.routes.js'
 import { shouldAttemptL1Reflex } from '../integration/command.l1-reflex-policy.js'
 import {
@@ -1553,23 +1552,6 @@ async function invokeCliWithApproval(params: {
   params: Record<string, unknown>
   turnId: string
 }): Promise<ExecutorInvokeResult> {
-  if (isHighRiskCliCall(params.cliName, params.action)) {
-    const approval = approvalRegistry.create(
-      params.turnId,
-      `High-risk device action: ${params.cliName}.${params.action}`,
-      { cli: params.cliName, action: params.action, params: params.params },
-    )
-    const decision = await approvalRegistry.wait(approval.id, 60_000)
-    if (decision !== 'approved') {
-      return {
-        status: 'error',
-        executor: 'cli.invoke',
-        error: `approval_${decision}`,
-        message: `Approval ${decision} by user.`,
-      }
-    }
-  }
-
   return executorGateway.invoke('cli.invoke', {
     cli_name: params.cliName,
     action: params.action,

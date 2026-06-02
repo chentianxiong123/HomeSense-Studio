@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url'
 import path from 'path'
 import fs from 'fs'
 import { initDb } from './db/index.js'
-import { authRoutes } from './modules/integration/auth.routes.js'
+
 import { deviceRoutes } from './modules/device/routes.js'
 import { userDeviceRoutes } from './modules/device/user-device-routes.js'
 import { roomRoutes } from './modules/device/room-routes.js'
@@ -20,12 +20,12 @@ import { settingRoutes } from './modules/setting/routes.js'
 import { skillRoutes } from './modules/skill/routes.js'
 import { ruleRoutes } from './modules/rule/routes.js'
 import { commandRoutes } from './modules/integration/command.routes.js'
-import { compensationRoutes } from './modules/compensation/routes.js'
-import { compensationService } from './modules/compensation/index.js'
+
+
 import { cronRoutes } from './modules/cron/routes.js'
 import { executorGatewayRoutes } from './modules/executor-gateway/routes.js'
 import { manifestRegistryRoutes } from './modules/registry/routes.js'
-import { approvalRoutes } from './modules/approval/routes.js'
+
 import { agentInstanceRoutes } from './modules/agent-instance/routes.js'
 // import { devtestRoutes } from './modules/devtest/routes.js'
 import { intentRouterRoutes } from './modules/intent/routes.js'
@@ -46,7 +46,7 @@ import { mcpRegistryService } from './modules/mcp-registry/index.js'
 import { experienceService } from './modules/experience/index.js'
 import { cronService } from './modules/cron/index.js'
 import { agentInstanceService } from './modules/agent-instance/index.js'
-import { agentAdapterRegistry } from './modules/agent-adapter/index.js'
+
 import { llmService, seedDefaultProviders } from './modules/llm-provider/service.js'
 import { cliBridge } from './modules/integration/index.js'
 import { memoryKernel } from './modules/memory/index.js'
@@ -55,7 +55,7 @@ import { executorGateway } from './modules/executor-gateway/index.js'
 import { planLibrary } from './modules/plan/index.js'
 import { assertWorkflowNodeRegistryIntegrity } from './modules/workflow/node-factory.js'
 import './modules/registry/index.js'
-import { channelRegistry } from './modules/channels/index.js'
+
 import { stateMachine } from './modules/state-machine/index.js'
 
 const wsClients = new Set<import('ws').WebSocket>()
@@ -72,10 +72,8 @@ export async function buildApp() {
   stateMachine.hydrate()
 
   agentInstanceService.ensureDefaults()
-  agentAdapterRegistry.initialize()
   memoryKernel.initialize()
   await executorGateway.initialize()
-  channelRegistry.register()
   assertWorkflowNodeRegistryIntegrity()
   workflowSeedService.ensureDefaults()
   ruleEngine.loadFromDb()
@@ -126,10 +124,6 @@ export async function buildApp() {
       .catch(() => {})
   }, 10 * 60 * 1000)
 
-  const compensationTimer = setInterval(() => {
-    compensationService.processPendingTasks()
-  }, 30000)
-
   app.get('/api/health', async () => {
     return { status: 'ok', timestamp: new Date().toISOString() }
   })
@@ -155,7 +149,6 @@ export async function buildApp() {
     return { executors: cliBridge.listExecutors() }
   })
 
-  app.register(authRoutes)
   app.register(deviceRoutes)
   app.register(userDeviceRoutes)
   app.register(roomRoutes)
@@ -169,11 +162,9 @@ export async function buildApp() {
   app.register(skillRoutes)
   app.register(ruleRoutes)
   app.register(commandRoutes)
-  app.register(compensationRoutes)
   app.register(cronRoutes)
   app.register(executorGatewayRoutes)
   app.register(manifestRegistryRoutes)
-  app.register(approvalRoutes)
   app.register(agentInstanceRoutes)
   // app.register(devtestRoutes)
   app.register(intentRouterRoutes)
@@ -274,7 +265,6 @@ export async function buildApp() {
   // deviceStatePoller.start(30000)
 
   app.addHook('onClose', async () => {
-    clearInterval(compensationTimer)
     clearInterval(embeddingRefreshTimer)
     cronService.stop()
     remoteWorkspaceService.shutdown()

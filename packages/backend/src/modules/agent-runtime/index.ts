@@ -3,25 +3,16 @@ import { cliBridge as defaultCliBridge, type CLIBridge } from '../integration/in
 import { executorGateway as defaultExecutorGateway } from '../executor-gateway/index.js'
 import { intentRouter as defaultIntentRouter, type RoutedCandidatePlan, type RoutedObservation } from '../intent/index.js'
 import { llmService, type LLMChatResult } from '../llm-provider/service.js'
-import { approvalRegistry as defaultApprovalRegistry, isHighRiskCliCall, type ApprovalRecord } from '../approval/index.js'
 import { memoryKernel as defaultMemoryKernel } from '../memory/index.js'
 import { selfEnhancementService as defaultSelfEnhancement } from '../self-enhancement/index.js'
-import { compensationService as defaultCompensationService, type CompensationTask } from '../compensation/index.js'
 import type { TaskFailure } from '../self-enhancement/index.js'
 import type { AgentEvent, AgentStreamContext, HistoryItem, MemoryHit } from './events.js'
 
-interface ApprovalRegistryInstance {
-  create(turnId: string, reason: string, payload: unknown): ApprovalRecord
-  wait(id: string, timeoutMs: number): Promise<'approved' | 'denied' | 'timeout'>
-}
 
 interface SelfEnhancementInstance {
   processFailureAndEnhance(failure: TaskFailure): void
 }
 
-interface CompensationServiceInstance {
-  createTask(type: string, params: Record<string, unknown>, maxRetries?: number): CompensationTask
-}
 
 interface MemoryKernelInstance {
   observeOutcome(params: {
@@ -89,10 +80,8 @@ class AgentRuntime {
     private readonly intentRouter = defaultIntentRouter,
     private readonly cliBridge: CLIBridge = defaultCliBridge,
     private readonly executorGateway: ExecutorGatewayInstance = defaultExecutorGateway,
-    private readonly approvalRegistry: ApprovalRegistryInstance = defaultApprovalRegistry,
     private readonly memoryKernel: MemoryKernelInstance = defaultMemoryKernel,
     private readonly selfEnhancement: SelfEnhancementInstance = defaultSelfEnhancement,
-    private readonly compensationService: CompensationServiceInstance = defaultCompensationService,
   ) {}
 
   async *processMessageStream(
@@ -195,13 +184,6 @@ class AgentRuntime {
             error: failedStep.error ?? 'unknown plan step error',
             trace: planResult.results.map((r) => ({ step: `step ${r.order}:${r.tool}.${r.action}`, result: r.status, duration_ms: 0 })),
           })
-          this.compensationService.createTask('agent_plan_step', {
-            message,
-            failed_step_order: failedStep.order,
-            failed_tool: failedStep.tool,
-            failed_action: failedStep.action,
-            error: failedStep.error,
-          }, 2)
         }
         const successCount = planResult.results.filter((result) => result.status === 'success').length
         const finalStep = planResult.results[planResult.results.length - 1]
@@ -391,47 +373,6 @@ class AgentRuntime {
           } catch {}
 
           const action = parsedArgs.action ?? ''
-          if (isHighRiskCliCall('mi-cli', action)) {
-            const approval = this.approvalRegistry.create(
-              turnId,
-              `High-risk device action: mi-cli.${action}`,
-              { cli: 'mi-cli', action, params: parsedArgs.params },
-            )
-            yield {
-              type: 'approval.request',
-              turn_id: turnId,
-              approval_id: approval.id,
-              reason: approval.reason,
-              payload: approval.payload,
-            }
-            const decision = await this.approvalRegistry.wait(approval.id, 60_000)
-            if (decision !== 'approved') {
-              yield {
-                type: 'tool.call.start',
-                turn_id: turnId,
-                call_id: callId,
-                kind: 'cli',
-                name: toolCall.function.name,
-                args: parsedArgs,
-              }
-              yield {
-                type: 'tool.call.end',
-                turn_id: turnId,
-                call_id: callId,
-                status: 'error',
-                error: `Approval ${decision} by user.`,
-                duration_ms: 0,
-              }
-              messages.push({
-                role: 'tool',
-                tool_call_id: callId,
-                name: toolCall.function.name,
-                content: JSON.stringify({ error: `approval_${decision}` }),
-              })
-              continue
-            }
-          }
-
           yield {
             type: 'tool.call.start',
             turn_id: turnId,
@@ -606,21 +547,6 @@ class AgentRuntime {
           try { parsedArgs = JSON.parse(toolCall.function.arguments) } catch {}
 
           const action = parsedArgs.action ?? ''
-          if (isHighRiskCliCall('mi-cli', action)) {
-            const approval = this.approvalRegistry.create(
-              turnId, `High-risk device action: mi-cli.${action}`,
-              { cli: 'mi-cli', action, params: parsedArgs.params },
-            )
-            yield { type: 'approval.request', turn_id: turnId, approval_id: approval.id, reason: approval.reason, payload: approval.payload }
-            const decision = await this.approvalRegistry.wait(approval.id, 60_000)
-            if (decision !== 'approved') {
-              yield { type: 'tool.call.start', turn_id: turnId, call_id: callId, kind: 'cli', name: toolCall.function.name, args: parsedArgs }
-              yield { type: 'tool.call.end', turn_id: turnId, call_id: callId, status: 'error', error: `Approval ${decision} by user.`, duration_ms: 0 }
-              messages.push({ role: 'tool', tool_call_id: callId, name: toolCall.function.name, content: JSON.stringify({ error: `approval_${decision}` }) } as typeof messages[0])
-              continue
-            }
-          }
-
           yield { type: 'tool.call.start', turn_id: turnId, call_id: callId, kind: 'cli', name: toolCall.function.name, args: parsedArgs }
           const stepStart = Date.now()
           const cliResult = await this.cliBridge.run('mi-cli', parsedArgs.action ?? '', parsedArgs.params ?? {})

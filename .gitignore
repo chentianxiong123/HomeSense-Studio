@@ -16,3 +16,6 @@ __pycache__/
 uv.lock
 .DS_Store
 Thumbs.db
+# test/dev scratch logs
+.baseline-*.log
+.test-backend-*.log

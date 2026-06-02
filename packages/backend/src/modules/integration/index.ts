@@ -6,18 +6,15 @@
  *   - external-integrations (user-managed integrations like bilibili/mi/cloud)
  *   - cli-bridge            (subprocess bridge to local CLI executors)
  *   - command               (L1 reflex routes for the chat command path)
- *   - auth                  (HTTP authentication for the API)
  *
  * Public surface (re-exported here):
  *   - external-integrations: externalIntegrationsService, ExternalIntegrationRecord, routes
  *   - cli-bridge: cliBridge, CLIBridge, CLIResult, CLIBridgePort
  *   - command: commandRoutes, L1_REFLEX_POLICY, shouldAttemptL1Reflex, CONTEXT_TTL_MS
- *   - auth: authRoutes
  */
 
 export * from './external-integrations.js'
 export * from './cli-bridge.js'
 export * as command from './command.routes.js'
-export * as auth from './auth.routes.js'
 export { CONTEXT_TTL_MS } from './command.constants.js'
 export { L1_REFLEX_POLICY, shouldAttemptL1Reflex } from './command.l1-reflex-policy.js'

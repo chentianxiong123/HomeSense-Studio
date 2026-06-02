@@ -77,9 +77,7 @@ describe('casting CLI integration', () => {
     const bridge = loadBridge()
     const registry = new ManifestRegistryService(
       bridge,
-      emptyAgentRegistry,
       emptyServiceRegistry,
-      emptyChannelRegistry,
     )
 
     const dlna = registry.get('cli.dlna-cast-cli')
@@ -114,7 +112,6 @@ describe('casting CLI integration', () => {
     const bridge = loadBridge()
     const gateway = new ExecutorGatewayService(
       bridge,
-      emptyAgentGatewayRegistry,
       emptyServiceRegistry,
       emptyPlanLibrary,
       emptyMemoryKernel,
