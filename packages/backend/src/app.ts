@@ -32,6 +32,7 @@ import { intentRouterRoutes } from './modules/intent-router/routes.js'
 import { deviceTypeSkillRoutes } from './modules/device-type-skill/routes.js'
 import { memoryAssetsRoutes } from './modules/memory-assets/routes.js'
 import { runtimeCapabilityMapRoutes } from './modules/runtime-capability-map/routes.js'
+import { mcpRegistryRoutes } from './modules/mcp-registry/routes.js'
 import { externalIntegrationsService } from './modules/external-integrations/index.js'
 import { externalIntegrationRoutes } from './modules/external-integrations/routes.js'
 import { remoteWorkspaceRoutes } from './modules/remote-workspace/routes.js'
@@ -41,6 +42,7 @@ import { eventBus } from './modules/event-bus/index.js'
 // import { deviceStatePoller } from './modules/device-state-poller/index.js'
 import { ruleEngine } from './modules/rule-engine/index.js'
 import { skillsService } from './modules/skills-system/index.js'
+import { mcpRegistryService } from './modules/mcp-registry/index.js'
 import { experienceService } from './modules/experience/index.js'
 import { cronService } from './modules/cron/index.js'
 import { agentInstanceService } from './modules/agent-instance/index.js'
@@ -100,6 +102,7 @@ export async function buildApp() {
   experienceService.indexAllExperiences()
   knowledgeCompiler.refreshKnowledge()
   externalIntegrationsService.ensureDefaults()
+  mcpRegistryService.ensureDefaults()
   seedDefaultProviders()
 
   setTimeout(() => {
@@ -177,6 +180,7 @@ export async function buildApp() {
   app.register(deviceTypeSkillRoutes)
   app.register(memoryAssetsRoutes)
   app.register(runtimeCapabilityMapRoutes)
+  app.register(mcpRegistryRoutes)
   app.register(externalIntegrationRoutes)
   app.register(remoteWorkspaceRoutes)
   app.register(streamingGatewayRoutes)

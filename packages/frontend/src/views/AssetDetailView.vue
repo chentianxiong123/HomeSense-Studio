@@ -8,10 +8,11 @@ import { executorApi } from '@/api/executor'
 import { buildSkillDetailTabs } from '@/features/studio/detailNavigation'
 import { manifestApi } from '@/api/manifests'
 import { memoryAssetsApi, type MemoryAssetRecord } from '@/api/memoryAssets'
-import { skillApi, type SkillRecord } from '@/api/skills'
+import { mcpApi, type McpServerRecord } from '@/api/mcp'
+import { skillApi, type SkillRecord, type SkillSectionRecord } from '@/api/skills'
 import { useLocale } from '@/composables/useLocale'
 
-type AssetKind = 'device_skill' | 'skill' | 'manifest' | 'plan' | 'memory' | 'agent'
+type AssetKind = 'device_skill' | 'skill' | 'manifest' | 'plan' | 'memory' | 'agent' | 'mcp'
 
 const route = useRoute()
 const { locale } = useLocale()
@@ -19,6 +20,7 @@ const { locale } = useLocale()
 const loading = ref(false)
 const detail = ref<Record<string, unknown> | null>(null)
 const extraText = ref('')
+const skillSections = ref<SkillSectionRecord[]>([])
 
 const assetKind = computed(() => (route.meta.assetKind ?? 'skill') as AssetKind)
 const assetTab = computed(() => String(route.meta.assetTab ?? 'overview'))
@@ -33,6 +35,7 @@ onMounted(loadDetail)
 async function loadDetail() {
   loading.value = true
   try {
+    skillSections.value = []
     if (assetKind.value === 'device_skill') {
       const id = String(route.params.id)
       const result = await deviceSkillApi.get(id)
@@ -48,6 +51,9 @@ async function loadDetail() {
       extraText.value = assetTab.value === 'prompt'
         ? (await skillApi.getFull(name)).prompt_template
         : ''
+      skillSections.value = assetTab.value === 'sections' || assetTab.value === 'overview'
+        ? (await skillApi.getSections(name)).sections
+        : []
       return
     }
 
@@ -70,6 +76,13 @@ async function loadDetail() {
       return
     }
 
+    if (assetKind.value === 'mcp') {
+      const result = await mcpApi.getServer(String(route.params.id))
+      detail.value = result.server as unknown as Record<string, unknown>
+      extraText.value = ''
+      return
+    }
+
     detail.value = await agentApi.getByTarget(String(route.params.target)) as unknown as Record<string, unknown>
     extraText.value = ''
   } finally {
@@ -87,6 +100,7 @@ const title = computed(() => {
   if (assetKind.value === 'manifest') return String(detail.value?.display_name ?? label('记忆项', 'Memory Item'))
   if (assetKind.value === 'plan') return String((detail.value?.plan as Record<string, unknown> | undefined)?.name ?? label('计划', 'Plan'))
   if (assetKind.value === 'memory') return String(detail.value?.title ?? label('记忆', 'Memory'))
+  if (assetKind.value === 'mcp') return String((detail.value as unknown as McpServerRecord | null)?.name ?? 'MCP')
   return String(detail.value?.name ?? label('遗留配置', 'Legacy Config'))
 })
 
@@ -100,7 +114,9 @@ function safeStringify(value: unknown) {
 }
 
 const deviceSkill = computed(() => assetKind.value === 'device_skill' ? detail.value : null)
+const skillDetail = computed(() => assetKind.value === 'skill' ? detail.value as unknown as SkillRecord | null : null)
 const memoryAsset = computed(() => assetKind.value === 'memory' ? detail.value as unknown as MemoryAssetRecord | null : null)
+const mcpServer = computed(() => assetKind.value === 'mcp' ? detail.value as unknown as McpServerRecord | null : null)
 const memoryMetadata = computed(() => memoryAsset.value?.metadata ?? {})
 const memorySteps = computed(() => Array.isArray(memoryMetadata.value.steps) ? memoryMetadata.value.steps as Array<Record<string, unknown>> : [])
 const memoryWorkflowId = computed(() => {
@@ -144,9 +160,30 @@ function formatDetailAssetKind(kind: AssetKind) {
     plan: ['旧计划', 'Legacy Plan'],
     memory: ['记忆', 'Memory'],
     agent: ['遗留配置', 'Legacy Config'],
+    mcp: ['MCP', 'MCP'],
   }
   const item = labels[kind]
   return label(item[0], item[1])
+}
+
+function parseJsonArray(raw: unknown) {
+  try {
+    const parsed = JSON.parse(String(raw ?? '[]')) as unknown
+    return Array.isArray(parsed) ? parsed.map(String) : []
+  } catch {
+    return []
+  }
+}
+
+function parseJsonObject(raw: unknown) {
+  try {
+    const parsed = JSON.parse(String(raw ?? '{}')) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {}
+  } catch {
+    return {}
+  }
 }
 
 function formatMemoryStatus(status: unknown) {
@@ -362,6 +399,127 @@ function readNumber(value: unknown) {
               <h3>{{ label('完整提示词', 'Full Prompt Template') }}</h3>
             </header>
             <pre class="json-block">{{ extraText || label('当前没有 prompt_template。', 'No prompt_template available.') }}</pre>
+          </section>
+        </template>
+        <template v-else-if="assetKind === 'skill' && assetTab === 'sections'">
+          <section class="detail-card glass-panel">
+            <header class="card-head">
+              <span class="eyebrow">Skill Sections</span>
+              <h3>{{ label('分层说明书章节', 'Layered Manual Sections') }}</h3>
+            </header>
+            <div v-if="skillSections.length === 0" class="empty-detail-line">
+              {{ label('当前 Skill 没有可解析章节。', 'No parsable sections for this skill.') }}
+            </div>
+            <div v-else class="section-list">
+              <article v-for="section in skillSections" :key="section.id" class="section-item">
+                <div class="section-head">
+                  <span>H{{ section.level }}</span>
+                  <strong>{{ section.title }}</strong>
+                </div>
+                <pre class="section-body">{{ section.body || label('无正文。', 'No body.') }}</pre>
+              </article>
+            </div>
+          </section>
+        </template>
+        <template v-else-if="assetKind === 'skill' && skillDetail">
+          <section class="detail-card glass-panel">
+            <header class="card-head">
+              <span class="eyebrow">Skill Index</span>
+              <h3>{{ label('渐进式披露索引', 'Progressive Disclosure Index') }}</h3>
+            </header>
+            <div class="summary-list compact">
+              <div class="summary-row">
+                <label>{{ label('说明', 'Description') }}</label>
+                <span class="summary-value soft">{{ skillDetail.description || '-' }}</span>
+              </div>
+              <div class="summary-row">
+                <label>{{ label('来源', 'Source') }}</label>
+                <span class="summary-value">{{ skillDetail.source }}</span>
+              </div>
+              <div class="summary-row">
+                <label>{{ label('加载模式', 'Context Mode') }}</label>
+                <span class="summary-value">{{ skillDetail.context_mode }}</span>
+              </div>
+              <div class="summary-row">
+                <label>{{ label('允许工具', 'Allowed Tools') }}</label>
+                <div class="chip-list">
+                  <span v-for="tool in parseJsonArray(skillDetail.allowed_tools_json)" :key="tool">{{ tool }}</span>
+                  <span v-if="parseJsonArray(skillDetail.allowed_tools_json).length === 0">-</span>
+                </div>
+              </div>
+              <div class="summary-row">
+                <label>{{ label('章节索引', 'Section Index') }}</label>
+                <div class="chapter-link-list">
+                  <RouterLink
+                    v-for="section in skillSections.slice(0, 8)"
+                    :key="section.id"
+                    :to="`/assets/skills/${encodeURIComponent(skillDetail.name)}/sections`"
+                  >
+                    {{ section.title }}
+                  </RouterLink>
+                  <span v-if="skillSections.length === 0">-</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="detail-card glass-panel">
+            <header class="card-head">
+              <span class="eyebrow">Action Schema</span>
+              <h3>{{ label('动作与参数摘要', 'Action and Argument Summary') }}</h3>
+            </header>
+            <pre class="json-block">{{ safeStringify(parseJsonObject(skillDetail.action_schema_json)) }}</pre>
+          </section>
+        </template>
+        <template v-else-if="mcpServer">
+          <section class="detail-card glass-panel">
+            <header class="card-head">
+              <span class="eyebrow">MCP Server</span>
+              <h3>{{ label('外部工具入口', 'External Tool Surface') }}</h3>
+            </header>
+            <div class="summary-list compact">
+              <div class="summary-row">
+                <label>{{ label('说明', 'Description') }}</label>
+                <span class="summary-value soft">{{ mcpServer.description || '-' }}</span>
+              </div>
+              <div class="summary-row">
+                <label>{{ label('传输', 'Transport') }}</label>
+                <span class="summary-value">{{ mcpServer.transport }}</span>
+              </div>
+              <div class="summary-row">
+                <label>{{ label('入口', 'Endpoint') }}</label>
+                <span class="summary-value">{{ mcpServer.endpoint || mcpServer.command || '-' }}</span>
+              </div>
+              <div class="summary-row">
+                <label>{{ label('状态', 'Status') }}</label>
+                <span class="summary-value">{{ mcpServer.enabled ? label('启用', 'Enabled') : label('未启用', 'Disabled') }}</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="detail-card glass-panel">
+            <header class="card-head">
+              <span class="eyebrow">Tools</span>
+              <h3>{{ label('工具索引', 'Tool Index') }}</h3>
+            </header>
+            <div v-if="mcpServer.tools.length === 0" class="empty-detail-line">
+              {{ label('这个 MCP server 还没有登记工具。', 'This MCP server has no registered tools.') }}
+            </div>
+            <div v-else class="tool-list">
+              <article v-for="tool in mcpServer.tools" :key="tool.name" class="tool-item">
+                <strong>{{ tool.name }}</strong>
+                <p>{{ tool.description || '-' }}</p>
+                <pre v-if="tool.input_schema" class="json-block compact-json">{{ safeStringify(tool.input_schema) }}</pre>
+              </article>
+            </div>
+          </section>
+
+          <section class="detail-card glass-panel">
+            <header class="card-head">
+              <span class="eyebrow">Metadata</span>
+              <h3>{{ label('认证与元数据', 'Auth and Metadata') }}</h3>
+            </header>
+            <pre class="json-block">{{ safeStringify({ auth: mcpServer.auth, metadata: mcpServer.metadata }) }}</pre>
           </section>
         </template>
         <template v-else>

@@ -12,10 +12,11 @@ const ROUTE_PATTERNS = [
   /^\/mi$/,
   /^\/studio\/workflows\/[^/]+\/(overview|editor|runs)$/,
   /^\/assets\/device-skills\/[^/]+\/overview$/,
-  /^\/assets\/skills\/[^/]+\/(overview|prompt)$/,
+  /^\/assets\/skills\/[^/]+\/(overview|sections|prompt)$/,
   /^\/assets\/manifests\/[^/]+\/overview$/,
   /^\/assets\/plans\/[^/]+\/overview$/,
   /^\/assets\/memory\/[^/]+\/overview$/,
+  /^\/assets\/mcp\/[^/]+\/overview$/,
   /^\/assets\/agents\/[^/]+\/overview$/,
 ]
 

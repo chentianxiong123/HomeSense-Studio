@@ -3,6 +3,7 @@ import { buildDeviceRuntimeManifest as defaultBuildDeviceRuntimeManifest, type D
 import { workflowNodeDefinitionRegistry as defaultWorkflowNodeDefinitionRegistry } from '../workflow/node-definitions.js'
 import { llmService as defaultLlmService, type LLMModelConfig, type LLMProviderCategory, type LLMProviderConfig } from '../llm-provider/service.js'
 import { skillsService as defaultSkillsService, type SkillDefinition } from '../skills-system/index.js'
+import { mcpRegistryService as defaultMcpRegistryService, type McpServerRecord } from '../mcp-registry/index.js'
 
 export type RuntimeCapabilityDomain =
   | 'device'
@@ -10,6 +11,7 @@ export type RuntimeCapabilityDomain =
   | 'provider'
   | 'workflow_node'
   | 'skill'
+  | 'mcp'
 
 export interface RuntimeCapabilityAction {
   name: string
@@ -84,6 +86,10 @@ interface SkillsServiceLike {
   listSkills(): SkillDefinition[]
 }
 
+interface McpRegistryServiceLike {
+  list(): McpServerRecord[]
+}
+
 type DeviceManifestBuilder = (options?: {
   includeCapabilities?: 'none' | 'summary' | 'full'
   online?: boolean
@@ -96,6 +102,7 @@ const DOMAIN_TITLES: Record<RuntimeCapabilityDomain, string> = {
   provider: 'Model Providers',
   workflow_node: 'Workflow Nodes',
   skill: 'Skills',
+  mcp: 'MCP Servers',
 }
 
 const PROVIDER_CATEGORIES: LLMProviderCategory[] = ['chat', 'embedding', 'rerank', 'vision']
@@ -107,6 +114,7 @@ export class RuntimeCapabilityMapService {
     private readonly workflowNodeDefinitions: WorkflowNodeDefinitionRegistryLike = defaultWorkflowNodeDefinitionRegistry,
     private readonly llmService: LLMServiceLike = defaultLlmService,
     private readonly skillsService: SkillsServiceLike = defaultSkillsService,
+    private readonly mcpRegistryService: McpRegistryServiceLike = defaultMcpRegistryService,
   ) {}
 
   async build(options: RuntimeCapabilityMapOptions = {}): Promise<RuntimeCapabilityMap> {
@@ -123,6 +131,7 @@ export class RuntimeCapabilityMapService {
       ...this.buildProviderSurfaces(),
       ...this.buildWorkflowNodeSurfaces(),
       ...this.buildSkillSurfaces(),
+      ...this.buildMcpSurfaces(),
     ].sort((left, right) => left.domain.localeCompare(right.domain) || left.title.localeCompare(right.title))
 
     return {
@@ -305,6 +314,33 @@ export class RuntimeCapabilityMapService {
     })
   }
 
+  private buildMcpSurfaces(): RuntimeCapabilitySurface[] {
+    return this.mcpRegistryService.list().map((server) => ({
+      id: `mcp.${server.name}`,
+      domain: 'mcp' as const,
+      title: server.name,
+      description: server.description,
+      status: server.enabled ? 'ready' : 'planned',
+      configured: server.enabled,
+      action_count: server.tools.length,
+      actions: server.tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        params_schema: tool.input_schema,
+      })),
+      tags: compact(['mcp', server.transport, String(server.metadata.status ?? '')]),
+      usage_hint: 'Expose this MCP server through a skill or tool bridge after the server is connected.',
+      metadata: {
+        transport: server.transport,
+        endpoint: server.endpoint,
+        command: server.command,
+        args: server.args,
+        auth: server.auth,
+        metadata: server.metadata,
+      },
+    }))
+  }
+
   private buildSummary(surfaces: RuntimeCapabilitySurface[]): RuntimeCapabilityMap['summary'] {
     const byDomain = emptyDomainCounts()
     let configured = 0
@@ -385,6 +421,7 @@ function emptyDomainCounts(): Record<RuntimeCapabilityDomain, number> {
     provider: 0,
     workflow_node: 0,
     skill: 0,
+    mcp: 0,
   }
 }
 

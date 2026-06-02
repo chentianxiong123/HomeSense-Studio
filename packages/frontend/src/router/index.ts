@@ -56,6 +56,12 @@ export const router = createRouter({
       meta: { assetKind: 'skill', assetTab: 'overview' },
     },
     {
+      path: '/assets/skills/:name/sections',
+      name: 'asset-skill-sections',
+      component: AssetDetailView,
+      meta: { assetKind: 'skill', assetTab: 'sections' },
+    },
+    {
       path: '/assets/skills/:name/prompt',
       name: 'asset-skill-prompt',
       component: AssetDetailView,
@@ -78,6 +84,12 @@ export const router = createRouter({
       name: 'asset-memory-overview',
       component: AssetDetailView,
       meta: { assetKind: 'memory', assetTab: 'overview' },
+    },
+    {
+      path: '/assets/mcp/:id/overview',
+      name: 'asset-mcp-overview',
+      component: AssetDetailView,
+      meta: { assetKind: 'mcp', assetTab: 'overview' },
     },
     {
       path: '/assets/agents/:target/overview',

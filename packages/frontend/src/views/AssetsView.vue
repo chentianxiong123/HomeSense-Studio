@@ -3,8 +3,10 @@ import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { deviceSkillApi } from '@/api/deviceSkills'
 import { memoryAssetsApi, type MemoryAssetRecord, type MemoryAssetSummary } from '@/api/memoryAssets'
+import { mcpApi, type McpServerRecord } from '@/api/mcp'
 import { runtimeCapabilityApi, type RuntimeCapabilityMap, type RuntimeCapabilitySurface } from '@/api/runtimeCapabilities'
 import { skillApi } from '@/api/skills'
+import type { SkillRecord } from '@/api/skills'
 import { useLocale } from '@/composables/useLocale'
 
 type AssetDomainKey = 'runtime_capability' | 'device_skill' | 'memory' | 'skill' | 'mcp_skill' | 'gateway'
@@ -41,17 +43,21 @@ const counts = ref({
   runtimeCapabilities: 0,
   deviceSkills: 0,
   skills: 0,
+  mcpServers: 0,
   memory: 0,
 })
 const memoryAssets = ref<MemoryAssetRecord[]>([])
 const memorySummary = ref<MemoryAssetSummary | null>(null)
 const runtimeCapabilityMap = ref<RuntimeCapabilityMap | null>(null)
+const mcpServers = ref<McpServerRecord[]>([])
+const skillsList = ref<SkillRecord[]>([])
 
 const isZh = computed(() => locale.value === 'zh')
 const totalActiveAssets = computed(() =>
   counts.value.runtimeCapabilities
   + counts.value.deviceSkills
   + counts.value.skills
+  + counts.value.mcpServers
   + counts.value.memory,
 )
 
@@ -69,13 +75,13 @@ const domains = computed<AssetDomain[]>(() => [
   },
   {
     key: 'device_skill',
-    title: label('设备技能', 'Device Skills'),
-    subtitle: label('设备类型说明书', 'Device-type playbooks'),
+    title: label('设备说明书 Skills', 'Device Manual Skills'),
+    subtitle: label('分层设备说明书', 'Layered device manuals'),
     status: label('已接入', 'Active'),
     count: counts.value.deviceSkills,
     accent: '#0f9f6e',
-    role: label('按电视、机顶盒、音箱、手机、电脑等设备类型组织能力说明。', 'Organizes capability instructions by device type.'),
-    llmUsage: label('LLM 先看到设备列表和上下文设备，需要时再加载对应设备类型的 skill。', 'The LLM sees devices first, then loads the matching device skill when needed.'),
+    role: label('Skill 是分层说明书，可以按设备、任务、工具或场景组织；设备说明书只是其中一种。', 'Skills are layered manuals that can be organized by device, task, tool, or scenario; device manuals are one subtype.'),
+    llmUsage: label('LLM 先看到设备列表和上下文设备，需要时再加载对应 Skill 的索引或章节。', 'The LLM sees devices first, then loads the matching skill index or section when needed.'),
     nextStep: label('继续把真实设备能力 JSON 接进 skill 详情。', 'Connect real capability JSON into skill details.'),
   },
   {
@@ -102,14 +108,14 @@ const domains = computed<AssetDomain[]>(() => [
   },
   {
     key: 'mcp_skill',
-    title: label('MCP Skills', 'MCP Skills'),
-    subtitle: label('未来外部工具技能', 'Future external tool skills'),
-    status: label('规划中', 'Planned'),
-    count: null,
+    title: label('MCP', 'MCP'),
+    subtitle: label('外部工具与 Skill 入口', 'External tools and skill entry'),
+    status: counts.value.mcpServers > 0 ? label('已登记', 'Registered') : label('规划中', 'Planned'),
+    count: counts.value.mcpServers,
     accent: '#d97706',
-    role: label('未来承接 MCP 工具的说明、参数、示例和加载规则。', 'Future home for MCP tool instructions, arguments, examples, and loading rules.'),
-    llmUsage: label('等 MCP 接入后，LLM 通过 skill 而不是裸工具列表理解怎么用。', 'After MCP lands, the LLM learns usage through skills instead of raw tool lists.'),
-    nextStep: label('先不实现后端，只保留资产入口。', 'Keep the entry point; no backend work yet.'),
+    role: label('登记 MCP server、transport、endpoint、tools 和认证元数据，后续由 Skill 解释怎么用。', 'Registers MCP servers, transport, endpoint, tools, and auth metadata; skills explain how to use them later.'),
+    llmUsage: label('LLM 不直接吃裸工具海；先看 MCP 轻量索引，再按需加载对应 Skill。', 'The LLM does not consume a raw tool dump; it sees a lightweight MCP index first, then loads matching skills when needed.'),
+    nextStep: label('下一步接真实 MCP SDK 或外部 MCP bridge。', 'Next connect the real MCP SDK or an external MCP bridge.'),
   },
   {
     key: 'gateway',
@@ -139,6 +145,9 @@ const visibleCapabilitySurfaces = computed(() =>
     .filter((surface) => surface.configured || surface.domain === 'provider' || surface.domain === 'workflow_node')
     .slice(0, 18),
 )
+
+const visibleSkills = computed(() => skillsList.value.slice(0, 12))
+const visibleMcpServers = computed(() => mcpServers.value.slice(0, 12))
 
 const memorySubtypes = computed<MemorySubtype[]>(() => [
   {
@@ -194,27 +203,49 @@ async function loadAssets() {
   loading.value = true
   errorMessage.value = ''
   try {
-    const [deviceSkills, skills, memoryResult, capabilityResult] = await Promise.all([
+    const [deviceSkills, skills, memoryResult, capabilityResult, mcpResult] = await Promise.all([
       deviceSkillApi.list(),
       skillApi.list(),
       memoryAssetsApi.list(),
       runtimeCapabilityApi.get(),
+      mcpApi.listServers(),
     ])
 
     counts.value = {
       runtimeCapabilities: capabilityResult.map?.summary.total_surfaces ?? capabilityResult.map?.surfaces.length ?? 0,
       deviceSkills: deviceSkills.skills?.length ?? 0,
       skills: skills.skills?.length ?? 0,
+      mcpServers: mcpResult.servers?.length ?? 0,
       memory: memoryResult.summary?.total ?? memoryResult.assets?.length ?? 0,
     }
     memoryAssets.value = memoryResult.assets ?? []
     memorySummary.value = memoryResult.summary
     runtimeCapabilityMap.value = capabilityResult.map ?? null
+    mcpServers.value = mcpResult.servers ?? []
+    skillsList.value = skills.skills ?? []
     lastLoadedAt.value = formatChinaTime(new Date())
   } catch (error) {
     errorMessage.value = (error as Error).message || label('资产加载失败。', 'Failed to load assets.')
   } finally {
     loading.value = false
+  }
+}
+
+function skillRoute(skill: SkillRecord) {
+  return `/assets/skills/${encodeURIComponent(skill.name)}/overview`
+}
+
+function mcpRoute(server: McpServerRecord) {
+  return `/assets/mcp/${encodeURIComponent(String(server.id))}/overview`
+}
+
+function formatSkillTools(skill: SkillRecord) {
+  try {
+    const parsed = JSON.parse(skill.allowed_tools_json) as unknown
+    if (!Array.isArray(parsed)) return ''
+    return parsed.map(String).slice(0, 4).join(' / ')
+  } catch {
+    return ''
   }
 }
 
@@ -291,6 +322,7 @@ function formatCapabilityDomain(surface: RuntimeCapabilitySurface) {
     provider: ['模型', 'Provider'],
     workflow_node: ['节点', 'Node'],
     skill: ['Skill', 'Skill'],
+    mcp: ['MCP', 'MCP'],
   }
   const item = labels[surface.domain]
   return label(item[0], item[1])
@@ -365,7 +397,7 @@ function formatChinaTime(date: Date) {
         <span class="eyebrow">{{ label('资产', 'Assets') }}</span>
         <h1>{{ label('智能家居 Agent 的资产地图', 'Asset Map for the Smart Home Agent') }}</h1>
         <p>
-          {{ label('这里不再堆内部表格，先保留真正会进入运行时链路的资产域：设备技能、记忆、通用技能、MCP Skills 和消息网关。', 'This page focuses on asset domains that will enter the runtime chain: device skills, memory, general skills, MCP skills, and gateways.') }}
+          {{ label('这里不再堆内部表格，先保留真正会进入运行时链路的资产域：Skills、记忆、MCP 和消息网关。', 'This page focuses on asset domains that will enter the runtime chain: skills, memory, MCP, and gateways.') }}
         </p>
       </div>
 
@@ -553,6 +585,98 @@ function formatChinaTime(date: Date) {
                   <p>{{ asset.retrieval_hint }}</p>
                 </div>
               </article>
+            </div>
+          </div>
+        </template>
+
+        <template v-else-if="selectedDomainKey === 'skill' || selectedDomainKey === 'device_skill'">
+          <div class="memory-brief">
+            <article>
+              <span>{{ label('定位', 'Role') }}</span>
+              <p>{{ selectedDomain.role }}</p>
+            </article>
+            <article>
+              <span>{{ label('LLM 如何使用', 'LLM Usage') }}</span>
+              <p>{{ selectedDomain.llmUsage }}</p>
+            </article>
+            <article>
+              <span>{{ label('下一步', 'Next') }}</span>
+              <p>{{ selectedDomain.nextStep }}</p>
+            </article>
+          </div>
+
+          <div class="asset-index-panel">
+            <div class="memory-list-head">
+              <div>
+                <span>{{ label('Skill 索引', 'Skill Index') }}</span>
+                <h3>{{ label('分层说明书', 'Layered Manuals') }}</h3>
+              </div>
+              <strong>{{ visibleSkills.length }}</strong>
+            </div>
+            <div v-if="visibleSkills.length === 0" class="memory-empty">
+              {{ label('还没有可展示的 Skill。', 'No skills to display yet.') }}
+            </div>
+            <div v-else class="asset-index-grid">
+              <RouterLink
+                v-for="skill in visibleSkills"
+                :key="skill.name"
+                class="asset-index-card"
+                :to="skillRoute(skill)"
+              >
+                <div class="capability-surface-top">
+                  <span>{{ skill.source }}</span>
+                  <span>{{ skill.context_mode }}</span>
+                </div>
+                <h4>{{ skill.name }}</h4>
+                <p>{{ skill.description }}</p>
+                <small>{{ formatSkillTools(skill) || label('无工具约束', 'No tool constraints') }}</small>
+              </RouterLink>
+            </div>
+          </div>
+        </template>
+
+        <template v-else-if="selectedDomainKey === 'mcp_skill'">
+          <div class="memory-brief">
+            <article>
+              <span>{{ label('定位', 'Role') }}</span>
+              <p>{{ selectedDomain.role }}</p>
+            </article>
+            <article>
+              <span>{{ label('LLM 如何使用', 'LLM Usage') }}</span>
+              <p>{{ selectedDomain.llmUsage }}</p>
+            </article>
+            <article>
+              <span>{{ label('下一步', 'Next') }}</span>
+              <p>{{ selectedDomain.nextStep }}</p>
+            </article>
+          </div>
+
+          <div class="asset-index-panel">
+            <div class="memory-list-head">
+              <div>
+                <span>{{ label('MCP 索引', 'MCP Index') }}</span>
+                <h3>{{ label('外部工具 Server', 'External Tool Servers') }}</h3>
+              </div>
+              <strong>{{ visibleMcpServers.length }}</strong>
+            </div>
+            <div v-if="visibleMcpServers.length === 0" class="memory-empty">
+              {{ label('还没有登记 MCP server。', 'No MCP servers registered yet.') }}
+            </div>
+            <div v-else class="asset-index-grid">
+              <RouterLink
+                v-for="server in visibleMcpServers"
+                :key="server.id"
+                class="asset-index-card"
+                :to="mcpRoute(server)"
+              >
+                <div class="capability-surface-top">
+                  <span>{{ server.transport }}</span>
+                  <span>{{ server.enabled ? label('启用', 'Enabled') : label('未启用', 'Disabled') }}</span>
+                </div>
+                <h4>{{ server.name }}</h4>
+                <p>{{ server.description }}</p>
+                <small>{{ label('工具', 'Tools') }} {{ server.tools.length }}</small>
+              </RouterLink>
             </div>
           </div>
         </template>
@@ -931,6 +1055,59 @@ h1 {
   background: #ffffff;
 }
 
+.asset-index-panel {
+  padding: 20px;
+  border: 1px solid rgba(203, 213, 225, 0.75);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.asset-index-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.asset-index-card {
+  min-height: 210px;
+  padding: 16px;
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  border-radius: 8px;
+  background: #f8fafc;
+  color: inherit;
+  text-decoration: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.asset-index-card:hover {
+  border-color: rgba(15, 118, 110, 0.35);
+  background: #ffffff;
+}
+
+.asset-index-card h4 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.asset-index-card p,
+.asset-index-card small {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.asset-index-card small {
+  margin-top: auto;
+  color: #0f766e;
+  font-weight: 900;
+}
+
 .capability-surface-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1166,6 +1343,10 @@ h1 {
     grid-template-columns: 1fr;
   }
 
+  .asset-index-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .hero-band,
   .domain-detail {
     grid-template-columns: 1fr;
@@ -1180,7 +1361,8 @@ h1 {
   .domain-grid,
   .domain-detail main,
   .memory-brief,
-  .memory-subtypes {
+  .memory-subtypes,
+  .asset-index-grid {
     grid-template-columns: 1fr;
   }
 }

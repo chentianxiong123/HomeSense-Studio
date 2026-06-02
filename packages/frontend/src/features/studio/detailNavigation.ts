@@ -21,6 +21,7 @@ export function buildSkillDetailTabs(
   const name = encodeURIComponent(skillName)
   return [
     { route: `/assets/skills/${name}/overview`, label: label('概览', 'Overview') },
+    { route: `/assets/skills/${name}/sections`, label: label('章节', 'Sections') },
     { route: `/assets/skills/${name}/prompt`, label: label('完整提示词', 'Prompt') },
   ]
 }
