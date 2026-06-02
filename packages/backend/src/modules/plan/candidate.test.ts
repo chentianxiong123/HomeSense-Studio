@@ -7,7 +7,7 @@ import {
   mergeProviderRerankScores,
   type CandidatePlan,
   type ObservationForAdjustment,
-} from './index.js'
+} from './candidate.js'
 
 const assert = {
   equal(actual: unknown, expected: unknown) {

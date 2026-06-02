@@ -1,6 +1,6 @@
 import fs from 'fs'
 import { memoryKernel as defaultMemoryKernel } from '../memory-kernel/index.js'
-import { planLibrary as defaultPlanLibrary } from '../plan-library/index.js'
+import { planLibrary as defaultPlanLibrary } from '../plan/index.js'
 import { SqlKnowledgeCompilerRepository, type KnowledgeCompilerRepository, type CompilerExperiencePathRow } from './repository.js'
 
 interface MemoryKernelInstance {

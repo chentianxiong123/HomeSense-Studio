@@ -1,6 +1,6 @@
 import { manifestRegistry, type UnifiedExecutorManifest } from '../registry/index.js'
 import { executorGateway } from '../executor-gateway/index.js'
-import type { CompiledPlanDefinition } from '../plan-library/index.js'
+import type { CompiledPlanDefinition } from '../plan/index.js'
 import type { SearchResult } from '../memory-kernel/index.js'
 import { getDb } from '../../db/index.js'
 import type Database from 'better-sqlite3'

@@ -35,8 +35,8 @@ import {
   isToolAllowedByPolicy,
   type L3ToolPolicyKind,
 } from './l3/tool-policy.js'
-import type { CandidatePlan } from '../candidate-plan/index.js'
-import type { PlanStepDefinition } from '../plan-library/index.js'
+import type { CandidatePlan } from '../plan/index.js'
+import type { PlanStepDefinition } from '../plan/index.js'
 import type { RuleAction } from '../rule/index.js'
 import type { RuntimeContextWindow } from '../runtime/index.js'
 

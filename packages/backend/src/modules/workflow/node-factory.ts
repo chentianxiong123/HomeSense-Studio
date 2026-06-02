@@ -24,7 +24,7 @@ import {
 } from './built-in-nodes.js'
 import { workflowNodeDefinitionRegistry } from './node-definitions.js'
 import { cliBridge } from '../integration/index.js'
-import { candidatePlanService } from '../candidate-plan/index.js'
+import { candidatePlanService } from '../plan/index.js'
 import { executorGateway } from '../executor-gateway/index.js'
 import { executeDeviceAgentTool } from '../device/device-agent-tools.js'
 import { llmService } from '../llm-provider/service.js'

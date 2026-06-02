@@ -1,8 +1,8 @@
-import { candidatePlanService as defaultCandidatePlanService, type CandidatePlan } from '../candidate-plan/index.js'
+import { candidatePlanService as defaultCandidatePlanService, type CandidatePlan } from '../plan/index.js'
 import { contextCompleter as defaultContextCompleter, type ContextCompletionResult, type ContextCompleterInput } from './context-completer.js'
 import { memoryAssetsService as defaultMemoryAssetsService } from '../memory-assets/index.js'
 import { memoryKernel as defaultMemoryKernel, type SearchResult } from '../memory-kernel/index.js'
-import { planLibrary as defaultPlanLibrary, type CompiledPlanDefinition } from '../plan-library/index.js'
+import { planLibrary as defaultPlanLibrary, type CompiledPlanDefinition } from '../plan/index.js'
 import { ruleEngine as defaultRuleEngine, type RuleMatch } from '../rule/index.js'
 import { skillsService as defaultSkillsService } from '../skills-system/index.js'
 

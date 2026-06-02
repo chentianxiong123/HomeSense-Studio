@@ -2,7 +2,7 @@ import type { ContextCompletionResult } from '../intent/index.js'
 import { llmService as defaultLlmService } from '../llm-provider/service.js'
 import { memoryAssetsService as defaultMemoryAssetsService } from '../memory-assets/index.js'
 import { memoryKernel as defaultMemoryKernel, type SearchResult } from '../memory-kernel/index.js'
-import { planLibrary as defaultPlanLibrary, type CompiledPlanDefinition, type PlanStepDefinition } from '../plan-library/index.js'
+import { planLibrary as defaultPlanLibrary, type CompiledPlanDefinition, type PlanStepDefinition } from '../plan/index.js'
 import { rerankService as defaultRerankService } from '../rerank-service/index.js'
 import { buildFingerprintFromCompletion, buildFingerprintFromSteps, fingerprintMatchScore } from '../intent/index.js'
 
