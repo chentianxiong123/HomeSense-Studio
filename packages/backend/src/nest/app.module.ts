@@ -5,6 +5,7 @@ import { DeviceDiscoveryModule } from './modules/device-discovery/device-discove
 import { UserDeviceModule } from './modules/user-device/user-device.module.js'
 import { RoomModule } from './modules/room/room.module.js'
 import { ContextModule } from './modules/context/context.module.js'
+import { IntegrationModule } from './modules/integration/integration.module.js'
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { ContextModule } from './modules/context/context.module.js'
     UserDeviceModule,
     RoomModule,
     ContextModule,
+    IntegrationModule,
   ],
   controllers: [HealthController],
 })
