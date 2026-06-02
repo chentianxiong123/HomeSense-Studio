@@ -10,7 +10,7 @@ import { agentInstanceService } from './modules/agent-instance/index.js'
 import { agentAdapterRegistry } from './modules/agent-adapter/index.js'
 import { cliBridge } from './modules/cli-bridge/index.js'
 import { executorGateway } from './modules/executor-gateway/index.js'
-import { ruleEngine } from './modules/rule-engine/index.js'
+import { ruleEngine } from './modules/rule/index.js'
 import { workflowSeedService } from './modules/workflow/seed.js'
 
 export interface EventBusInstance {

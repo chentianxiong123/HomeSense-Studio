@@ -37,7 +37,7 @@ import {
 } from './l3/tool-policy.js'
 import type { CandidatePlan } from '../candidate-plan/index.js'
 import type { PlanStepDefinition } from '../plan-library/index.js'
-import type { RuleAction } from '../rule-engine/index.js'
+import type { RuleAction } from '../rule/index.js'
 import type { RuntimeContextWindow } from '../runtime-context/index.js'
 
 export interface RuntimeTraceEvent {
