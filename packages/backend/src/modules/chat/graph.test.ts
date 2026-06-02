@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { matchCommand } from '../command/routes.js'
-import type { RuntimeContextWindow } from '../runtime-context/index.js'
+import type { RuntimeContextWindow } from '../runtime/index.js'
 
 let capturedMessages: Array<{ role: string; content: string }> = []
 let capturedTools: unknown

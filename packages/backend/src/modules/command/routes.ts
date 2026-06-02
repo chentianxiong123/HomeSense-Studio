@@ -129,7 +129,7 @@ export function seedAllAliasTemplates() {
 
 // ── Match pipeline ──
 import { CONTEXT_TTL_MS } from './constants.js'
-import { getActiveContextValue, parseContextUpdatedAt, type RuntimeContextWindow } from '../runtime-context/index.js'
+import { getActiveContextValue, parseContextUpdatedAt, type RuntimeContextWindow } from '../runtime/index.js'
 
 const CONTEXT_REQUIRED_ALIASES = new Set([
   '好', 'ok', 'OK',

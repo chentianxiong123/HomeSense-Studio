@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { runtimeCapabilityMapService } from './index.js'
+import { runtimeCapabilityMapService } from './capability-map.js'
 
 export async function runtimeCapabilityMapRoutes(app: FastifyInstance) {
   app.get('/api/runtime-capabilities', async (request) => {

@@ -6,7 +6,7 @@ import {
   getRuntimeContextState,
   getRuntimeContextSettings,
   saveRuntimeContextSettings,
-} from './index.js'
+} from './runtime-context.js'
 import { MemoryAssetsService } from '../memory-assets/index.js'
 
 describe('runtime context window', () => {

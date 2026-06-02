@@ -1,5 +1,5 @@
 import type { RuntimeTraceEvent } from '../chat/graph.js'
-import type { RuntimeContextWindow } from '../runtime-context/index.js'
+import type { RuntimeContextWindow } from '../runtime/index.js'
 
 export interface ChatAgentKernelInput {
   conversationId: number

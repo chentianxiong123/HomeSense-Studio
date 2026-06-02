@@ -4,7 +4,7 @@ import {
   buildRuntimeContextWindow,
   getRuntimeContextSettings,
   saveRuntimeContextSettings,
-} from '../runtime-context/index.js'
+} from '../runtime/index.js'
 import { chatService } from '../chat/service.js'
 
 export async function userContextRoutes(app: FastifyInstance) {
@@ -23,11 +23,11 @@ export async function userContextRoutes(app: FastifyInstance) {
     return { context }
   })
 
-  app.get('/api/runtime-context/settings', async () => {
+  app.get('/api/runtime/settings', async () => {
     return { settings: getRuntimeContextSettings() }
   })
 
-  app.put('/api/runtime-context/settings', async (request) => {
+  app.put('/api/runtime/settings', async (request) => {
     const body = request.body as {
       max_turns?: number
       ttl_ms?: number

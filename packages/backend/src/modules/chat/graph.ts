@@ -38,7 +38,7 @@ import {
 import type { CandidatePlan } from '../candidate-plan/index.js'
 import type { PlanStepDefinition } from '../plan-library/index.js'
 import type { RuleAction } from '../rule/index.js'
-import type { RuntimeContextWindow } from '../runtime-context/index.js'
+import type { RuntimeContextWindow } from '../runtime/index.js'
 
 export interface RuntimeTraceEvent {
   stage: 'runtime.intent' | 'runtime.context' | 'runtime.l1.command' | 'runtime.l1.rule' | 'runtime.l2.candidates' | 'runtime.decision' | 'runtime.l3.llm' | 'runtime.execution'

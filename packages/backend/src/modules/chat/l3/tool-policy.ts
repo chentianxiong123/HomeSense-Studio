@@ -1,5 +1,5 @@
 import { shouldAttemptL1Reflex } from '../../command/l1-reflex-policy.js'
-import type { RuntimeContextWindow } from '../../runtime-context/index.js'
+import type { RuntimeContextWindow } from '../../runtime/index.js'
 
 export type L3ToolPolicyKind = 'none' | 'read_only' | 'preview_only' | 'execute_allowed'
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RuntimeCapabilityMapService } from './index.js'
+import { RuntimeCapabilityMapService } from './capability-map.js'
 
 describe('RuntimeCapabilityMapService', () => {
   it('aggregates real registry-shaped capability surfaces into one map', async () => {

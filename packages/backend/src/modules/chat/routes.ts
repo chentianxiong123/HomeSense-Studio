@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { chatService } from './service.js'
-import { buildRuntimeContextWindow } from '../runtime-context/index.js'
+import { buildRuntimeContextWindow } from '../runtime/index.js'
 import { getChatAgentKernel, type ChatAgentKernelState } from '../agent-kernel/index.js'
 import { getDb } from '../../db/index.js'
 import {
