@@ -2,7 +2,7 @@ import { getDb as defaultGetDb } from '../../db/index.js'
 import { eventBus as defaultEventBus, HeartEvent } from '../event-bus/index.js'
 import { llmService as defaultLlmService } from '../llm-provider/service.js'
 import { skillsService as defaultSkillsService } from '../skills-system/index.js'
-import { SqlMemoryRepository, type MemoryRepository } from './repository.js'
+import { SqlMemoryRepository, type MemoryRepository } from './kernel-repository.js'
 
 type GetDbFn = () => ReturnType<typeof defaultGetDb>
 

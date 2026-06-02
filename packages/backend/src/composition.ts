@@ -1,7 +1,7 @@
 import { getDb } from './db/index.js'
 import { eventBus } from './modules/event-bus/index.js'
 import { llmService } from './modules/llm-provider/service.js'
-import { memoryKernel } from './modules/memory-kernel/index.js'
+import { memoryKernel } from './modules/memory/index.js'
 import { planLibrary } from './modules/plan/index.js'
 import { knowledgeCompiler } from './modules/knowledge-compiler/index.js'
 import { experienceService } from './modules/experience/index.js'

@@ -1,6 +1,6 @@
 import { eventBus, HeartEvent } from '../event-bus/index.js'
-import { memoryKernel } from '../memory-kernel/index.js'
-import { memoryAssetsService } from '../memory-assets/index.js'
+import { memoryKernel } from '../memory/index.js'
+import { memoryAssetsService } from '../memory/index.js'
 import { executeDeviceAgentTool } from '../device/device-agent-tools.js'
 import type { ExecutorInvokeResult } from '../executor-gateway/index.js'
 

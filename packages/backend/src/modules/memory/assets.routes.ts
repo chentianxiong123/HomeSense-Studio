@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { memoryAssetsService, type RecordExperiencePathInput } from './index.js'
+import { memoryAssetsService, type RecordExperiencePathInput } from './assets.js'
 
 export async function memoryAssetsRoutes(app: FastifyInstance) {
   app.get('/api/assets/memory', async () => {

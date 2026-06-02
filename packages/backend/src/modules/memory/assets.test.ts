@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MemoryAssetsService } from './index.js'
+import { MemoryAssetsService } from './assets.js'
 import { createInMemoryDb } from '../../db/index.js'
 
 describe('MemoryAssetsService', () => {

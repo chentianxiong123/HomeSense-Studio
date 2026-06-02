@@ -7,7 +7,7 @@ import {
   getRuntimeContextSettings,
   saveRuntimeContextSettings,
 } from './runtime-context.js'
-import { MemoryAssetsService } from '../memory-assets/index.js'
+import { MemoryAssetsService } from '../memory/index.js'
 
 describe('runtime context window', () => {
   it('enriches the active device context with device and room metadata', () => {

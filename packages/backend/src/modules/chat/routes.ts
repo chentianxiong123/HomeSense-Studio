@@ -8,7 +8,7 @@ import {
   type DeviceCardRow,
 } from '../device/device-card-projection.js'
 import { buildRuntimePathCandidate } from './path-candidate.js'
-import { memoryAssetsService } from '../memory-assets/index.js'
+import { memoryAssetsService } from '../memory/index.js'
 
 // Plain LLM stream path is frozen/disabled. All messages now go through LangGraph ReAct graph.
 // import { llmService } from '../llm-provider/service.js'

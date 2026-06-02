@@ -2,7 +2,7 @@ import { cliBridge as defaultCliBridge, type CLIResult, type CLIBridge } from '.
 import { agentAdapterRegistry as defaultAgentAdapterRegistry, type AgentCliAdapterBinding } from '../agent-adapter/index.js'
 import { serviceRegistry as defaultServiceRegistry } from '../registry/index.js'
 import { planLibrary as defaultPlanLibrary, type CompiledPlanDefinition, type PlanStepDefinition } from '../plan/index.js'
-import { memoryKernel as defaultMemoryKernel } from '../memory-kernel/index.js'
+import { memoryKernel as defaultMemoryKernel } from '../memory/index.js'
 
 interface ServiceRegistryInstance {
   call(serviceName: string, params: Record<string, unknown>): Promise<unknown>

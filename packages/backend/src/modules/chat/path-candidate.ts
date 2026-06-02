@@ -1,6 +1,6 @@
 import { normalizeDeviceTypeForSkill } from '../device/device-capability-registry.js'
 import { buildFingerprintFromSteps } from '../intent/index.js'
-import type { MemorySkillRef, RecordExperiencePathInput } from '../memory-assets/index.js'
+import type { MemorySkillRef, RecordExperiencePathInput } from '../memory/index.js'
 import type { RuntimeTraceEvent } from './graph.js'
 
 interface ChatMessageLike {

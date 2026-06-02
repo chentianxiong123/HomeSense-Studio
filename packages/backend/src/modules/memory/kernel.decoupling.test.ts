@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { createInMemoryDb } from '../../db/index.js'
 import { FakeEventBus, FakeLlmService } from '../../test-support/index.js'
-import { SqlMemoryRepository } from './repository.js'
-import { MemoryKernelService } from './index.js'
+import { SqlMemoryRepository } from './kernel-repository.js'
+import { MemoryKernelService } from './kernel.js'
 
 describe('memory-kernel · heart writes pass through repository', () => {
   it('observeOutcome via repository accumulates counts', () => {

@@ -4,7 +4,7 @@ import { executorGateway as defaultExecutorGateway } from '../executor-gateway/i
 import { intentRouter as defaultIntentRouter, type RoutedCandidatePlan, type RoutedObservation } from '../intent/index.js'
 import { llmService, type LLMChatResult } from '../llm-provider/service.js'
 import { approvalRegistry as defaultApprovalRegistry, isHighRiskCliCall, type ApprovalRecord } from '../approval/index.js'
-import { memoryKernel as defaultMemoryKernel } from '../memory-kernel/index.js'
+import { memoryKernel as defaultMemoryKernel } from '../memory/index.js'
 import { selfEnhancementService as defaultSelfEnhancement } from '../self-enhancement/index.js'
 import { compensationService as defaultCompensationService, type CompensationTask } from '../compensation/index.js'
 import type { TaskFailure } from '../self-enhancement/index.js'
