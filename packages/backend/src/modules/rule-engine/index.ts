@@ -1,6 +1,6 @@
 import { getDb as defaultGetDb } from '../../db/index.js'
 import { eventBus as defaultEventBus } from '../event-bus/index.js'
-import { serviceRegistry as defaultServiceRegistry } from '../service-registry/index.js'
+import { serviceRegistry as defaultServiceRegistry } from '../registry/index.js'
 import type { EventBusInstance } from '../../composition.js'
 
 interface ServiceRegistryInstance {

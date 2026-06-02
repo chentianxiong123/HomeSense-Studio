@@ -1,7 +1,7 @@
 import { getDb as defaultGetDb } from '../../db/index.js'
 import { eventBus as defaultEventBus, HeartEvent } from '../event-bus/index.js'
-import { serviceRegistry as defaultServiceRegistry } from '../service-registry/index.js'
-import { entityRegistry as defaultEntityRegistry } from '../entity-registry/index.js'
+import { serviceRegistry as defaultServiceRegistry } from '../registry/index.js'
+import { entityRegistry as defaultEntityRegistry } from '../registry/index.js'
 import { stateMachine as defaultStateMachine } from '../state-machine/index.js'
 
 type GetDbFn = () => ReturnType<typeof defaultGetDb>

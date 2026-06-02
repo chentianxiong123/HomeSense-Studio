@@ -1,4 +1,4 @@
-import { manifestRegistry as defaultManifestRegistry, type UnifiedExecutorManifest } from '../manifest-registry/index.js'
+import { manifestRegistry as defaultManifestRegistry, type UnifiedExecutorManifest } from '../registry/index.js'
 import { buildDeviceRuntimeManifest as defaultBuildDeviceRuntimeManifest, type DeviceRuntimeManifest } from '../device/device-runtime-manifest.js'
 import { workflowNodeDefinitionRegistry as defaultWorkflowNodeDefinitionRegistry } from '../workflow/node-definitions.js'
 import { llmService as defaultLlmService, type LLMModelConfig, type LLMProviderCategory, type LLMProviderConfig } from '../llm-provider/service.js'

@@ -24,7 +24,7 @@ import { compensationRoutes } from './modules/compensation/routes.js'
 import { compensationService } from './modules/compensation/index.js'
 import { cronRoutes } from './modules/cron/routes.js'
 import { executorGatewayRoutes } from './modules/executor-gateway/routes.js'
-import { manifestRegistryRoutes } from './modules/manifest-registry/routes.js'
+import { manifestRegistryRoutes } from './modules/registry/routes.js'
 import { approvalRoutes } from './modules/approval/routes.js'
 import { agentInstanceRoutes } from './modules/agent-instance/routes.js'
 // import { devtestRoutes } from './modules/devtest/routes.js'
@@ -54,7 +54,7 @@ import { knowledgeCompiler } from './modules/knowledge-compiler/index.js'
 import { executorGateway } from './modules/executor-gateway/index.js'
 import { planLibrary } from './modules/plan-library/index.js'
 import { assertWorkflowNodeRegistryIntegrity } from './modules/workflow/node-factory.js'
-import './modules/service-registry/index.js'
+import './modules/registry/index.js'
 import { channelRegistry } from './modules/channels/index.js'
 import { stateMachine } from './modules/state-machine/index.js'
 
@@ -135,14 +135,14 @@ export async function buildApp() {
   })
 
   app.get('/api/services', async () => {
-    const { serviceRegistry } = await import('./modules/service-registry/index.js')
+    const { serviceRegistry } = await import('./modules/registry/index.js')
     return { services: serviceRegistry.list() }
   })
 
   app.post('/api/services/:name/call', async (request) => {
     const { name } = request.params as { name: string }
     const params = (request.body as Record<string, unknown>) ?? {}
-    const { serviceRegistry } = await import('./modules/service-registry/index.js')
+    const { serviceRegistry } = await import('./modules/registry/index.js')
     try {
       const result = await serviceRegistry.call(name, params)
       return { status: 'success', data: result }

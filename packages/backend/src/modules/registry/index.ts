@@ -1,7 +1,153 @@
+/**
+ * Module: registry
+ *
+ * In-memory registries that the system looks things up in. This module
+ * was the consolidation of three legacy modules:
+ *   - service-registry  (named services with schema, fires events)
+ *   - entity-registry   (entity definitions keyed by device)
+ *   - manifest-registry (unified CLI/agent/service/channel manifest view)
+ *
+ * Noun: registry
+ * Public surface: the three classes + their singleton instances + their types.
+ * Internal helpers are `_`-prefixed.
+ */
+
+import { eventBus as defaultEventBus, HeartEvent } from '../event-bus/index.js'
+import { stateMachine as defaultStateMachine } from '../state-machine/index.js'
 import { agentAdapterRegistry as defaultAgentAdapterRegistry } from '../agent-adapter/index.js'
 import { cliBridge as defaultCliBridge, type CLIBridge } from '../cli-bridge/index.js'
-import { serviceRegistry as defaultServiceRegistry } from '../service-registry/index.js'
 import { channelRegistry as defaultChannelRegistry } from '../channels/index.js'
+
+// ============================================================================
+// Service registry
+// ============================================================================
+
+export interface ServiceSchema {
+  description: string
+  fields: Record<string, {
+    description: string
+    required: boolean
+    default?: unknown
+  }>
+}
+
+export type ServiceHandler = (params: Record<string, unknown>) => Promise<unknown>
+
+export interface ServiceInfo {
+  name: string
+  description: string
+  schema?: ServiceSchema
+}
+
+interface EventBusInstance {
+  fire(event: string, data?: unknown): void
+  on(event: string, handler: (...args: unknown[]) => void): void
+}
+
+interface StateMachineInstance {
+  set(entityId: string, state: string, attributes?: Record<string, unknown>): void
+  get(entityId: string): { state: string; attributes?: Record<string, unknown> } | undefined
+}
+
+export class ServiceRegistry {
+  private services = new Map<string, { handler: ServiceHandler; schema?: ServiceSchema }>()
+
+  constructor(
+    private readonly eventBus: EventBusInstance = defaultEventBus,
+    private readonly stateMachine: StateMachineInstance = defaultStateMachine,
+  ) {}
+
+  register(name: string, handler: ServiceHandler, schema?: ServiceSchema): void {
+    this.services.set(name, { handler, schema })
+    this.eventBus.fire(HeartEvent.SERVICE_REGISTERED, { name, schema })
+  }
+
+  async call(name: string, params: Record<string, unknown>): Promise<unknown> {
+    const service = this.services.get(name)
+    if (!service) {
+      throw new Error(`Service not found: ${name}`)
+    }
+
+    if (service.schema) {
+      for (const [fieldName, fieldDef] of Object.entries(service.schema.fields)) {
+        if (fieldDef.required && params[fieldName] === undefined) {
+          if (fieldDef.default !== undefined) {
+            params[fieldName] = fieldDef.default
+          } else {
+            throw new Error(`Missing required field: ${fieldName}`)
+          }
+        }
+      }
+    }
+
+    const result = await service.handler(params)
+    this.eventBus.fire(HeartEvent.SERVICE_CALLED, { name, params })
+    return result
+  }
+
+  list(): ServiceInfo[] {
+    return Array.from(this.services.entries()).map(([name, { schema }]) => ({
+      name,
+      description: schema?.description ?? '',
+      schema,
+    }))
+  }
+
+  has(name: string): boolean {
+    return this.services.has(name)
+  }
+
+  initialize(): void {
+    // Device control handlers will be re-added later.
+  }
+}
+
+export const serviceRegistry = new ServiceRegistry()
+serviceRegistry.initialize()
+
+// ============================================================================
+// Entity registry
+// ============================================================================
+
+export interface EntityDef {
+  entity_id: string
+  device_did: string
+  domain: string
+  capability: string
+  name: string
+  icon: string
+  enabled: boolean
+}
+
+export class EntityRegistry {
+  private entities = new Map<string, EntityDef>()
+
+  register(entity: EntityDef): void {
+    this.entities.set(entity.entity_id, entity)
+  }
+
+  get(entityId: string): EntityDef | undefined {
+    return this.entities.get(entityId)
+  }
+
+  getByDevice(deviceDid: string): EntityDef[] {
+    return Array.from(this.entities.values()).filter((e) => e.device_did === deviceDid)
+  }
+
+  getAll(): EntityDef[] {
+    return Array.from(this.entities.values())
+  }
+
+  remove(entityId: string): boolean {
+    return this.entities.delete(entityId)
+  }
+}
+
+export const entityRegistry = new EntityRegistry()
+
+// ============================================================================
+// Manifest registry (CLI / agent / service / channel unified view)
+// ============================================================================
 
 export type ExecutorKind = 'cli' | 'agent' | 'a2a' | 'service' | 'channel'
 
@@ -27,11 +173,11 @@ export interface UnifiedExecutorManifest {
   sample_invocation?: Record<string, unknown>
 }
 
-interface ServiceRegistryInstance {
+interface ServiceRegistryPort {
   list(): Array<{ name: string; description: string; schema?: { fields?: Record<string, unknown> } }>
 }
 
-interface AgentAdapterRegistryInstance {
+interface AgentAdapterRegistryPort {
   list(): Array<{
     id: string; display_name: string; description: string; capabilities: string[]
     execution_modes: string[]; payload_schema?: Record<string, { type: string; required: boolean; description?: string; default?: unknown }>
@@ -43,7 +189,7 @@ interface AgentAdapterRegistryInstance {
   }>
 }
 
-interface ChannelRegistryInstance {
+interface ChannelRegistryPort {
   list(): Array<{ name: string; display_name: string; description: string }>
 }
 
@@ -65,9 +211,9 @@ function normalizeParamsSchema(
 export class ManifestRegistryService {
   constructor(
     private readonly cliBridge: CLIBridge = defaultCliBridge,
-    private readonly agentAdapterRegistry: AgentAdapterRegistryInstance = defaultAgentAdapterRegistry,
-    private readonly serviceRegistry: ServiceRegistryInstance = defaultServiceRegistry,
-    private readonly channelRegistry: ChannelRegistryInstance = defaultChannelRegistry,
+    private readonly agentAdapterRegistry: AgentAdapterRegistryPort = defaultAgentAdapterRegistry,
+    private readonly serviceRegistryPort: ServiceRegistryPort = serviceRegistry,
+    private readonly channelRegistry: ChannelRegistryPort = defaultChannelRegistry,
   ) {}
 
   list(): UnifiedExecutorManifest[] {
@@ -189,7 +335,7 @@ export class ManifestRegistryService {
 
   private buildServiceManifests(): UnifiedExecutorManifest[] {
     const channelsByName = new Map(this.channelRegistry.list().map((channel) => [channel.name, channel]))
-    return this.serviceRegistry.list().map((service) => {
+    return this.serviceRegistryPort.list().map((service) => {
       const channel = channelsByName.get(service.name)
       const isChannel = Boolean(channel)
       const fields = service.schema?.fields ?? {}

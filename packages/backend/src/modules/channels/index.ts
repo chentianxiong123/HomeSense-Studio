@@ -1,4 +1,4 @@
-import { serviceRegistry, type ServiceSchema } from '../service-registry/index.js'
+import { serviceRegistry, type ServiceSchema } from '../registry/index.js'
 
 interface ChannelManifest {
   name: string
