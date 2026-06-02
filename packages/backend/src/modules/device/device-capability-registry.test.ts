@@ -3,7 +3,7 @@ import {
   buildDeviceCapabilityRegistry,
   resolveDeviceCapability,
 } from './device-capability-registry.js'
-import type { CLIBridge } from '../cli-bridge/index.js'
+import type { CLIBridge } from '../integration/index.js'
 
 const fakeCliBridge = {
   run: async (cliName: string, action: string) => {

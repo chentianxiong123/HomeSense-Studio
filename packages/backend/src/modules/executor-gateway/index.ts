@@ -1,4 +1,4 @@
-import { cliBridge as defaultCliBridge, type CLIResult, type CLIBridge } from '../cli-bridge/index.js'
+import { cliBridge as defaultCliBridge, type CLIResult, type CLIBridge } from '../integration/index.js'
 import { agentAdapterRegistry as defaultAgentAdapterRegistry, type AgentCliAdapterBinding } from '../agent-adapter/index.js'
 import { serviceRegistry as defaultServiceRegistry } from '../registry/index.js'
 import { planLibrary as defaultPlanLibrary, type CompiledPlanDefinition, type PlanStepDefinition } from '../plan-library/index.js'

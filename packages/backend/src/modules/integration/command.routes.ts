@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { getDb } from '../../db/index.js'
-import { L1_REFLEX_POLICY, shouldAttemptL1Reflex } from './l1-reflex-policy.js'
+import { L1_REFLEX_POLICY, shouldAttemptL1Reflex } from './command.l1-reflex-policy.js'
 
 // ── Preset stopwords ──
 const PRESET_STOPWORDS = [
@@ -128,7 +128,7 @@ export function seedAllAliasTemplates() {
 }
 
 // ── Match pipeline ──
-import { CONTEXT_TTL_MS } from './constants.js'
+import { CONTEXT_TTL_MS } from './command.constants.js'
 import { getActiveContextValue, parseContextUpdatedAt, type RuntimeContextWindow } from '../runtime/index.js'
 
 const CONTEXT_REQUIRED_ALIASES = new Set([

@@ -1,5 +1,5 @@
 import { getDb } from '../../db/index.js'
-import { cliBridge as defaultCliBridge, type CLIBridge } from '../cli-bridge/index.js'
+import { cliBridge as defaultCliBridge, type CLIBridge } from '../integration/index.js'
 import { executorGateway as defaultExecutorGateway } from '../executor-gateway/index.js'
 import { intentRouter as defaultIntentRouter, type RoutedCandidatePlan, type RoutedObservation } from '../intent/index.js'
 import { llmService, type LLMChatResult } from '../llm-provider/service.js'

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { executorGateway } from './index.js'
 import { agentAdapterRegistry } from '../agent-adapter/index.js'
-import { cliBridge } from '../cli-bridge/index.js'
+import { cliBridge } from '../integration/index.js'
 
 export async function executorGatewayRoutes(app: FastifyInstance) {
   app.get('/api/executor-gateway/executors', async () => {

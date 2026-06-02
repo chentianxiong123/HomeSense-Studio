@@ -4,8 +4,8 @@ import type { Dirent, Stats } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import type { ExternalIntegrationRecord } from '../external-integrations/index.js'
-import { externalIntegrationsService } from '../external-integrations/index.js'
+import type { ExternalIntegrationRecord } from '../integration/index.js'
+import { externalIntegrationsService } from '../integration/index.js'
 
 const execFileAsync = promisify(execFile)
 const DEFAULT_CODE_SERVER_ENDPOINT = 'http://127.0.0.1:8080'

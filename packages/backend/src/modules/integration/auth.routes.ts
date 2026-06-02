@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { cliBridge } from '../cli-bridge/index.js'
+import { cliBridge } from './cli-bridge.js'
 
 export async function authRoutes(app: FastifyInstance) {
   app.post('/api/auth/qr/start', async () => {

@@ -23,7 +23,7 @@ import {
   HumanInputWorkflowNode,
 } from './built-in-nodes.js'
 import { workflowNodeDefinitionRegistry } from './node-definitions.js'
-import { cliBridge } from '../cli-bridge/index.js'
+import { cliBridge } from '../integration/index.js'
 import { candidatePlanService } from '../candidate-plan/index.js'
 import { executorGateway } from '../executor-gateway/index.js'
 import { executeDeviceAgentTool } from '../device/device-agent-tools.js'

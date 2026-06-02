@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { externalIntegrationsService } from './index.js'
+import { externalIntegrationsService } from './external-integrations.js'
 
 export async function externalIntegrationRoutes(app: FastifyInstance) {
   app.get('/api/external-integrations', async () => {

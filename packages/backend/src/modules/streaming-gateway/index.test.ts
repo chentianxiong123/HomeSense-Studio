@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { ExternalIntegrationRecord } from '../external-integrations/index.js'
+import type { ExternalIntegrationRecord } from '../integration/index.js'
 import { StreamingGatewayService } from './index.js'
 
 function makeIntegration(overrides: Partial<ExternalIntegrationRecord> = {}): ExternalIntegrationRecord {

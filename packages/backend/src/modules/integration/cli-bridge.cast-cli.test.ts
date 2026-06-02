@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { CLIBridge } from './index.js'
+import { CLIBridge } from './cli-bridge.js'
 import { ManifestRegistryService } from '../registry/index.js'
 import { ExecutorGatewayService } from '../executor-gateway/index.js'
 

@@ -1,5 +1,5 @@
 import { getDb } from '../../db/index.js'
-import { CONTEXT_TTL_MS } from '../command/constants.js'
+import { CONTEXT_TTL_MS } from '../integration/command.constants.js'
 
 export interface RuntimeContextEntry {
   key: string

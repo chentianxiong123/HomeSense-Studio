@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import type { FastifyInstance } from 'fastify'
-import { cliBridge } from '../cli-bridge/index.js'
+import { cliBridge } from '../integration/index.js'
 import { getDb } from '../../db/index.js'
 import { pingAllDevices } from './device-network.js'
 import {

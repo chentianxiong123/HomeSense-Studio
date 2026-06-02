@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { matchCommand } from '../command/routes.js'
+import { matchCommand } from '../integration/command.routes.js'
 import type { RuntimeContextWindow } from '../runtime/index.js'
 
 let capturedMessages: Array<{ role: string; content: string }> = []
@@ -52,7 +52,7 @@ vi.mock('../intent/index.js', () => ({
   },
 }))
 
-vi.mock('../command/routes.js', () => ({
+vi.mock('../integration/command.routes.js', () => ({
   matchCommand: vi.fn(() => null),
 }))
 

@@ -4,8 +4,8 @@ import { executorGateway } from '../executor-gateway/index.js'
 import type { ExecutorInvokeResult } from '../executor-gateway/index.js'
 import { intentRouter, type IntentRouterResult } from '../intent/index.js'
 import { approvalRegistry, isHighRiskCliCall } from '../approval/index.js'
-import { matchCommand } from '../command/routes.js'
-import { shouldAttemptL1Reflex } from '../command/l1-reflex-policy.js'
+import { matchCommand } from '../integration/command.routes.js'
+import { shouldAttemptL1Reflex } from '../integration/command.l1-reflex-policy.js'
 import {
   DEVICE_AGENT_TOOL_DEFINITIONS,
   executeDeviceAgentTool,

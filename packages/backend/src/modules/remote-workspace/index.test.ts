@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { ExternalIntegrationRecord } from '../external-integrations/index.js'
+import type { ExternalIntegrationRecord } from '../integration/index.js'
 import { RemoteWorkspaceService, probeSourceKernel } from './index.js'
 
 function makeIntegration(overrides: Partial<ExternalIntegrationRecord> = {}): ExternalIntegrationRecord {

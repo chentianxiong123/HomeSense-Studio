@@ -15,7 +15,7 @@
 import { eventBus as defaultEventBus, HeartEvent } from '../event-bus/index.js'
 import { stateMachine as defaultStateMachine } from '../state-machine/index.js'
 import { agentAdapterRegistry as defaultAgentAdapterRegistry } from '../agent-adapter/index.js'
-import { cliBridge as defaultCliBridge, type CLIBridge } from '../cli-bridge/index.js'
+import { cliBridge as defaultCliBridge, type CLIBridge } from '../integration/index.js'
 import { channelRegistry as defaultChannelRegistry } from '../channels/index.js'
 
 // ============================================================================

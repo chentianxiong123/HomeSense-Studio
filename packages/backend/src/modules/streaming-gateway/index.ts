@@ -1,6 +1,6 @@
 import dgram from 'node:dgram'
-import type { ExternalIntegrationRecord } from '../external-integrations/index.js'
-import { externalIntegrationsService } from '../external-integrations/index.js'
+import type { ExternalIntegrationRecord } from '../integration/index.js'
+import { externalIntegrationsService } from '../integration/index.js'
 
 export type StreamingNetworkPath = 'lan' | 'vpn' | 'tunnel' | 'public'
 
