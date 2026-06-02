@@ -8,7 +8,9 @@
     "build": "tsc",
     "db:init": "tsx src/db/init.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:isolation": "node ../../scripts/check-module-isolation.mjs --by-source",
+    "check:isolation:strict": "node ../../scripts/check-module-isolation.mjs --strict --by-source"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "file:../../../HomeSense/References/pi/packages/agent",
