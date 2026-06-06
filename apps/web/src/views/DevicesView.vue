@@ -38,6 +38,38 @@ const selectedDeviceId = ref<number | null>(null)
 const viewportWidth = ref(1000)
 const viewportHeight = ref(700)
 const zoomedRoomId = ref<number | null>(null)
+const isEditMode = ref(false)
+
+type LayoutKey = 'desktop' | 'mobile'
+type RoomLayoutDraft = { x?: number; y?: number; w?: number; h?: number }
+type RoomPropsDraft = Record<string, unknown> & {
+  desktop?: RoomLayoutDraft
+  mobile?: RoomLayoutDraft
+  bgColor?: string
+}
+type DevicePropsDraft = Record<string, unknown> & {
+  desktop?: RoomLayoutDraft
+  mobile?: RoomLayoutDraft
+}
+
+const roomColorPresets = [
+  { value: '', preview: 'rgba(255, 255, 255, 0.45)', zh: '默认', en: 'Default' },
+  { value: 'rgba(14, 165, 233, 0.14)', preview: 'rgba(14, 165, 233, 0.14)', zh: '天空蓝', en: 'Sky Blue' },
+  { value: 'rgba(34, 197, 94, 0.14)', preview: 'rgba(34, 197, 94, 0.14)', zh: '草绿色', en: 'Soft Green' },
+  { value: 'rgba(245, 158, 11, 0.16)', preview: 'rgba(245, 158, 11, 0.16)', zh: '暖橙色', en: 'Warm Amber' },
+  { value: 'rgba(244, 114, 182, 0.16)', preview: 'rgba(244, 114, 182, 0.16)', zh: '雾粉色', en: 'Soft Pink' },
+]
+
+const editingRoomId = ref<number | null>(null)
+const editingRoomName = ref('')
+const editingRoomColor = ref('')
+const editingRoomDeviceIds = ref<number[]>([])
+const editingRoom = computed(() =>
+  rooms.value.find((room) => room.id === editingRoomId.value) || null
+)
+const roomDeviceOptions = computed(() =>
+  [...devices.value].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+)
 
 // Interactive Scale & Pan
 const scale = ref(1)
@@ -50,15 +82,36 @@ const panStartRawY = ref(0)
 // Orientation Detection
 const isMobilePortrait = ref(false)
 
+function currentLayoutKey(): LayoutKey {
+  return isMobilePortrait.value ? 'mobile' : 'desktop'
+}
+
+function roomPropsRecord(room: Room): RoomPropsDraft {
+  if (!room.props || typeof room.props !== 'object') room.props = {}
+  return room.props as RoomPropsDraft
+}
+
+function getRoomLayoutSource(room: Room): RoomLayoutDraft {
+  const props = roomPropsRecord(room)
+  const layout = props[currentLayoutKey()]
+  if (layout && typeof layout === 'object') return layout
+  return props as RoomLayoutDraft
+}
+
+function getRoomBackground(room: Room, fallback = 'rgba(255, 255, 255, 0.45)'): string {
+  const background = roomPropsRecord(room).bgColor
+  return typeof background === 'string' && background.trim()
+    ? background
+    : fallback
+}
+
 const selectedDevice = computed(() =>
   devices.value.find((d) => d.id === selectedDeviceId.value) || null
 )
 
 const activeRooms = computed(() => {
-  return rooms.value.filter((r) => {
-    const props = r.props ?? {}
-    const key = isMobilePortrait.value ? 'mobile' : 'desktop'
-    const layout = props[key] ?? props
+  return rooms.value.filter((room) => {
+    const layout = getRoomLayoutSource(room)
     return (
       typeof layout.x === 'number' &&
       typeof layout.y === 'number' &&
@@ -69,9 +122,7 @@ const activeRooms = computed(() => {
 })
 
 function getRoomLayout(room: Room): { x: number; y: number; w: number; h: number } {
-  const props = room.props ?? {}
-  const key = isMobilePortrait.value ? 'mobile' : 'desktop'
-  const layout = props[key] ?? props
+  const layout = getRoomLayoutSource(room)
   return {
     x: layout.x ?? 50,
     y: layout.y ?? 50,
@@ -80,10 +131,64 @@ function getRoomLayout(room: Room): { x: number; y: number; w: number; h: number
   }
 }
 
+function ensureRoomLayout(room: Room): RoomLayoutDraft {
+  const props = roomPropsRecord(room)
+  const key = currentLayoutKey()
+  const existing = props[key]
+  if (!existing || typeof existing !== 'object') {
+    const layout = getRoomLayout(room)
+    props[key] = { x: layout.x, y: layout.y, w: layout.w, h: layout.h }
+    room.props = props
+  }
+  return props[key] as RoomLayoutDraft
+}
+
+function getRoomCardStyle(room: Room) {
+  if (zoomedRoomId.value === room.id) {
+    return {
+      width: `${viewportWidth.value - 40}px`,
+      height: `${viewportHeight.value - 120}px`,
+      background: getRoomBackground(room, 'rgba(255, 255, 255, 0.85)'),
+    }
+  }
+
+  const layout = getRoomLayout(room)
+  return {
+    left: `${layout.x}px`,
+    top: `${layout.y}px`,
+    width: `${layout.w}px`,
+    height: `${layout.h}px`,
+    background: getRoomBackground(room),
+  }
+}
+
+function getDeviceLayoutSource(device: UserDevice): RoomLayoutDraft {
+  const props = (device.props && typeof device.props === 'object'
+    ? device.props
+    : {}) as DevicePropsDraft
+  if (props !== device.props) device.props = props
+  const layout = props[currentLayoutKey()]
+  if (layout && typeof layout === 'object') return layout
+  return props as RoomLayoutDraft
+}
+
+function ensureDeviceLayout(device: UserDevice): RoomLayoutDraft {
+  const props = (device.props && typeof device.props === 'object'
+    ? device.props
+    : {}) as DevicePropsDraft
+  if (props !== device.props) device.props = props
+  const key = currentLayoutKey()
+  const existing = props[key]
+  if (!existing || typeof existing !== 'object') {
+    const layout = getDeviceLayout(device)
+    props[key] = { x: layout.x, y: layout.y }
+    device.props = props
+  }
+  return props[key] as RoomLayoutDraft
+}
+
 function getDeviceLayout(device: UserDevice): { x: number; y: number } {
-  const props = device.props ?? {}
-  const key = isMobilePortrait.value ? 'mobile' : 'desktop'
-  const layout = props[key] ?? props
+  const layout = getDeviceLayoutSource(device)
   return {
     x: layout.x ?? 40,
     y: layout.y ?? 40,
@@ -107,6 +212,19 @@ function propNumber(d: UserDevice | null, key: string): number | null {
 }
 
 const viewportRef = ref<HTMLElement | null>(null)
+const transformWrapperRef = ref<HTMLElement | null>(null)
+const roomElementRefs = new Map<number, HTMLElement>()
+const deviceElementRefs = new Map<number, HTMLElement>()
+
+function setRoomElementRef(id: number, el: unknown) {
+  if (el instanceof HTMLElement) roomElementRefs.set(id, el)
+  else roomElementRefs.delete(id)
+}
+
+function setDeviceElementRef(id: number, el: unknown) {
+  if (el instanceof HTMLElement) deviceElementRefs.set(id, el)
+  else deviceElementRefs.delete(id)
+}
 
 onMounted(async () => {
   detectOrientation()
@@ -120,6 +238,12 @@ onMounted(async () => {
 onUnmounted(() => {
   if (pingTimer) clearInterval(pingTimer)
   window.removeEventListener('resize', onResize)
+  document.removeEventListener('pointermove', onDragRoom)
+  document.removeEventListener('pointerup', stopDragRoom)
+  document.removeEventListener('pointermove', onResizeRoom)
+  document.removeEventListener('pointerup', stopResizeRoom)
+  document.removeEventListener('pointermove', onDragDevice)
+  document.removeEventListener('pointerup', stopDragDevice)
 })
 
 function onResize() {
@@ -138,6 +262,45 @@ function updateViewportSize() {
   }
 }
 
+function getCanvasDomScale() {
+  const el = transformWrapperRef.value
+  if (!el || el.offsetWidth === 0) return scale.value
+  return el.getBoundingClientRect().width / el.offsetWidth
+}
+
+function clampVisualDelta(delta: number, currentStart: number, currentEnd: number, boundaryStart: number, boundaryEnd: number) {
+  if (delta < 0) return Math.max(delta, boundaryStart - currentStart)
+  if (delta > 0) return Math.min(delta, boundaryEnd - currentEnd)
+  return 0
+}
+
+function clampResizeVisualDelta(delta: number, currentSize: number, minSize: number, availableGrowth: number) {
+  if (delta < 0) return Math.max(delta, minSize - currentSize)
+  if (delta > 0) return Math.min(delta, availableGrowth)
+  return 0
+}
+
+function getRoomVisualLayout(room: Room): { x: number; y: number; w: number; h: number } {
+  if (zoomedRoomId.value === room.id) {
+    return {
+      x: 20,
+      y: 20,
+      w: viewportWidth.value - 40,
+      h: viewportHeight.value - 120,
+    }
+  }
+  return getRoomLayout(room)
+}
+
+function getRoomDomScale(room: Room, roomEl: HTMLElement) {
+  const layout = getRoomVisualLayout(room)
+  const rect = roomEl.getBoundingClientRect()
+  return {
+    x: layout.w > 0 ? rect.width / layout.w : getCanvasDomScale(),
+    y: layout.h > 0 ? rect.height / layout.h : getCanvasDomScale(),
+  }
+}
+
 async function loadData() {
   loading.value = true
   errorMessage.value = ''
@@ -151,17 +314,19 @@ async function loadData() {
 
     // Auto initialize coordinates
     let changed = false
-    const key = isMobilePortrait.value ? 'mobile' : 'desktop'
-    for (const r of rooms.value) {
-      if (!r.props) r.props = {}
-      if (!r.props[key] || typeof r.props[key].x !== 'number') {
-        r.props[key] = {
+    const key = currentLayoutKey()
+    for (const room of rooms.value) {
+      const props = roomPropsRecord(room)
+      const layout = props[key]
+      if (!layout || typeof layout !== 'object' || typeof layout.x !== 'number') {
+        props[key] = {
           x: Math.floor(Math.random() * (isMobilePortrait.value ? 100 : 400)) + 30,
           y: Math.floor(Math.random() * (isMobilePortrait.value ? 150 : 300)) + 30,
           w: isMobilePortrait.value ? 200 : 260,
           h: isMobilePortrait.value ? 150 : 200,
         }
-        await api.rooms.update(r.id, { props: r.props })
+        room.props = props
+        await api.rooms.update(room.id, { props: room.props })
         changed = true
       }
     }
@@ -186,6 +351,22 @@ async function pingDevices() {
 function startPing() {
   pingDevices()
   pingTimer = setInterval(pingDevices, 60000)
+}
+
+function toggleEditMode() {
+  isEditMode.value = !isEditMode.value
+  if (isEditMode.value) {
+    zoomedRoomId.value = null
+    selectedDeviceId.value = null
+  } else {
+    closeRoomSettings()
+  }
+}
+
+function roomNameForDevice(device: UserDevice): string {
+  const roomId = propNumber(device, 'room_id')
+  if (!roomId) return label('未绑定房间', 'Unassigned')
+  return rooms.value.find((room) => room.id === roomId)?.name ?? label('未知房间', 'Unknown room')
 }
 
 // Zoom & Pan Wheel handlers
@@ -257,90 +438,203 @@ function resetZoom() {
 
 // Draggable room card implementation
 const draggingRoomId = ref<number | null>(null)
-const dragOffsetX = ref(0)
-const dragOffsetY = ref(0)
+const resizingRoomId = ref<number | null>(null)
+const MIN_ROOM_WIDTH = 180
+const MIN_ROOM_HEIGHT = 140
+
+type ElementMoveState = {
+  layoutX: number
+  layoutY: number
+  clientX: number
+  clientY: number
+  elementRect: DOMRect
+  boundaryRect: DOMRect
+  scaleX: number
+  scaleY: number
+}
+
+type ElementResizeState = {
+  layoutW: number
+  layoutH: number
+  clientX: number
+  clientY: number
+  elementRect: DOMRect
+  boundaryRect: DOMRect
+  scaleX: number
+  scaleY: number
+}
+
+let roomDragState: ElementMoveState | null = null
+let roomResizeState: ElementResizeState | null = null
+let deviceDragState: ElementMoveState | null = null
 
 function startDragRoom(event: PointerEvent, room: Room) {
+  if (!isEditMode.value || zoomedRoomId.value === room.id) return
+  const roomEl = roomElementRefs.get(room.id)
+  const viewportEl = viewportRef.value
+  if (!roomEl || !viewportEl) return
   event.preventDefault()
   event.stopPropagation()
-  draggingRoomId.value = room.id
+
   const layout = getRoomLayout(room)
-  dragOffsetX.value = event.clientX / scale.value - layout.x
-  dragOffsetY.value = event.clientY / scale.value - layout.y
+  const domScale = getCanvasDomScale()
+  draggingRoomId.value = room.id
+  roomDragState = {
+    layoutX: layout.x,
+    layoutY: layout.y,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    elementRect: roomEl.getBoundingClientRect(),
+    boundaryRect: viewportEl.getBoundingClientRect(),
+    scaleX: domScale || 1,
+    scaleY: domScale || 1,
+  }
   document.addEventListener('pointermove', onDragRoom)
   document.addEventListener('pointerup', stopDragRoom)
 }
 
 function onDragRoom(event: PointerEvent) {
-  if (draggingRoomId.value === null) return
+  if (draggingRoomId.value === null || !roomDragState) return
   const room = rooms.value.find((r) => r.id === draggingRoomId.value)
   if (!room) return
-  const layout = getRoomLayout(room)
-  const key = isMobilePortrait.value ? 'mobile' : 'desktop'
 
-  if (!room.props[key]) room.props[key] = { w: layout.w, h: layout.h }
-  room.props[key].x = Math.max(0, Math.min(viewportWidth.value / scale.value - layout.w, event.clientX / scale.value - dragOffsetX.value))
-  room.props[key].y = Math.max(0, Math.min(viewportHeight.value / scale.value - layout.h, event.clientY / scale.value - dragOffsetY.value))
+  const state = roomDragState
+  const roomLayout = ensureRoomLayout(room)
+  const rawDx = event.clientX - state.clientX
+  const rawDy = event.clientY - state.clientY
+  const dx = clampVisualDelta(rawDx, state.elementRect.left, state.elementRect.right, state.boundaryRect.left, state.boundaryRect.right)
+  const dy = clampVisualDelta(rawDy, state.elementRect.top, state.elementRect.bottom, state.boundaryRect.top, state.boundaryRect.bottom)
+
+  roomLayout.x = state.layoutX + dx / state.scaleX
+  roomLayout.y = state.layoutY + dy / state.scaleY
 }
 
 async function stopDragRoom() {
   if (draggingRoomId.value === null) return
   const room = rooms.value.find((r) => r.id === draggingRoomId.value)
+  draggingRoomId.value = null
+  roomDragState = null
+  document.removeEventListener('pointermove', onDragRoom)
+  document.removeEventListener('pointerup', stopDragRoom)
   if (room) {
     await api.rooms.update(room.id, { props: room.props })
   }
-  draggingRoomId.value = null
-  document.removeEventListener('pointermove', onDragRoom)
-  document.removeEventListener('pointerup', stopDragRoom)
+}
+
+function startResizeRoom(event: PointerEvent, room: Room) {
+  if (!isEditMode.value || zoomedRoomId.value === room.id) return
+  const roomEl = roomElementRefs.get(room.id)
+  const viewportEl = viewportRef.value
+  if (!roomEl || !viewportEl) return
+  event.preventDefault()
+  event.stopPropagation()
+
+  const layout = getRoomLayout(room)
+  const domScale = getRoomDomScale(room, roomEl)
+  resizingRoomId.value = room.id
+  roomResizeState = {
+    layoutW: layout.w,
+    layoutH: layout.h,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    elementRect: roomEl.getBoundingClientRect(),
+    boundaryRect: viewportEl.getBoundingClientRect(),
+    scaleX: domScale.x || 1,
+    scaleY: domScale.y || 1,
+  }
+  document.addEventListener('pointermove', onResizeRoom)
+  document.addEventListener('pointerup', stopResizeRoom)
+}
+
+function onResizeRoom(event: PointerEvent) {
+  if (resizingRoomId.value === null || !roomResizeState) return
+  const room = rooms.value.find((r) => r.id === resizingRoomId.value)
+  if (!room) return
+
+  const state = roomResizeState
+  const roomLayout = ensureRoomLayout(room)
+  const rawDx = event.clientX - state.clientX
+  const rawDy = event.clientY - state.clientY
+  const dx = clampResizeVisualDelta(rawDx, state.elementRect.width, MIN_ROOM_WIDTH * state.scaleX, state.boundaryRect.right - state.elementRect.right)
+  const dy = clampResizeVisualDelta(rawDy, state.elementRect.height, MIN_ROOM_HEIGHT * state.scaleY, state.boundaryRect.bottom - state.elementRect.bottom)
+
+  roomLayout.w = Math.max(MIN_ROOM_WIDTH, state.layoutW + dx / state.scaleX)
+  roomLayout.h = Math.max(MIN_ROOM_HEIGHT, state.layoutH + dy / state.scaleY)
+}
+
+async function stopResizeRoom() {
+  if (resizingRoomId.value === null) return
+  const room = rooms.value.find((r) => r.id === resizingRoomId.value)
+  resizingRoomId.value = null
+  roomResizeState = null
+  document.removeEventListener('pointermove', onResizeRoom)
+  document.removeEventListener('pointerup', stopResizeRoom)
+  if (room) {
+    await api.rooms.update(room.id, { props: room.props })
+  }
 }
 
 // Draggable Device Node implementation
 const draggingDeviceId = ref<number | null>(null)
-const dragDevOffsetX = ref(0)
-const dragDevOffsetY = ref(0)
 
 function startDragDevice(event: PointerEvent, device: UserDevice) {
+  if (!isEditMode.value) return
+  const deviceEl = deviceElementRefs.get(device.id)
+  if (!deviceEl) return
   event.stopPropagation()
   event.preventDefault()
-  draggingDeviceId.value = device.id
+
   const layout = getDeviceLayout(device)
-  dragDevOffsetX.value = event.clientX / scale.value - layout.x
-  dragDevOffsetY.value = event.clientY / scale.value - layout.y
+  const roomId = propNumber(device, 'room_id')
+  const room = rooms.value.find((r) => r.id === roomId)
+  const roomEl = room ? roomElementRefs.get(room.id) : null
+  const boundaryEl = roomEl ?? viewportRef.value
+  if (!boundaryEl) return
+
+  const domScale = room && roomEl
+    ? getRoomDomScale(room, roomEl)
+    : { x: getCanvasDomScale(), y: getCanvasDomScale() }
+  draggingDeviceId.value = device.id
+  deviceDragState = {
+    layoutX: layout.x,
+    layoutY: layout.y,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    elementRect: deviceEl.getBoundingClientRect(),
+    boundaryRect: boundaryEl.getBoundingClientRect(),
+    scaleX: domScale.x || 1,
+    scaleY: domScale.y || 1,
+  }
   document.addEventListener('pointermove', onDragDevice)
   document.addEventListener('pointerup', stopDragDevice)
 }
 
 function onDragDevice(event: PointerEvent) {
-  if (draggingDeviceId.value === null) return
+  if (draggingDeviceId.value === null || !deviceDragState) return
   const device = devices.value.find((d) => d.id === draggingDeviceId.value)
   if (!device) return
-  const layout = getDeviceLayout(device)
-  const key = isMobilePortrait.value ? 'mobile' : 'desktop'
 
-  const roomId = propNumber(device, 'room_id')
-  const room = rooms.value.find((r) => r.id === roomId)
-  const isZoomed = zoomedRoomId.value === roomId
+  const state = deviceDragState
+  const rawDx = event.clientX - state.clientX
+  const rawDy = event.clientY - state.clientY
+  const dx = clampVisualDelta(rawDx, state.elementRect.left, state.elementRect.right, state.boundaryRect.left, state.boundaryRect.right)
+  const dy = clampVisualDelta(rawDy, state.elementRect.top, state.elementRect.bottom, state.boundaryRect.top, state.boundaryRect.bottom)
 
-  const roomLayout = room ? getRoomLayout(room) : { w: 260, h: 200 }
-  const containerW = isZoomed ? viewportWidth.value - 40 : roomLayout.w
-  const containerH = isZoomed ? viewportHeight.value - 120 : roomLayout.h
-  const nodeW = isZoomed ? 154 : 48
-  const nodeH = isZoomed ? 114 : 48
-
-  if (!device.props[key]) device.props[key] = {}
-  device.props[key].x = Math.max(0, Math.min(containerW - nodeW, event.clientX / scale.value - dragDevOffsetX.value))
-  device.props[key].y = Math.max(0, Math.min(containerH - nodeH, event.clientY / scale.value - dragDevOffsetY.value))
+  const deviceLayout = ensureDeviceLayout(device)
+  deviceLayout.x = Math.max(0, state.layoutX + dx / state.scaleX)
+  deviceLayout.y = Math.max(0, state.layoutY + dy / state.scaleY)
 }
 
 async function stopDragDevice() {
   if (draggingDeviceId.value === null) return
   const device = devices.value.find((d) => d.id === draggingDeviceId.value)
+  draggingDeviceId.value = null
+  deviceDragState = null
+  document.removeEventListener('pointermove', onDragDevice)
+  document.removeEventListener('pointerup', stopDragDevice)
   if (device) {
     await api.userDevices.update(device.id, { props: device.props })
   }
-  draggingDeviceId.value = null
-  document.removeEventListener('pointermove', onDragDevice)
-  document.removeEventListener('pointerup', stopDragDevice)
 }
 
 function deviceIcon(t: string): string {
@@ -388,7 +682,108 @@ function selectDevice(device: UserDevice) {
   selectedDeviceId.value = device.id
 }
 
+function closeRoomSettings() {
+  editingRoomId.value = null
+  editingRoomName.value = ''
+  editingRoomColor.value = ''
+  editingRoomDeviceIds.value = []
+}
+
+function openRoomSettings(room: Room) {
+  editingRoomId.value = room.id
+  editingRoomName.value = room.name
+  editingRoomColor.value = typeof roomPropsRecord(room).bgColor === 'string'
+    ? String(roomPropsRecord(room).bgColor)
+    : ''
+  editingRoomDeviceIds.value = devices.value
+    .filter((device) => propNumber(device, 'room_id') === room.id)
+    .map((device) => device.id)
+}
+
+async function saveRoomSettings() {
+  const room = editingRoom.value
+  if (!room) return
+
+  const name = editingRoomName.value.trim()
+  if (!name) {
+    errorMessage.value = label('房间名不能为空', 'Room name is required')
+    return
+  }
+
+  saving.value = true
+  errorMessage.value = ''
+  try {
+    const props = roomPropsRecord(room)
+    room.name = name
+    if (editingRoomColor.value) props.bgColor = editingRoomColor.value
+    else delete props.bgColor
+    room.props = props
+
+    const selectedIds = new Set(editingRoomDeviceIds.value)
+    const deviceUpdates: Array<Promise<unknown>> = []
+
+    for (const device of devices.value) {
+      const currentRoomId = propNumber(device, 'room_id')
+      const shouldBeInRoom = selectedIds.has(device.id)
+
+      if (shouldBeInRoom && currentRoomId !== room.id) {
+        const nextProps = { ...device.props, room_id: room.id }
+        device.props = nextProps
+        deviceUpdates.push(api.userDevices.update(device.id, { props: nextProps }))
+      } else if (!shouldBeInRoom && currentRoomId === room.id) {
+        const nextProps = { ...device.props }
+        delete nextProps.room_id
+        device.props = nextProps
+        deviceUpdates.push(api.userDevices.update(device.id, { props: nextProps }))
+      }
+    }
+
+    await Promise.all([
+      api.rooms.update(room.id, { name, props: room.props }),
+      ...deviceUpdates,
+    ])
+
+    closeRoomSettings()
+    showSuccess(label('房间已保存', 'Room saved'))
+  } catch (error) {
+    errorMessage.value = (error as Error).message || String(error)
+  } finally {
+    saving.value = false
+  }
+}
+
+async function deleteEditingRoom() {
+  const room = editingRoom.value
+  if (!room) return
+  if (!window.confirm(label(`确认删除房间「${room.name}」？`, `Delete room "${room.name}"?`))) return
+
+  saving.value = true
+  errorMessage.value = ''
+  try {
+    const deviceUpdates = devices.value
+      .filter((device) => propNumber(device, 'room_id') === room.id)
+      .map((device) => {
+        const nextProps = { ...device.props }
+        delete nextProps.room_id
+        device.props = nextProps
+        return api.userDevices.update(device.id, { props: nextProps })
+      })
+
+    await Promise.all(deviceUpdates)
+    await api.rooms.delete(room.id)
+    rooms.value = rooms.value.filter((entry) => entry.id !== room.id)
+    if (zoomedRoomId.value === room.id) zoomedRoomId.value = null
+    closeRoomSettings()
+    showSuccess(label('房间已删除', 'Room deleted'))
+  } catch (error) {
+    errorMessage.value = (error as Error).message || String(error)
+  } finally {
+    saving.value = false
+  }
+}
+
 function handleRoomDblClick(room: Room) {
+  if (isEditMode.value) return
   if (zoomedRoomId.value === room.id) {
     zoomedRoomId.value = null // Zoom out
   } else {
@@ -514,13 +909,20 @@ function getRoomConnections(roomId: number) {
     <main class="canvas-area glass-panel" :class="{ 'room-focused': zoomedRoomId !== null }">
       <header class="canvas-head">
         <h2>{{ label('数字孪生 · 2D 房型布局', 'Digital Twin Canvas') }}</h2>
-        <span class="hint-pill" v-if="zoomedRoomId === null">{{ label('使用鼠标滚轮或双指进行「无级缩放 / 画布拖拽」', 'Scroll wheel or pinch zoom to zoom & pan canvas') }}</span>
-        <button class="focus-back-btn" v-else @click="zoomedRoomId = null">
-          {{ label('← 返回全局户型图', '← Back to Global View') }}
-        </button>
-        <button class="reset-zoom-btn" v-if="zoomedRoomId === null && (scale !== 1 || panX !== 0 || panY !== 0)" @click="resetZoom">
-          {{ label('重置缩放', 'Reset View') }}
-        </button>
+        <div class="canvas-head-actions">
+          <span class="hint-pill" v-if="zoomedRoomId === null">
+            {{ isEditMode ? label('编辑模式：拖拽房间、拉伸右下角、打开设置', 'Edit mode: drag rooms, resize from corner, open settings') : label('使用鼠标滚轮或双指进行「无级缩放 / 画布拖拽」', 'Scroll wheel or pinch zoom to zoom & pan canvas') }}
+          </span>
+          <button class="focus-back-btn" v-else @click="zoomedRoomId = null">
+            {{ label('← 返回全局户型图', '← Back to Global View') }}
+          </button>
+          <button class="edit-mode-btn" :class="{ active: isEditMode }" type="button" @click="toggleEditMode">
+            {{ isEditMode ? label('退出编辑', 'Exit Edit') : label('编辑房间', 'Edit Rooms') }}
+          </button>
+          <button class="reset-zoom-btn" v-if="zoomedRoomId === null && (scale !== 1 || panX !== 0 || panY !== 0)" @click="resetZoom">
+            {{ label('重置缩放', 'Reset View') }}
+          </button>
+        </div>
       </header>
 
       <!-- Viewport capturing mouse pan/zoom/touch -->
@@ -538,6 +940,7 @@ function getRoomConnections(roomId: number) {
       >
         <!-- The Infinite Pan/Zoom Grid Container -->
         <div
+          ref="transformWrapperRef"
           class="canvas-transform-wrapper"
           :style="{
             transform: `translate(${panX}px, ${panY}px) scale(${scale})`,
@@ -548,15 +951,16 @@ function getRoomConnections(roomId: number) {
           <div
             v-for="room in activeRooms"
             :key="room.id"
+            :ref="(el) => setRoomElementRef(room.id, el)"
             class="room-card"
-            :class="{ 'zoomed-in': zoomedRoomId === room.id, 'zoomed-out': zoomedRoomId !== null && zoomedRoomId !== room.id }"
-            :style="zoomedRoomId === room.id ? { width: (viewportWidth - 40) + 'px', height: (viewportHeight - 120) + 'px' } : {
-              left: getRoomLayout(room).x + 'px',
-              top: getRoomLayout(room).y + 'px',
-              width: getRoomLayout(room).w + 'px',
-              height: getRoomLayout(room).h + 'px',
+            :class="{
+              'zoomed-in': zoomedRoomId === room.id,
+              'zoomed-out': zoomedRoomId !== null && zoomedRoomId !== room.id,
+              editing: isEditMode,
+              resizing: resizingRoomId === room.id,
             }"
-            @pointerdown="zoomedRoomId === room.id ? null : startDragRoom($event, room)"
+            :style="getRoomCardStyle(room)"
+            @pointerdown="startDragRoom($event, room)"
             @dblclick="handleRoomDblClick(room)"
           >
             <!-- SVG Connector Lines for Groups inside Room -->
@@ -577,10 +981,27 @@ function getRoomConnections(roomId: number) {
               <strong>{{ room.name }}</strong>
             </div>
 
+            <button
+              v-if="isEditMode && zoomedRoomId !== room.id"
+              class="room-edit-gear"
+              type="button"
+              @pointerdown.stop.prevent
+              @click.stop="openRoomSettings(room)"
+            >
+              ⋯
+            </button>
+
+            <div
+              v-if="isEditMode && zoomedRoomId !== room.id"
+              class="room-resize-handle"
+              @pointerdown="startResizeRoom($event, room)"
+            ></div>
+
             <!-- Renders Devices bounded inside this Room -->
             <div
               v-for="dev in devices.filter((d) => propNumber(d, 'room_id') === room.id)"
               :key="dev.id"
+              :ref="(el) => setDeviceElementRef(dev.id, el)"
               class="device-node"
               :class="{
                 active: selectedDeviceId === dev.id,
@@ -594,8 +1015,8 @@ function getRoomConnections(roomId: number) {
                 top: getDeviceLayout(dev).y + 'px',
               }"
               @pointerdown="startDragDevice($event, dev)"
-              @click.stop="selectDevice(dev)"
-              @dblclick.stop="router.push(`/devices/${dev.id}`)"
+              @click.stop="isEditMode ? null : selectDevice(dev)"
+              @dblclick.stop="isEditMode ? null : router.push(`/devices/${dev.id}`)"
             >
               <!-- Normal Mode Icon -->
               <div v-if="zoomedRoomId !== room.id" class="node-icon" :class="`icon-${deviceIcon(propString(dev, 'device_type'))}`">
@@ -672,12 +1093,81 @@ function getRoomConnections(roomId: number) {
         </div>
       </div>
     </Teleport>
+
+    <Teleport to="body">
+      <div v-if="editingRoom" class="room-settings-overlay" @click="closeRoomSettings">
+        <form class="room-settings-panel glass-panel" @click.stop @submit.prevent="saveRoomSettings">
+          <header class="room-settings-head">
+            <div>
+              <span class="room-settings-kicker">{{ label('房间操作', 'Room Operations') }}</span>
+              <h3>{{ editingRoom.name }}</h3>
+            </div>
+            <button class="room-settings-close" type="button" @click="closeRoomSettings">×</button>
+          </header>
+
+          <label class="room-form-field">
+            <span>{{ label('房间名称', 'Room name') }}</span>
+            <input v-model="editingRoomName" type="text" :placeholder="label('例如：客厅', 'e.g. Living Room')" />
+          </label>
+
+          <section class="room-color-section">
+            <span>{{ label('背景颜色', 'Background color') }}</span>
+            <div class="room-color-grid">
+              <button
+                v-for="preset in roomColorPresets"
+                :key="preset.preview"
+                class="room-color-chip"
+                :class="{ active: editingRoomColor === preset.value }"
+                :style="{ background: preset.preview }"
+                type="button"
+                @click="editingRoomColor = preset.value"
+              >
+                <span>{{ isZh ? preset.zh : preset.en }}</span>
+              </button>
+            </div>
+          </section>
+
+          <section class="room-device-section">
+            <div class="room-device-head">
+              <span>{{ label('房间设备', 'Room devices') }}</span>
+              <small>{{ label('勾选后会把设备移动到这个房间', 'Checked devices move into this room') }}</small>
+            </div>
+            <div class="room-device-list">
+              <label v-for="device in roomDeviceOptions" :key="device.id" class="room-device-row">
+                <input v-model="editingRoomDeviceIds" type="checkbox" :value="device.id" />
+                <span class="room-device-main">
+                  <strong>{{ device.name }}</strong>
+                  <small>{{ typeLabel(propString(device, 'device_type') || 'other') }} · {{ roomNameForDevice(device) }}</small>
+                </span>
+              </label>
+            </div>
+          </section>
+
+          <footer class="room-settings-actions">
+            <button class="room-delete-btn" type="button" :disabled="saving" @click="deleteEditingRoom">
+              {{ label('删除房间', 'Delete Room') }}
+            </button>
+            <div class="room-settings-save-group">
+              <button class="room-cancel-btn" type="button" :disabled="saving" @click="closeRoomSettings">
+                {{ label('取消', 'Cancel') }}
+              </button>
+              <button class="room-save-btn" type="submit" :disabled="saving">
+                {{ saving ? label('保存中...', 'Saving...') : label('保存', 'Save') }}
+              </button>
+            </div>
+          </footer>
+        </form>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <style scoped>
 .devices-page-2d {
   height: 100%;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   padding: 32px;
   background: #f7f9fa;
@@ -693,10 +1183,14 @@ function getRoomConnections(roomId: number) {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.02);
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  min-height: 0;
 }
 
 .canvas-area {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
   padding: 32px;
   overflow: hidden;
   position: relative;
@@ -711,6 +1205,7 @@ function getRoomConnections(roomId: number) {
   align-items: center;
   margin-bottom: 24px;
   flex-shrink: 0;
+  flex-wrap: wrap;
   gap: 16px;
 }
 
@@ -720,6 +1215,14 @@ function getRoomConnections(roomId: number) {
   font-weight: 900;
   color: var(--text-primary);
   letter-spacing: -0.04em;
+}
+
+.canvas-head-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .hint-pill {
@@ -755,18 +1258,42 @@ function getRoomConnections(roomId: number) {
 }
 .reset-zoom-btn:hover { border-color: #10b981; color: #10b981; }
 
+.edit-mode-btn {
+  padding: 8px 18px;
+  border-radius: 10px;
+  font-weight: 900;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #111827;
+  color: #fff;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  box-shadow: 0 4px 14px rgba(17, 24, 39, 0.16);
+}
+
+.edit-mode-btn.active {
+  background: #10b981;
+  border-color: #10b981;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.25);
+}
+
+.edit-mode-btn:hover {
+  transform: translateY(-1px);
+}
+
 /* 2D Viewport constraints - Dynamic size adaptation */
 .twin-viewport {
-  flex: 1;
-  width: 100% !important;
-  height: 100% !important;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
   background: radial-gradient(rgba(0, 0, 0, 0.03) 1px, transparent 1px);
   background-size: 20px 20px;
   border: 1px solid rgba(0, 0, 0, 0.03);
   border-radius: 24px;
   position: relative;
   overflow: hidden;
-  margin: 0 auto;
+  margin: 0;
   cursor: grab;
 }
 
@@ -808,12 +1335,61 @@ function getRoomConnections(roomId: number) {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.04);
 }
 
+.room-card.editing {
+  cursor: move;
+  border-style: dashed;
+  border-color: rgba(16, 185, 129, 0.45);
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.08), 0 10px 30px rgba(15, 23, 42, 0.06);
+}
+
+.room-card.resizing {
+  border-color: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.14), 0 14px 38px rgba(15, 23, 42, 0.08);
+}
+
+.room-edit-gear {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(16, 185, 129, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #059669;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+
+.room-edit-gear:hover {
+  transform: translateY(-1px);
+  background: #ecfdf5;
+}
+
+.room-resize-handle {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  z-index: 5;
+  width: 22px;
+  height: 22px;
+  border-radius: 8px;
+  cursor: nwse-resize;
+  background:
+    linear-gradient(135deg, transparent 0 45%, rgba(16, 185, 129, 0.9) 45% 55%, transparent 55%),
+    linear-gradient(135deg, transparent 0 62%, rgba(16, 185, 129, 0.65) 62% 72%, transparent 72%);
+  background-color: rgba(236, 253, 245, 0.9);
+  border: 1px solid rgba(16, 185, 129, 0.28);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+
 .room-card.zoomed-in {
   position: absolute !important;
   left: 20px !important;
   top: 20px !important;
   z-index: 100;
-  background: rgba(255, 255, 255, 0.85) !important;
   border-color: #10b981 !important;
   cursor: default !important;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.1) !important;
@@ -1184,6 +1760,242 @@ function getRoomConnections(roomId: number) {
 }
 .bp-close-btn:hover { border-color: #10b981; color: #10b981; }
 
+.room-settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(8px);
+  animation: overlayFade 0.25s ease;
+  box-sizing: border-box;
+}
+
+.room-settings-panel {
+  width: min(560px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  padding: 28px;
+  gap: 22px;
+  overflow: auto;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(229, 231, 235, 0.7);
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.16);
+  box-sizing: border-box;
+}
+
+.room-settings-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.room-settings-kicker {
+  display: inline-flex;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 900;
+  color: #10b981;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.room-settings-head h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+}
+
+.room-settings-close {
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 999px;
+  background: #fff;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.room-form-field,
+.room-color-section,
+.room-device-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.room-form-field > span,
+.room-color-section > span,
+.room-device-head > span {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.room-form-field input {
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 14px;
+  background: #fff;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 700;
+  outline: none;
+}
+
+.room-form-field input:focus {
+  border-color: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.12);
+}
+
+.room-color-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  gap: 10px;
+}
+
+.room-color-chip {
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 14px;
+  color: #0f172a;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 900;
+  text-align: left;
+  box-shadow: inset 0 0 0 999px rgba(255, 255, 255, 0.22);
+}
+
+.room-color-chip.active {
+  border-color: #10b981;
+  box-shadow: inset 0 0 0 999px rgba(255, 255, 255, 0.12), 0 0 0 3px rgba(16, 185, 129, 0.14);
+}
+
+.room-device-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.room-device-head small {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.room-device-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 16px;
+  background: rgba(248, 250, 252, 0.74);
+}
+
+.room-device-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.05);
+}
+
+.room-device-row:last-child {
+  border-bottom: 0;
+}
+
+.room-device-row:hover {
+  background: rgba(16, 185, 129, 0.06);
+}
+
+.room-device-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: #10b981;
+}
+
+.room-device-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.room-device-main strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.room-device-main small {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.room-settings-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.room-settings-save-group {
+  display: flex;
+  gap: 10px;
+}
+
+.room-delete-btn,
+.room-cancel-btn,
+.room-save-btn {
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.room-delete-btn {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+.room-cancel-btn {
+  background: #fff;
+  color: var(--text-secondary);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.room-save-btn {
+  background: #10b981;
+  color: #fff;
+  border: 0;
+  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.24);
+}
+
+.room-delete-btn:disabled,
+.room-cancel-btn:disabled,
+.room-save-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 @keyframes overlayFade {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -1197,20 +2009,20 @@ function getRoomConnections(roomId: number) {
 @media (max-width: 1024px) {
   .devices-page-2d {
     overflow-y: auto;
-    height: auto;
+    height: 100%;
     min-height: 100%;
+    min-width: 0;
     padding: 16px;
   }
 
   .canvas-area {
+    flex: 1 1 auto;
+    min-height: 0;
     padding: 16px;
-    height: 640px;
-    flex: none;
   }
 
   .twin-viewport {
-    width: 100% !important;
-    height: 500px !important;
+    min-height: 420px;
   }
 
   .room-card {
@@ -1231,11 +2043,11 @@ function getRoomConnections(roomId: number) {
   }
 
   .canvas-area {
-    height: 520px;
+    padding: 12px;
   }
 
   .twin-viewport {
-    height: 380px !important;
+    min-height: 320px;
   }
 
   .room-card {

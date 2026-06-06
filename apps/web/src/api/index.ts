@@ -428,7 +428,7 @@ export const api = {
     get: (id: number) => request<{ room: Room }>(`/api/rooms/${id}`),
     create: (body: { name: string; props?: Record<string, unknown> }) =>
       request<{ status: string; data: { room: Room } }>('/api/rooms', { method: 'POST', body: JSON.stringify(body) }),
-    update: (id: number, body: { name: string; props?: Record<string, unknown> }) =>
+    update: (id: number, body: { name?: string; props?: Record<string, unknown> }) =>
       request<{ status: string; data: { room: Room } }>(`/api/rooms/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
     delete: (id: number) => request<{ status: string }>(`/api/rooms/${id}`, { method: 'DELETE' }),
   },
