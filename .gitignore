@@ -1,7 +1,13 @@
 node_modules
 dist
+data/
 .env
 .env.*
 !.env.example
 *.tsbuildinfo
 .DS_Store
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/

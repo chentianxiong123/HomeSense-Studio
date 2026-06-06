@@ -1,16 +1,17 @@
 import { createApp } from 'vue'
-import { createRouter, createWebHistory } from 'vue-router'
+import { createPinia } from 'pinia'
 import App from './App.vue'
-import AccountCenter from './views/AccountCenter.vue'
+import { router } from './router'
 
-const router = createRouter({
-  history: createWebHistory(),
-  routes: [
-    { path: '/', redirect: '/accounts' },
-    { path: '/accounts', name: 'accounts', component: AccountCenter },
-  ],
-})
+async function bootstrap() {
+  if (import.meta.env.VITE_ENABLE_MOCK_API !== '0' && !import.meta.env.VITE_API_BASE) {
+    await import('./mock-server')
+  }
 
-const app = createApp(App)
-app.use(router)
-app.mount('#app')
+  const app = createApp(App)
+  app.use(createPinia())
+  app.use(router)
+  app.mount('#app')
+}
+
+void bootstrap()
