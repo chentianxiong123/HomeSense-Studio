@@ -1,57 +1,33 @@
-export type DeviceType =
-  | 'television'
-  | 'stb'
-  | 'speaker'
-  | 'router'
-  | 'outlet'
-  | 'phone'
-  | 'tv_box'
-  | 'tablet'
-  | 'computer'
-  | 'other'
-
-export interface RoomRecord {
+export type RoomRecord = {
   id: number
   name: string
+  props: Record<string, unknown>
   created_at: string
   updated_at: string
 }
 
-export interface UserDevice {
+export type UserDevice = {
   id: number
   name: string
-  device_type: DeviceType
-  room_id: number | null
-  room_name: string | null
-  mi_did: string | null
-  adb_ip: string
-  ip_address: string
+  props: Record<string, unknown>
   created_at: string
   updated_at: string
 }
 
-export interface CreateUserDeviceInput {
+export type CreateUserDeviceInput = {
   name: string
-  device_type?: DeviceType
-  room_id?: number | null
-  mi_did?: string | null
-  adb_ip?: string
-  ip_address?: string
+  props?: Record<string, unknown>
 }
 
-export interface UpdateUserDeviceInput {
+export type UpdateUserDeviceInput = {
   name?: string
-  device_type?: DeviceType
-  room_id?: number | null
-  mi_did?: string | null
-  adb_ip?: string
-  ip_address?: string
+  props?: Record<string, unknown>
 }
 
-export interface DeviceCardProjection {
+export type DeviceCardProjection = {
   id: number
   name: string
-  device_type: DeviceType
+  props: Record<string, unknown>
   room: {
     id: number | null
     name: string
@@ -76,22 +52,21 @@ export interface DeviceCardProjection {
   }
 }
 
-export interface DeviceRuntimeManifestItem extends DeviceCardProjection {
+export type DeviceRuntimeManifestItem = DeviceCardProjection & {
   capability_count: number
   capabilities?: Array<Record<string, unknown>>
 }
 
-export interface DeviceRuntimeManifest {
+export type DeviceRuntimeManifest = {
   version: number
   generated_at: string
   include_capabilities: 'none' | 'summary' | 'full'
   devices: DeviceRuntimeManifestItem[]
 }
 
-export interface LegacyCapabilityExecuteBody {
+export type LegacyCapabilityExecuteBody = {
   capability?: string
   capability_id?: string
   params?: string
   arguments?: Record<string, unknown>
 }
-

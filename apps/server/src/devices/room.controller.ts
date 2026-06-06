@@ -16,12 +16,12 @@ export class RoomController {
   }
 
   @Post()
-  create(@Body() body: { name: string }) {
+  create(@Body() body: { name: string; props?: Record<string, unknown> }) {
     return this.rooms.create(body)
   }
 
   @Put(':id')
-  update(@Param('id', ParseIntPipe) id: number, @Body() body: { name?: string }) {
+  update(@Param('id', ParseIntPipe) id: number, @Body() body: { name?: string; props?: Record<string, unknown> }) {
     return this.rooms.update(id, body)
   }
 
@@ -30,4 +30,3 @@ export class RoomController {
     return this.rooms.remove(id)
   }
 }
-

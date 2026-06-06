@@ -29,6 +29,126 @@ from adb_cli.adb import (
     handle_power,
 )
 
+
+def _make_capability(cap_id: str, name: str, kind: str, action: str) -> dict:
+    return {
+        "capability_id": cap_id,
+        "name": name,
+        "kind": kind,
+        "source": "adb",
+        "adb_action": action,
+        "input_schema": {"type": "object", "required": [], "properties": {}},
+    }
+
+
+def _with_tap_schema(cap: dict) -> dict:
+    cap = dict(cap)
+    cap["input_schema"] = {
+        "type": "object",
+        "required": ["x", "y"],
+        "properties": {
+            "x": {"type": "integer"},
+            "y": {"type": "integer"},
+        },
+    }
+    return cap
+
+
+def _with_text_schema(cap: dict) -> dict:
+    cap = dict(cap)
+    cap["input_schema"] = {
+        "type": "object",
+        "required": ["text"],
+        "properties": {"text": {"type": "string"}},
+    }
+    return cap
+
+
+def _with_package_schema(cap: dict) -> dict:
+    cap = dict(cap)
+    cap["input_schema"] = {
+        "type": "object",
+        "required": ["package"],
+        "properties": {"package": {"type": "string"}},
+    }
+    return cap
+
+
+def _with_swipe_schema(cap: dict) -> dict:
+    cap = dict(cap)
+    cap["input_schema"] = {
+        "type": "object",
+        "required": ["start_x", "start_y", "end_x", "end_y"],
+        "properties": {
+            "start_x": {"type": "integer"},
+            "start_y": {"type": "integer"},
+            "end_x": {"type": "integer"},
+            "end_y": {"type": "integer"},
+            "duration": {"type": "integer"},
+        },
+    }
+    return cap
+
+
+def _with_tap_element_schema(cap: dict) -> dict:
+    cap = dict(cap)
+    cap["input_schema"] = {
+        "type": "object",
+        "required": [],
+        "properties": {
+            "index": {"type": "integer"},
+            "text": {"type": "string"},
+        },
+    }
+    return cap
+
+
+PHONE_BASE = [
+    _make_capability("adb.back", "返回", "action", "back"),
+    _make_capability("adb.home", "主页", "action", "home"),
+    _make_capability("adb.enter", "确认", "action", "enter"),
+    _make_capability("adb.volume_up", "音量+", "action", "volume_up"),
+    _make_capability("adb.volume_down", "音量-", "action", "volume_down"),
+    _make_capability("adb.power", "电源", "action", "power"),
+    _make_capability("adb.wake", "唤醒", "action", "wake"),
+    _with_tap_schema(_make_capability("adb.tap", "点击坐标", "action", "tap")),
+    _with_text_schema(_make_capability("adb.input_text", "输入文本", "action", "input_text")),
+    _with_package_schema(_make_capability("adb.launch_app", "启动应用", "action", "launch_app")),
+    _make_capability("adb.screenshot", "截屏", "property", "screenshot"),
+    _make_capability("adb.current_app", "当前应用", "property", "current_app"),
+    _make_capability("adb.ui_tree", "界面元素", "property", "ui_tree"),
+]
+
+
+TV_BOX_EXTRA = [
+    _with_tap_element_schema(_make_capability("adb.tap_element", "按索引点击", "action", "tap_element")),
+    _with_swipe_schema(_make_capability("adb.swipe", "滑动", "action", "swipe")),
+]
+
+
+DEVICE_TYPE_TABLE = {
+    "phone": PHONE_BASE,
+    "tablet": PHONE_BASE,
+    "television": PHONE_BASE + TV_BOX_EXTRA,
+    "tv_box": PHONE_BASE + TV_BOX_EXTRA,
+    "stb": PHONE_BASE + TV_BOX_EXTRA,
+    "computer": PHONE_BASE,
+    "other": PHONE_BASE,
+}
+
+
+def handle_capabilities_action(command: dict) -> dict:
+    device_type = (command.get("device_type") or command.get("type") or "other").lower()
+    caps = DEVICE_TYPE_TABLE.get(device_type, PHONE_BASE)
+    return {
+        "status": "success",
+        "data": {
+            "device_type": device_type,
+            "capabilities": caps,
+        },
+    }
+
+
 ACTION_MAP = {
     "list_devices": handle_list_devices,
     "devices": handle_list_devices,
@@ -63,6 +183,7 @@ ACTION_MAP = {
     "find_text": handle_find_element,
     "wait": handle_wait,
     "ensure_connected": handle_ensure_connected,
+    "capabilities": handle_capabilities_action,
     # Convenience aliases
     "wake": handle_press_key,
     "wakeup": handle_press_key,

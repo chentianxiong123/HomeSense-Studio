@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { api, type UserDevice, type MiDeviceCandidate, type Room } from '@/api'
+import { api, type UserDevice, type Room, type MiDeviceCandidate } from '@/api'
+import { cliApi } from '@/api/cli'
 import { useLocale } from '@/composables/useLocale'
 
 const { locale } = useLocale()
@@ -19,25 +20,9 @@ function showSuccess(msg: string) {
   if (successTimer) clearTimeout(successTimer)
   successTimer = setTimeout(() => { successMessage.value = '' }, 3000)
 }
-const devices = ref<UserDevice[]>([])
-const editingIp = ref<Record<number, string>>({})
-const savingIp = ref<Record<number, boolean>>({})
-const showCreate = ref(false)
-const showEdit = ref(false)
-const editingDevice = ref<UserDevice | null>(null)
 
-// Create form
-const formName = ref('')
-const formType = ref('other')
-const formRoomId = ref<number | null>(null)
+const devices = ref<UserDevice[]>([])
 const rooms = ref<Room[]>([])
-const showRoomsManager = ref(false)
-const roomFormName = ref('')
-const editingRoom = ref<Room | null>(null)
-const savingRoom = ref(false)
-const formMiDid = ref<string | null>(null)
-const formAdbAddress = ref('')
-const formIp = ref('')
 const miCandidates = ref<MiDeviceCandidate[]>([])
 const miCandidatesLoaded = ref(false)
 const miCandidatesLoading = ref(false)
@@ -48,37 +33,82 @@ const saving = ref(false)
 const onlineStatus = ref<Record<number, boolean>>({})
 let pingTimer: ReturnType<typeof setInterval> | null = null
 
-const miBindingOptions = computed(() => {
-  const rows = [...miCandidates.value]
-  const currentDid = formMiDid.value
-  if (currentDid && !rows.some((candidate) => candidate.did === currentDid)) {
-    rows.unshift({
-      did: currentDid,
-      name: label('当前绑定', 'Current binding'),
-      model: '',
-      device_type: '',
-      room_name: '',
-      home_name: '',
-    })
-  }
-  return rows
+// 2D Layout State
+const selectedDeviceId = ref<number | null>(null)
+const canvasWidth = 800
+const canvasHeight = 600
+
+const selectedDevice = computed(() =>
+  devices.value.find((d) => d.id === selectedDeviceId.value) || null
+)
+
+const activeRooms = computed(() => {
+  return rooms.value.filter((r) => {
+    const props = r.props ?? {}
+    return (
+      typeof props.x === 'number' &&
+      typeof props.y === 'number' &&
+      typeof props.w === 'number' &&
+      typeof props.h === 'number'
+    )
+  })
 })
 
-onMounted(() => {
-  loadDevices()
+function propString(d: UserDevice | null, key: string): string {
+  if (!d) return ''
+  const v = d.props?.[key]
+  return typeof v === 'string' ? v : ''
+}
+function propNumber(d: UserDevice | null, key: string): number | null {
+  if (!d) return null
+  const v = d.props?.[key]
+  if (typeof v === 'number') return v
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
+onMounted(async () => {
+  await loadData()
   startPing()
+  void ensureMiNamesLoaded()
 })
 
 onUnmounted(() => {
   if (pingTimer) clearInterval(pingTimer)
 })
 
-async function loadDevices() {
+async function loadData() {
   loading.value = true
   errorMessage.value = ''
   try {
-    const result = await api.userDevices.list()
-    devices.value = result.devices ?? []
+    const [devRes, roomRes] = await Promise.all([
+      api.userDevices.list(),
+      api.rooms.list(),
+    ])
+    devices.value = devRes.devices ?? []
+    rooms.value = roomRes.rooms ?? []
+
+    // Auto initialize dummy room positions if not present
+    let changed = false
+    for (const r of rooms.value) {
+      if (!r.props || typeof r.props.x !== 'number') {
+        r.props = {
+          x: Math.floor(Math.random() * 400) + 50,
+          y: Math.floor(Math.random() * 300) + 50,
+          w: 240,
+          h: 180,
+        }
+        await api.rooms.update(r.id, { props: r.props })
+        changed = true
+      }
+    }
+    if (changed) {
+      const roomRes2 = await api.rooms.list()
+      rooms.value = roomRes2.rooms ?? []
+    }
   } catch (error) {
     errorMessage.value = (error as Error).message || String(error)
   } finally {
@@ -98,1108 +128,548 @@ function startPing() {
   pingTimer = setInterval(pingDevices, 60000)
 }
 
-async function openCreate() {
-  showCreate.value = true
-  formName.value = ''
-  formType.value = 'other'
-  formRoomId.value = null
-  formMiDid.value = null
-  formAdbAddress.value = ''
-  formIp.value = ''
-  void ensureEditLookupsLoaded()
+// Draggable room card implementation
+const draggingRoomId = ref<number | null>(null)
+const dragOffsetX = ref(0)
+const dragOffsetY = ref(0)
+
+function startDragRoom(event: PointerEvent, room: Room) {
+  event.preventDefault()
+  draggingRoomId.value = room.id
+  const props = room.props as any
+  dragOffsetX.value = event.clientX - (props.x ?? 0)
+  dragOffsetY.value = event.clientY - (props.y ?? 0)
+  document.addEventListener('pointermove', onDragRoom)
+  document.addEventListener('pointerup', stopDragRoom)
 }
 
-async function submitCreate() {
-  if (!formName.value.trim()) return
-  creating.value = true
-  try {
-    await api.userDevices.create({
-      name: formName.value.trim(),
-      device_type: formType.value,
-      room_id: formRoomId.value,
-      mi_did: formMiDid.value || null,
-      adb_ip: formAdbAddress.value,
-      ip_address: formIp.value.trim(),
-    })
-    showCreate.value = false
-    showSuccess(label('设备创建成功', 'Device created'))
-    await loadDevices()
-  } catch (e) {
-    errorMessage.value = (e as Error).message || String(e)
-  } finally {
-    creating.value = false
+function onDragRoom(event: PointerEvent) {
+  if (draggingRoomId.value === null) return
+  const room = rooms.value.find((r) => r.id === draggingRoomId.value)
+  if (!room) return
+  const props = room.props as any
+  props.x = Math.max(0, Math.min(canvasWidth - (props.w ?? 200), event.clientX - dragOffsetX.value))
+  props.y = Math.max(0, Math.min(canvasHeight - (props.h ?? 200), event.clientY - dragOffsetY.value))
+}
+
+async function stopDragRoom() {
+  if (draggingRoomId.value === null) return
+  const room = rooms.value.find((r) => r.id === draggingRoomId.value)
+  if (room) {
+    await api.rooms.update(room.id, { props: room.props })
   }
+  draggingRoomId.value = null
+  document.removeEventListener('pointermove', onDragRoom)
+  document.removeEventListener('pointerup', stopDragRoom)
 }
 
-function openEdit(device: UserDevice) {
-  showEdit.value = true
-  editingDevice.value = device
-  formName.value = device.name
-  formType.value = device.device_type
-  formRoomId.value = device.room_id
-  formMiDid.value = device.mi_did
-  formAdbAddress.value = device.adb_ip
-  formIp.value = device.ip_address
-  void ensureEditLookupsLoaded()
+// Draggable Device Node implementation (relative inside room)
+const draggingDeviceId = ref<number | null>(null)
+const dragDevOffsetX = ref(0)
+const dragDevOffsetY = ref(0)
+
+function startDragDevice(event: PointerEvent, device: UserDevice) {
+  event.stopPropagation()
+  event.preventDefault()
+  draggingDeviceId.value = device.id
+  const props = device.props as any
+  dragDevOffsetX.value = event.clientX - (props.x ?? 50)
+  dragDevOffsetY.value = event.clientY - (props.y ?? 50)
+  document.addEventListener('pointermove', onDragDevice)
+  document.addEventListener('pointerup', stopDragDevice)
 }
 
-async function ensureEditLookupsLoaded() {
-  await Promise.allSettled([ensureMiCandidatesLoaded(), ensureRoomsLoaded()])
+function onDragDevice(event: PointerEvent) {
+  if (draggingDeviceId.value === null) return
+  const device = devices.value.find((d) => d.id === draggingDeviceId.value)
+  if (!device) return
+  const props = device.props as any
+  const roomId = propNumber(device, 'room_id')
+  const room = rooms.value.find((r) => r.id === roomId)
+  const roomW = (room?.props as any)?.w ?? 240
+  const roomH = (room?.props as any)?.h ?? 180
+  props.x = Math.max(10, Math.min(roomW - 50, event.clientX - dragDevOffsetX.value))
+  props.y = Math.max(10, Math.min(roomH - 50, event.clientY - dragDevOffsetY.value))
 }
 
-async function ensureMiCandidatesLoaded(force = false) {
-  if (!force && (miCandidatesLoaded.value || miCandidatesLoading.value)) return
-  miCandidatesLoading.value = true
-  try {
-    const result = await api.userDevices.miCandidates({ refresh: force })
-    miCandidates.value = result.devices ?? []
-    miCandidatesLoaded.value = true
-  } catch {
-    if (force) miCandidatesLoaded.value = false
-  } finally {
-    miCandidatesLoading.value = false
+async function stopDragDevice() {
+  if (draggingDeviceId.value === null) return
+  const device = devices.value.find((d) => d.id === draggingDeviceId.value)
+  if (device) {
+    await api.userDevices.update(device.id, { props: device.props })
   }
-}
-
-async function ensureRoomsLoaded(force = false) {
-  if (!force && (roomsLoaded.value || roomsLoading.value)) return
-  roomsLoading.value = true
-  try {
-    const result = await api.rooms.list()
-    rooms.value = result.rooms ?? []
-    roomsLoaded.value = true
-  } catch {
-    if (force) roomsLoaded.value = false
-  } finally {
-    roomsLoading.value = false
-  }
-}
-
-async function submitEdit() {
-  if (!formName.value.trim() || !editingDevice.value) return
-  saving.value = true
-  try {
-    await api.userDevices.update(editingDevice.value.id, {
-      name: formName.value.trim(),
-      device_type: formType.value,
-      room_id: formRoomId.value,
-      mi_did: formMiDid.value || null,
-      adb_ip: formAdbAddress.value,
-      ip_address: formIp.value.trim(),
-    })
-    showEdit.value = false
-    editingDevice.value = null
-    showSuccess(label('设备已保存', 'Device saved'))
-    await loadDevices()
-  } catch (e) {
-    errorMessage.value = (e as Error).message || String(e)
-  } finally {
-    saving.value = false
-  }
-}
-
-async function deleteDevice(id: number) {
-  if (!confirm(label('确定删除？', 'Delete this device?'))) return
-  try {
-    await api.userDevices.delete(id)
-    devices.value = devices.value.filter(d => d.id !== id)
-    showSuccess(label('设备已删除', 'Device deleted'))
-  } catch (e) {
-    errorMessage.value = (e as Error).message || String(e)
-  }
-}
-
-async function loadRooms() {
-  try {
-    const result = await api.rooms.list()
-    rooms.value = result.rooms ?? []
-    roomsLoaded.value = true
-  } catch {}
-}
-
-function openRoomsManager() {
-  showRoomsManager.value = true
-  roomFormName.value = ''
-  editingRoom.value = null
-  loadRooms()
-}
-
-async function saveRoom() {
-  if (!roomFormName.value.trim()) return
-  savingRoom.value = true
-  try {
-    if (editingRoom.value) {
-      await api.rooms.update(editingRoom.value.id, { name: roomFormName.value.trim() })
-    } else {
-      await api.rooms.create({ name: roomFormName.value.trim() })
-    }
-    roomFormName.value = ''
-    editingRoom.value = null
-    await loadRooms()
-  } catch (e) {
-    errorMessage.value = (e as Error).message || String(e)
-  } finally {
-    savingRoom.value = false
-  }
-}
-
-function editRoom(room: Room) {
-  editingRoom.value = room
-  roomFormName.value = room.name
-}
-
-async function deleteRoom(id: number) {
-  if (!confirm(label('确定删除此房间？', 'Delete this room?'))) return
-  try {
-    await api.rooms.delete(id)
-    await loadRooms()
-  } catch (e) {
-    errorMessage.value = (e as Error).message || String(e)
-  }
-}
-
-const deviceTypeOptions = [
-  { value: 'television', zh: '电视', en: 'TV' },
-  { value: 'stb', zh: '机顶盒', en: 'STB' },
-  { value: 'speaker', zh: '音箱', en: 'Speaker' },
-  { value: 'router', zh: '路由器', en: 'Router' },
-  { value: 'outlet', zh: '插座', en: 'Outlet' },
-  { value: 'phone', zh: '手机', en: 'Phone' },
-  { value: 'tv_box', zh: '电视盒', en: 'TV Box' },
-  { value: 'tablet', zh: '平板', en: 'Tablet' },
-  { value: 'computer', zh: '电脑', en: 'Computer' },
-  { value: 'other', zh: '其他', en: 'Other' },
-]
-
-function typeLabel(t: string) {
-  const opt = deviceTypeOptions.find(o => o.value === t)
-  return opt ? (isZh.value ? opt.zh : opt.en) : t
+  draggingDeviceId.value = null
+  document.removeEventListener('pointermove', onDragDevice)
+  document.removeEventListener('pointerup', stopDragDevice)
 }
 
 function deviceIcon(t: string): string {
-  if (t === 'television') return 'tv'
+  if (t === 'television' || t === 'tv_box') return 'tv'
   if (t === 'stb') return 'stb'
   if (t === 'speaker') return 'speaker'
   if (t === 'router') return 'router'
   if (t === 'outlet') return 'outlet'
-  if (t === 'phone') return 'phone'
-  if (t === 'tv_box') return 'tv'
-  if (t === 'tablet') return 'phone'
+  if (t === 'phone' || t === 'tablet') return 'phone'
   if (t === 'computer') return 'computer'
   return 'device'
 }
 
-function sourceTags(device: UserDevice): string[] {
-  const tags: string[] = []
-  if (device.mi_did) tags.push('Mi')
-  if (device.adb_ip) tags.push('ADB')
-  return tags
+function miNameFor(did: string): string {
+  if (!did) return ''
+  const c = miCandidates.value.find((x) => x.did === did)
+  return c?.name || c?.model || did
 }
 
-function startEditIp(device: UserDevice) {
-  editingIp.value[device.id] = device.ip_address || ''
-}
-
-function cancelEditIp(id: number) {
-  const obj = { ...editingIp.value }
-  delete obj[id]
-  editingIp.value = obj
-}
-
-async function saveIp(device: UserDevice) {
-  const ip = editingIp.value[device.id]?.trim() ?? ''
-  savingIp.value[device.id] = true
+async function ensureMiNamesLoaded() {
+  if (miCandidates.value.length > 0 || miCandidatesLoading.value) return
+  miCandidatesLoading.value = true
   try {
-    await api.userDevices.update(device.id, { ip_address: ip })
-    device.ip_address = ip
-    const obj = { ...editingIp.value }
-    delete obj[device.id]
-    editingIp.value = obj
-  } catch (e) {
-    console.error('Failed to save IP:', e)
-  } finally {
-    savingIp.value[device.id] = false
+    const r = await cliApi.run<{ summary: Array<{ did: string; name?: string; model?: string }> }>('mi-cli', {
+      action: 'discover',
+      params: { summary_only: true },
+      ttl_ms: 60_000,
+    })
+    if (r.status === 'success' && r.data?.summary) {
+      miCandidates.value = r.data.summary.map((d) => ({
+        did: d.did,
+        name: d.name ?? '',
+        model: d.model ?? '',
+        device_type: '',
+        room_name: '',
+        home_name: '',
+      }))
+    }
+  } catch {} finally {
+    miCandidatesLoading.value = false
   }
+}
+
+function selectDevice(device: UserDevice) {
+  selectedDeviceId.value = device.id
 }
 </script>
 
 <template>
-  <div class="devices-page">
-    <header class="page-head glass-panel">
-      <div class="head-content">
-        <span class="eyebrow">{{ label('设备', 'Devices') }}</span>
-        <h1>{{ label('设备管理', 'Device Management') }}</h1>
-        <p>{{ label('创建设备并绑定 Mi 或 ADB 能力。IP 仅用于在线检测。', 'Create devices and bind Mi or ADB capabilities. IP is only used for presence checks.') }}</p>
-      </div>
-      <div class="actions">
-        <button class="refresh-btn" :disabled="loading" @click="loadDevices">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
-          {{ label('刷新', 'Refresh') }}
-        </button>
-        <button class="create-btn" @click="openCreate">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-          {{ label('添加设备', 'Add Device') }}
-        </button>
-        <button class="room-manage-btn" @click="openRoomsManager">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L3 8l9 5 9-5-9-5z"></path><path d="M3 13l9 5 9-5"></path><path d="M3 18l9 5 9-5"></path></svg>
-          {{ label('管理房间', 'Rooms') }}
-        </button>
-      </div>
-    </header>
+  <div class="devices-page-2d">
+    <!-- Left interactive floor plan canvas -->
+    <main class="canvas-area glass-panel">
+      <header class="canvas-head">
+        <h2>{{ label('数字孪生 · 2D 房型布局', 'Digital Twin Canvas') }}</h2>
+        <span class="hint-pill">{{ label('按住房间卡片或设备图标自由拖动摆放', 'Drag rooms & devices to place') }}</span>
+      </header>
 
-    <div v-if="errorMessage" class="error-line glass-panel">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-      {{ errorMessage }}
-    </div>
-    <div v-if="successMessage" class="success-line glass-panel">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-      {{ successMessage }}
-    </div>
+      <div class="twin-viewport" :style="{ width: canvasWidth + 'px', height: canvasHeight + 'px' }">
+        <!-- Renders Rooms -->
+        <div
+          v-for="room in activeRooms"
+          :key="room.id"
+          class="room-card"
+          :style="{
+            left: (room.props.x || 0) + 'px',
+            top: (room.props.y || 0) + 'px',
+            width: (room.props.w || 240) + 'px',
+            height: (room.props.h || 180) + 'px',
+          }"
+          @pointerdown="startDragRoom($event, room)"
+        >
+          <div class="room-title">
+            <span class="room-dot"></span>
+            <strong>{{ room.name }}</strong>
+          </div>
 
-    <div v-if="loading" class="empty-state">{{ label('加载中…', 'Loading…') }}</div>
-
-    <div v-else-if="devices.length === 0" class="empty-state">{{ label('暂无设备，点击"添加设备"创建', 'No devices. Click "Add Device" to create one.') }}</div>
-
-    <section v-else class="device-grid">
-      <div v-for="device in devices" :key="device.id" class="device-card glass-panel">
-        <!-- Icon -->
-        <div class="card-icon" :class="`icon-${deviceIcon(device.device_type)}`">
-          <svg v-if="deviceIcon(device.device_type) === 'tv'" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-          <svg v-else-if="deviceIcon(device.device_type) === 'stb'" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><circle cx="8" cy="12" r="1.5" fill="currentColor"></circle><circle cx="12" cy="12" r="1.5" fill="currentColor"></circle><circle cx="16" cy="12" r="1.5" fill="currentColor"></circle></svg>
-          <svg v-else-if="deviceIcon(device.device_type) === 'speaker'" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="3"></rect><circle cx="12" cy="14" r="3"></circle><line x1="12" y1="7" x2="12" y2="9"></line></svg>
-          <svg v-else-if="deviceIcon(device.device_type) === 'router'" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="20" height="8" rx="2"></rect><line x1="6" y1="12" x2="6.01" y2="12"></line><line x1="10" y1="12" x2="10.01" y2="12"></line><line x1="14" y1="12" x2="14.01" y2="12"></line><path d="M6 20v-4 M18 20v-4"></path></svg>
-          <svg v-else-if="deviceIcon(device.device_type) === 'outlet'" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"></rect><rect x="9" y="10" width="6" height="4" rx="1"></rect></svg>
-          <svg v-else-if="deviceIcon(device.device_type) === 'phone'" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="3"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>
-          <svg v-else-if="deviceIcon(device.device_type) === 'computer'" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-          <svg v-else viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+          <!-- Renders Devices bounded inside this Room -->
+          <div
+            v-for="dev in devices.filter((d) => propNumber(d, 'room_id') === room.id)"
+            :key="dev.id"
+            class="device-node"
+            :class="{
+              active: selectedDeviceId === dev.id,
+              online: onlineStatus[dev.id] === true,
+              offline: onlineStatus[dev.id] === false,
+            }"
+            :style="{
+              left: (dev.props.x ?? 40) + 'px',
+              top: (dev.props.y ?? 40) + 'px',
+            }"
+            @pointerdown="startDragDevice($event, dev)"
+            @click.stop="selectDevice(dev)"
+          >
+            <div class="node-icon" :class="`icon-${deviceIcon(propString(dev, 'device_type'))}`">
+              <svg v-if="deviceIcon(propString(dev, 'device_type')) === 'tv'" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+              <svg v-else-if="deviceIcon(propString(dev, 'device_type')) === 'speaker'" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="4" y="2" width="16" height="20" rx="3"></rect><circle cx="12" cy="14" r="3"></circle><line x1="12" y1="7" x2="12" y2="9"></line></svg>
+              <svg v-else-if="deviceIcon(propString(dev, 'device_type')) === 'phone'" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="5" y="2" width="14" height="20" rx="3"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>
+              <svg v-else viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+            </div>
+            <span class="node-name">{{ dev.name }}</span>
+          </div>
         </div>
+      </div>
+    </main>
 
-        <!-- Body -->
-        <div class="card-body" @click="router.push(`/devices/${device.id}`)" style="cursor: pointer;">
-          <div class="card-top">
-            <span class="status-dot" :class="onlineStatus[device.id] === undefined ? 'status-unknown' : onlineStatus[device.id] ? 'status-online' : 'status-offline'" />
-            <strong class="device-name">{{ device.name }}</strong>
-            <div class="source-tags">
-              <span v-for="tag in sourceTags(device)" :key="tag" class="source-tag" :class="tag === 'ADB' ? 'tag-adb' : 'tag-mi'">{{ tag }}</span>
+    <!-- Right Summary / Detail Panel -->
+    <aside class="control-panel glass-panel">
+      <template v-if="selectedDevice">
+        <header class="panel-head">
+          <span class="meta-label">{{ typeLabel(propString(selectedDevice, 'device_type') || 'other') }}</span>
+          <h2>{{ selectedDevice.name }}</h2>
+          <span class="status-indicator" :class="onlineStatus[selectedDevice.id] ? 'status-online' : 'status-offline'">
+            {{ onlineStatus[selectedDevice.id] ? label('在线', 'Online') : label('离线', 'Offline') }}
+          </span>
+        </header>
+
+        <section class="panel-body">
+          <div class="props-list">
+            <div v-if="propString(selectedDevice, 'mi_did')" class="prop-item">
+              <span class="p-key">Mi Device</span>
+              <strong class="p-val truncate">{{ miNameFor(propString(selectedDevice, 'mi_did')) }}</strong>
+            </div>
+            <div v-if="propString(selectedDevice, 'adb_ip')" class="prop-item">
+              <span class="p-key">ADB IP</span>
+              <strong class="p-val monospace">{{ propString(selectedDevice, 'adb_ip') }}</strong>
+            </div>
+            <div v-if="propString(selectedDevice, 'ip_address')" class="prop-item">
+              <span class="p-key">Local IP</span>
+              <strong class="p-val monospace">{{ propString(selectedDevice, 'ip_address') }}</strong>
             </div>
           </div>
 
-          <div class="card-meta">
-            <span class="meta-chip">{{ typeLabel(device.device_type) }}</span>
-            <span v-if="device.room_name" class="meta-chip">{{ device.room_name }}</span>
+          <div class="actions">
+            <button class="primary-btn-sm" @click="router.push(`/devices/${selectedDevice.id}`)">
+              {{ label('控制与详情', 'Manage & Control') }}
+            </button>
+            <button class="ghost-btn-sm" @click="selectedDeviceId = null">
+              {{ label('取消选中', 'Deselect') }}
+            </button>
           </div>
+        </section>
+      </template>
 
-          <div class="card-info">
-            <span v-if="device.mi_did" class="info-line">Mi: {{ device.mi_did }}</span>
-            <span v-if="device.adb_ip" class="info-line">ADB: {{ device.adb_ip }}</span>
-          </div>
-
-          <!-- IP row -->
-          <div class="ip-row">
-            <span class="ip-label">IP:</span>
-            <template v-if="editingIp[device.id] !== undefined">
-              <input v-model="editingIp[device.id]" class="ip-input" placeholder="192.168.1.x" @keyup.enter="saveIp(device)" @keyup.escape="cancelEditIp(device.id)" />
-              <button class="ip-action ip-save" :disabled="savingIp[device.id]" @click="saveIp(device)">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-              </button>
-              <button class="ip-action ip-cancel" @click="cancelEditIp(device.id)">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-              </button>
-            </template>
-            <template v-else>
-              <span class="ip-value" :class="{ 'ip-empty': !device.ip_address }">
-                {{ device.ip_address || '—' }}
-              </span>
-              <button class="ip-action ip-edit" @click="startEditIp(device)">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-              </button>
-            </template>
-          </div>
-        </div>
-
-        <!-- Actions -->
-        <div class="card-actions">
-          <button class="action-btn action-edit" :title="label('编辑', 'Edit')" @click="openEdit(device)">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+      <template v-else>
+        <div class="panel-empty">
+          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="empty-icon"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+          <p>{{ label('在左侧点击设备查看控制和能力', 'Select a device node on the left twin canvas') }}</p>
+          <button class="ghost-btn-sm" @click="router.push('/authorizations')">
+            {{ label('进入授权中心', 'Unified Auth') }}
           </button>
-          <button class="action-btn action-delete" :title="label('删除', 'Delete')" @click="deleteDevice(device.id)">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-          </button>
         </div>
-      </div>
-    </section>
-
-    <!-- Create dialog -->
-    <Teleport to="body">
-      <div v-if="showCreate" class="dialog-overlay" @click.self="showCreate = false">
-        <div class="dialog glass-panel">
-          <h2>{{ label('添加设备', 'Add Device') }}</h2>
-
-          <div class="form-row">
-            <label>{{ label('名称', 'Name') }} *</label>
-            <input v-model="formName" class="form-input" :placeholder="label('如: 客厅电视', 'e.g. Living Room TV')" />
-          </div>
-
-          <div class="form-row">
-            <label>{{ label('类型', 'Type') }}</label>
-            <select v-model="formType" class="form-select">
-              <option v-for="opt in deviceTypeOptions" :key="opt.value" :value="opt.value">{{ isZh ? opt.zh : opt.en }}</option>
-            </select>
-          </div>
-
-          <div class="form-row">
-            <label>{{ label('房间', 'Room') }}</label>
-            <div class="room-select-row">
-              <select v-model="formRoomId" class="form-select">
-                <option :value="null">{{ label('无', 'None') }}</option>
-                <option v-if="roomsLoading" disabled>{{ label('房间加载中...', 'Loading rooms...') }}</option>
-                <option v-for="r in rooms" :key="r.id" :value="r.id">{{ r.name }}</option>
-              </select>
-              <button class="room-manage-btn-sm" :title="label('管理房间', 'Manage Rooms')" @click="openRoomsManager">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L3 8l9 5 9-5-9-5z"></path><path d="M3 13l9 5 9-5"></path><path d="M3 18l9 5 9-5"></path></svg>
-              </button>
-            </div>
-          </div>
-
-          <div class="form-row">
-            <label>{{ label('Mi 绑定', 'Mi Binding') }}</label>
-            <select v-model="formMiDid" class="form-select">
-              <option :value="null">{{ label('不绑定', 'None') }}</option>
-              <option v-if="miCandidatesLoading" disabled>{{ label('Mi 候选加载中...', 'Loading Mi candidates...') }}</option>
-              <option v-for="c in miBindingOptions" :key="c.did" :value="c.did">
-                {{ c.name || c.did }} ({{ c.model }}{{ c.room_name ? ' · ' + c.room_name : '' }})
-              </option>
-            </select>
-          </div>
-
-          <div class="form-row">
-            <label>{{ label('ADB 绑定地址', 'ADB Binding Address') }}</label>
-            <input v-model="formAdbAddress" class="form-input" placeholder="192.168.1.100:5555" />
-            <div class="form-hint">{{ label('绑定 ADB 端点后，该设备才能获得 ADB 能力。', 'Bind an ADB endpoint to enable ADB capabilities for this device.') }}</div>
-          </div>
-
-          <div class="form-row">
-            <label>{{ label('IP 地址', 'IP Address') }}</label>
-            <input v-model="formIp" class="form-input" placeholder="192.168.1.100" />
-          </div>
-
-          <div class="dialog-actions">
-            <button class="dialog-btn dialog-cancel" @click="showCreate = false">{{ label('取消', 'Cancel') }}</button>
-            <button class="dialog-btn dialog-confirm" :disabled="!formName.trim() || creating" @click="submitCreate">
-              {{ creating ? label('创建中…', 'Creating…') : label('创建', 'Create') }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
-    <!-- Edit dialog -->
-    <Teleport to="body">
-      <div v-if="showEdit" class="dialog-overlay" @click.self="showEdit = false">
-        <div class="dialog glass-panel">
-          <h2>{{ label('编辑设备', 'Edit Device') }}</h2>
-
-          <div class="form-row">
-            <label>{{ label('名称', 'Name') }} *</label>
-            <input v-model="formName" class="form-input" :placeholder="label('如: 客厅电视', 'e.g. Living Room TV')" />
-          </div>
-
-          <div class="form-row">
-            <label>{{ label('类型', 'Type') }}</label>
-            <select v-model="formType" class="form-select">
-              <option v-for="opt in deviceTypeOptions" :key="opt.value" :value="opt.value">{{ isZh ? opt.zh : opt.en }}</option>
-            </select>
-          </div>
-
-          <div class="form-row">
-            <label>{{ label('房间', 'Room') }}</label>
-            <div class="room-select-row">
-              <select v-model="formRoomId" class="form-select">
-                <option :value="null">{{ label('无', 'None') }}</option>
-                <option v-if="roomsLoading" disabled>{{ label('房间加载中...', 'Loading rooms...') }}</option>
-                <option v-for="r in rooms" :key="r.id" :value="r.id">{{ r.name }}</option>
-              </select>
-              <button class="room-manage-btn-sm" :title="label('管理房间', 'Manage Rooms')" @click="openRoomsManager">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L3 8l9 5 9-5-9-5z"></path><path d="M3 13l9 5 9-5"></path><path d="M3 18l9 5 9-5"></path></svg>
-              </button>
-            </div>
-          </div>
-
-          <div class="form-row">
-            <label>{{ label('Mi 绑定', 'Mi Binding') }}</label>
-            <select v-model="formMiDid" class="form-select">
-              <option :value="null">{{ label('不绑定', 'None') }}</option>
-              <option v-if="miCandidatesLoading" disabled>{{ label('Mi 候选加载中...', 'Loading Mi candidates...') }}</option>
-              <option v-for="c in miBindingOptions" :key="c.did" :value="c.did">
-                {{ c.name || c.did }} ({{ c.model }}{{ c.room_name ? ' · ' + c.room_name : '' }})
-              </option>
-            </select>
-          </div>
-
-          <div class="form-row">
-            <label>{{ label('ADB 绑定地址', 'ADB Binding Address') }}</label>
-            <input v-model="formAdbAddress" class="form-input" placeholder="192.168.1.100:5555" />
-            <div class="form-hint">{{ label('绑定 ADB 端点后，该设备才能获得 ADB 能力。', 'Bind an ADB endpoint to enable ADB capabilities for this device.') }}</div>
-          </div>
-
-          <div class="form-row">
-            <label>{{ label('IP 地址', 'IP Address') }}</label>
-            <input v-model="formIp" class="form-input" placeholder="192.168.1.100:5555" />
-          </div>
-
-          <div class="dialog-actions">
-            <button class="dialog-btn dialog-cancel" @click="showEdit = false">{{ label('取消', 'Cancel') }}</button>
-            <button class="dialog-btn dialog-confirm" :disabled="!formName.trim() || saving" @click="submitEdit">
-              {{ saving ? label('保存中…', 'Saving…') : label('保存', 'Save') }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
-    <!-- Rooms Manager dialog -->
-    <Teleport to="body">
-      <div v-if="showRoomsManager" class="dialog-overlay" @click.self="showRoomsManager = false">
-        <div class="dialog glass-panel">
-          <h2>{{ label('管理房间', 'Manage Rooms') }}</h2>
-
-          <div class="form-row room-form-inline">
-            <input v-model="roomFormName" class="form-input" :placeholder="label('房间名称', 'Room name')" @keyup.enter="saveRoom" />
-            <button class="dialog-btn dialog-confirm room-save-btn" :disabled="!roomFormName.trim() || savingRoom" @click="saveRoom">
-              {{ savingRoom ? '…' : editingRoom ? label('更新', 'Update') : label('添加', 'Add') }}
-            </button>
-            <button v-if="editingRoom" class="dialog-btn dialog-cancel" @click="editingRoom = null; roomFormName = ''">
-              {{ label('取消', 'Cancel') }}
-            </button>
-          </div>
-
-          <div v-if="rooms.length === 0" class="empty-rooms">
-            {{ label('暂无房间', 'No rooms yet.') }}
-          </div>
-          <ul v-else class="room-list">
-            <li v-for="r in rooms" :key="r.id" class="room-list-item">
-              <span class="room-list-name">{{ r.name }}</span>
-              <div class="room-list-actions">
-                <button class="room-list-btn room-list-edit" :title="label('编辑', 'Edit')" @click="editRoom(r)">
-                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                </button>
-                <button class="room-list-btn room-list-delete" :title="label('删除', 'Delete')" @click="deleteRoom(r.id)">
-                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                </button>
-              </div>
-            </li>
-          </ul>
-
-          <div class="dialog-actions">
-            <button class="dialog-btn dialog-cancel" @click="showRoomsManager = false">{{ label('关闭', 'Close') }}</button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+      </template>
+    </aside>
   </div>
 </template>
 
 <style scoped>
-.devices-page {
+.devices-page-2d {
   height: 100%;
-  overflow-y: auto;
-  padding: 48px;
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 24px;
+  padding: 32px;
   background: #f7f9fa;
-  display: flex;
-  flex-direction: column;
-  gap: 32px;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .glass-panel {
   border: 1px solid rgba(229, 231, 235, 0.4);
-  border-radius: 40px;
-  background: rgba(255, 255, 255, 0.5);
+  border-radius: 32px;
+  background: rgba(255, 255, 255, 0.6);
   backdrop-filter: blur(48px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.02);
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.page-head {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 48px 56px;
+  flex-direction: column;
 }
 
-.eyebrow {
-  display: inline-block;
-  color: #10b981;
-  font-size: 14px;
-  font-weight: 900;
-  text-transform: uppercase;
-  letter-spacing: 0.2em;
-  background: rgba(16, 185, 129, 0.1);
-  padding: 6px 16px;
-  border-radius: 10px;
-  margin-bottom: 20px;
-}
-
-h1 {
-  margin: 0;
-  font-size: 40px;
-  font-weight: 900;
-  letter-spacing: -0.06em;
-  color: var(--text-primary);
-  line-height: 1;
-}
-
-.page-head p {
-  margin-top: 16px;
-  color: var(--text-secondary);
-  font-size: 16px;
-  line-height: 1.6;
-  font-weight: 600;
-  max-width: 600px;
-  opacity: 0.7;
-}
-
-.actions {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-
-.refresh-btn, .create-btn {
-  min-height: 48px;
-  padding: 0 24px;
-  border: 1px solid rgba(229, 231, 235, 0.8);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.8);
-  font-size: 15px;
-  font-weight: 900;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-primary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.refresh-btn:hover:not(:disabled) {
-  border-color: #10b981;
-  color: #10b981;
-  background: #fff;
-  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.12);
-  transform: translateY(-2px);
-}
-
-.create-btn {
-  background: #10b981;
-  border-color: #10b981;
-  color: #fff;
-}
-
-.create-btn:hover {
-  background: #059669;
-  border-color: #059669;
-  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.2);
-  transform: translateY(-2px);
-}
-
-.error-line {
-  padding: 20px 32px;
-  border-color: rgba(239, 68, 68, 0.15);
-  background: rgba(254, 242, 242, 0.8);
-  color: #ef4444;
-  font-size: 16px;
-  font-weight: 900;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  box-shadow: 0 8px 24px rgba(239, 68, 68, 0.08);
-}
-
-.empty-state {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 300px;
-  color: var(--text-tertiary);
-  font-size: 16px;
-  font-weight: 900;
-  text-transform: uppercase;
-  letter-spacing: 0.25em;
-  opacity: 0.4;
-}
-
-/* ── device card grid ── */
-.device-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
-  gap: 24px;
-}
-
-.device-card {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  padding: 28px 32px;
-  cursor: default;
-  border-radius: 28px;
-}
-
-.device-card:hover {
-  background: rgba(255, 255, 255, 0.85);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.06);
-  transform: translateY(-4px);
-}
-
-/* ── icons ── */
-.card-icon {
-  width: 52px;
-  height: 52px;
-  border-radius: 18px;
-  background: rgba(16, 185, 129, 0.1);
-  color: #10b981;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.icon-tv { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-.icon-stb { background: rgba(99, 102, 241, 0.1); color: #6366f1; }
-.icon-speaker { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-.icon-router { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
-.icon-outlet { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
-.icon-phone { background: rgba(139, 92, 246, 0.1); color: #8b5cf6; }
-.icon-computer { background: rgba(6, 182, 212, 0.1); color: #06b6d4; }
-
-/* ── body ── */
-.card-body {
+.canvas-area {
   flex: 1;
-  min-width: 0;
-}
-
-.card-top {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-
-.device-name {
-  font-size: 18px;
-  font-weight: 900;
-  color: var(--text-primary);
-  letter-spacing: -0.03em;
-  white-space: nowrap;
+  padding: 32px;
   overflow: hidden;
-  text-overflow: ellipsis;
+  position: relative;
 }
 
-.status-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  transition: background 0.3s;
+.canvas-head {
+  margin-bottom: 24px;
 }
 
-.status-online { background: #10b981; box-shadow: 0 0 6px rgba(16, 185, 129, 0.4); }
-.status-offline { background: #ef4444; box-shadow: 0 0 6px rgba(239, 68, 68, 0.4); }
-.status-unknown { background: #d1d5db; }
-
-.source-tags {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.source-tag {
-  display: inline-block;
-  padding: 3px 10px;
-  border-radius: 99px;
-  font-size: 13px;
+.canvas-head h2 {
+  margin: 0 0 8px;
+  font-size: 24px;
   font-weight: 900;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+  color: var(--text-primary);
+  letter-spacing: -0.04em;
 }
 
-.tag-mi { background: rgba(16, 185, 129, 0.1); color: #10b981; }
-.tag-adb { background: rgba(99, 102, 241, 0.1); color: #6366f1; }
-
-.card-meta {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
-}
-
-.meta-chip {
+.hint-pill {
   display: inline-block;
-  padding: 4px 12px;
-  background: rgba(0, 0, 0, 0.03);
-  border-radius: 8px;
-  font-size: 16px;
-  font-weight: 800;
-  color: var(--text-tertiary);
-}
-
-.card-info {
-  display: flex;
-  gap: 16px;
-  margin-bottom: 8px;
-}
-
-.info-line {
-  font-size: 16px;
+  font-size: 13px;
   font-weight: 700;
-  color: var(--text-tertiary);
-  opacity: 0.6;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+  padding: 4px 12px;
+  border-radius: 8px;
 }
 
-/* ── IP row ── */
-.ip-row {
+/* 2D Viewport constraints */
+.twin-viewport {
+  flex: 1;
+  background: radial-gradient(rgba(0, 0, 0, 0.03) 1px, transparent 1px);
+  background-size: 20px 20px;
+  border: 1px solid rgba(0, 0, 0, 0.03);
+  border-radius: 24px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Draggable Rooms cards */
+.room-card {
+  position: absolute;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.45);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.01);
+  cursor: grab;
+  touch-action: none;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.room-card:active {
+  cursor: grabbing;
+  border-color: #10b981;
+  background: rgba(255, 255, 255, 0.65);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.04);
+}
+
+.room-title {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-top: 6px;
-  border-top: 1px solid rgba(229, 231, 235, 0.3);
+  margin-bottom: 12px;
+  pointer-events: none;
 }
 
-.ip-label {
-  font-size: 16px;
-  font-weight: 800;
-  color: var(--text-tertiary);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+.room-dot {
+  width: 8px;
+  height: 8px;
+  background: #10b981;
+  border-radius: 50%;
 }
 
-.ip-value {
+.room-title strong {
   font-size: 15px;
-  font-weight: 700;
   color: var(--text-primary);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-weight: 900;
 }
 
-.ip-value.ip-empty {
-  color: rgba(0, 0, 0, 0.15);
-  font-weight: 400;
-}
-
-.ip-input {
-  flex: 1;
-  min-width: 0;
-  max-width: 160px;
-  padding: 4px 10px;
-  border: 1.5px solid #10b981;
-  border-radius: 8px;
-  font-size: 15px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-weight: 700;
-  outline: none;
+/* Draggable inside room device nodes */
+.device-node {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
   background: #fff;
-  transition: border-color 0.2s;
-}
-
-.ip-input:focus {
-  border-color: #059669;
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
-}
-
-.ip-action {
-  width: 26px;
-  height: 26px;
-  border: 1px solid rgba(229, 231, 235, 0.6);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.6);
-  color: var(--text-tertiary);
-  cursor: pointer;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
-  padding: 0;
+  cursor: grab;
+  touch-action: none;
 }
 
-.ip-action:hover { border-color: #10b981; color: #10b981; background: #fff; }
-.ip-save:hover { border-color: #10b981; color: #10b981; }
-.ip-cancel:hover { border-color: #ef4444; color: #ef4444; }
-.ip-edit { opacity: 0; }
-.device-card:hover .ip-edit { opacity: 1; }
+.device-node:active {
+  cursor: grabbing;
+}
 
-/* ── card actions ── */
-.card-actions {
-  flex-shrink: 0;
+.node-icon {
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.device-node.active {
+  border-color: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+}
+
+.device-node.online {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+  border-color: rgba(16, 185, 129, 0.2);
+}
+
+.device-node.offline {
+  background: rgba(239, 68, 68, 0.05);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.15);
+}
+
+/* node text tooltip label on hover */
+.node-name {
+  position: absolute;
+  bottom: -22px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--text-primary);
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  pointer-events: none;
+}
+
+/* Right Control Panel */
+.control-panel {
+  padding: 32px;
+  justify-content: space-between;
+}
+
+.panel-head {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  align-items: flex-start;
 }
 
-.action-btn {
-  width: 44px;
-  height: 44px;
-  border: 1px solid rgba(229, 231, 235, 0.6);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.6);
-  color: var(--text-tertiary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+.meta-label {
+  font-size: 12px;
+  font-weight: 900;
+  color: #10b981;
+  text-transform: uppercase;
+  background: rgba(16, 185, 129, 0.08);
+  padding: 4px 10px;
+  border-radius: 6px;
 }
 
-.action-delete:hover {
-  border-color: #ef4444;
-  color: #ef4444;
-  background: #fff;
-  box-shadow: 0 6px 16px rgba(239, 68, 68, 0.12);
-}
-
-.action-edit:hover {
-  border-color: #6366f1;
-  color: #6366f1;
-  background: #fff;
-  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.12);
-}
-
-/* ── dialog ── */
-.dialog-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.3);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.dialog {
-  width: 480px;
-  max-height: 80vh;
-  overflow-y: auto;
-  padding: 40px;
-  background: #fff;
-}
-
-.dialog h2 {
-  margin: 0 0 28px;
+.panel-head h2 {
+  margin: 0;
   font-size: 24px;
   font-weight: 900;
   letter-spacing: -0.04em;
 }
 
-.form-row {
-  margin-bottom: 20px;
-}
-
-.form-row label {
-  display: block;
-  font-size: 16px;
+.status-indicator {
+  font-size: 13px;
   font-weight: 800;
-  color: var(--text-secondary);
-  margin-bottom: 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.form-input, .form-select {
-  width: 100%;
-  padding: 10px 14px;
-  border: 1px solid rgba(229, 231, 235, 0.8);
-  border-radius: 12px;
-  font-size: 16px;
-  font-weight: 600;
-  outline: none;
-  background: #fff;
-  transition: border-color 0.2s;
-  box-sizing: border-box;
-}
-
-.form-input:focus, .form-select:focus {
-  border-color: #10b981;
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
-}
-
-.dialog-actions {
-  display: flex;
-  gap: 12px;
-  justify-content: flex-end;
-  margin-top: 32px;
-}
-
-.dialog-btn {
-  padding: 10px 24px;
-  border-radius: 12px;
-  font-size: 15px;
-  font-weight: 800;
-  cursor: pointer;
-  border: 1px solid rgba(229, 231, 235, 0.8);
-  transition: all 0.2s;
-}
-
-.dialog-cancel {
-  background: rgba(255, 255, 255, 0.8);
-  color: var(--text-secondary);
-}
-
-.dialog-confirm {
-  background: #10b981;
-  border-color: #10b981;
-  color: #fff;
-}
-
-.dialog-confirm:hover:not(:disabled) {
-  background: #059669;
-}
-
-.dialog-confirm:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-/* ── room select ── */
-.room-select-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.room-select-row .form-select {
-  flex: 1;
-}
-
-.room-manage-btn-sm {
-  flex-shrink: 0;
-  width: 40px;
-  height: 40px;
-  border: 1px solid rgba(229, 231, 235, 0.8);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.8);
-  color: var(--text-tertiary);
-  cursor: pointer;
   display: flex;
   align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-  padding: 0;
-}
-
-.room-manage-btn-sm:hover {
-  border-color: #6366f1;
-  color: #6366f1;
-  background: #fff;
-}
-
-/* ── rooms manager button in page head ── */
-.room-manage-btn {
-  min-height: 48px;
-  padding: 0 24px;
-  border: 1px solid rgba(229, 231, 235, 0.8);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.8);
-  font-size: 15px;
-  font-weight: 900;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-primary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.room-manage-btn:hover {
-  border-color: #6366f1;
-  color: #6366f1;
-  background: #fff;
-  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.12);
-  transform: translateY(-2px);
-}
-
-/* ── rooms manager dialog ── */
-.room-form-inline {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.room-form-inline .form-input {
-  flex: 1;
-}
-
-.room-save-btn {
-  flex-shrink: 0;
-}
-
-.empty-rooms {
-  text-align: center;
-  padding: 32px 0;
-  color: var(--text-tertiary);
-  font-weight: 700;
-  font-size: 16px;
-  opacity: 0.5;
-}
-
-.room-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.room-list-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid rgba(229, 231, 235, 0.4);
-  transition: background 0.2s;
-}
-
-.room-list-item:last-child {
-  border-bottom: none;
-}
-
-.room-list-item:hover {
-  background: rgba(0, 0, 0, 0.02);
-  border-radius: 12px;
-}
-
-.room-list-name {
-  font-weight: 700;
-  font-size: 15px;
-  color: var(--text-primary);
-}
-
-.room-list-actions {
-  display: flex;
   gap: 6px;
 }
 
-.room-list-btn {
-  width: 32px;
-  height: 32px;
-  border: 1px solid rgba(229, 231, 235, 0.6);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
+.status-indicator::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.status-online { color: #10b981; }
+.status-online::before { background: #10b981; }
+.status-offline { color: #ef4444; }
+.status-offline::before { background: #ef4444; }
+
+.panel-body {
+  flex: 1;
   display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  margin-top: 32px;
+}
+
+.props-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.prop-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+  padding-bottom: 12px;
+}
+
+.p-key {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+}
+
+.p-val {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.monospace {
+  font-family: ui-monospace, monospace;
+}
+
+.truncate {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.primary-btn-sm, .ghost-btn-sm {
+  width: 100%;
+  height: 40px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.primary-btn-sm {
+  background: #10b981;
+  color: #fff;
+  border: 0;
+}
+
+.primary-btn-sm:hover { background: #059669; }
+
+.ghost-btn-sm {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.ghost-btn-sm:hover { border-color: #10b981; color: #10b981; }
+
+/* Empty state panel */
+.panel-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
-  padding: 0;
+  text-align: center;
+  gap: 20px;
 }
 
-.room-list-edit:hover {
-  border-color: #6366f1;
-  color: #6366f1;
-  background: #fff;
+.empty-icon {
+  color: var(--text-tertiary);
+  opacity: 0.4;
 }
 
-.room-list-delete:hover {
-  border-color: #ef4444;
-  color: #ef4444;
-  background: #fff;
+.panel-empty p {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  line-height: 1.6;
+  max-width: 220px;
 }
 </style>

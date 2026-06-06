@@ -90,12 +90,7 @@ export interface LLMUsageTotals {
 export interface UserDevice {
   id: number
   name: string
-  device_type: 'television' | 'stb' | 'speaker' | 'router' | 'outlet' | 'phone' | 'tv_box' | 'tablet' | 'computer' | 'other'
-  room_id: number | null
-  room_name: string | null
-  mi_did: string | null
-  adb_ip: string
-  ip_address: string
+  props: Record<string, unknown>
   created_at: string
   updated_at: string
 }
@@ -103,7 +98,7 @@ export interface UserDevice {
 export interface DeviceCardProjection {
   id: number
   name: string
-  device_type: UserDevice['device_type']
+  props: Record<string, unknown>
   room: {
     id: number | null
     name: string
@@ -156,6 +151,7 @@ export interface DeviceRuntimeManifest {
 export interface Room {
   id: number
   name: string
+  props: Record<string, unknown>
   created_at: string
   updated_at: string
 }
@@ -202,9 +198,9 @@ export const api = {
       return request<{ manifest: DeviceRuntimeManifest }>(`/api/user-devices/runtime-manifest${suffix}`)
     },
     get: (id: number) => request<{ device: UserDevice }>(`/api/user-devices/${id}`),
-    create: (body: { name: string; device_type?: string; room_id?: number | null; mi_did?: string | null; adb_ip?: string; ip_address?: string }) =>
+    create: (body: { name: string; props?: Record<string, unknown> }) =>
       request<{ status: string; data: { device: UserDevice } }>('/api/user-devices', { method: 'POST', body: JSON.stringify(body) }),
-    update: (id: number, body: { name?: string; device_type?: string; room_id?: number | null; mi_did?: string | null; adb_ip?: string; ip_address?: string }) =>
+    update: (id: number, body: { name?: string; props?: Record<string, unknown> }) =>
       request<{ status: string; data: { device: UserDevice } }>(`/api/user-devices/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
     delete: (id: number) => request<{ status: string }>(`/api/user-devices/${id}`, { method: 'DELETE' }),
     miCandidates: (options?: { refresh?: boolean }) =>
@@ -430,9 +426,9 @@ export const api = {
   rooms: {
     list: () => request<{ rooms: Room[] }>('/api/rooms'),
     get: (id: number) => request<{ room: Room }>(`/api/rooms/${id}`),
-    create: (body: { name: string }) =>
+    create: (body: { name: string; props?: Record<string, unknown> }) =>
       request<{ status: string; data: { room: Room } }>('/api/rooms', { method: 'POST', body: JSON.stringify(body) }),
-    update: (id: number, body: { name: string }) =>
+    update: (id: number, body: { name: string; props?: Record<string, unknown> }) =>
       request<{ status: string; data: { room: Room } }>(`/api/rooms/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
     delete: (id: number) => request<{ status: string }>(`/api/rooms/${id}`, { method: 'DELETE' }),
   },

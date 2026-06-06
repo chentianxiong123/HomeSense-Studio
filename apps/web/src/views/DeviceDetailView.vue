@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, type UserDevice } from '@/api'
+import { cliApi } from '@/api/cli'
 import { useLocale } from '@/composables/useLocale'
 import AppBrowserModal from '@/components/AppBrowserModal.vue'
 import { formatChinaTime } from '@/utils/chinaTime'
@@ -39,21 +40,67 @@ const execError = ref('')
 const textInputs = ref<Record<string, string>>({})
 const execHistory = ref<Array<{ capability: string; params: string; result: string; time: string }>>([])
 
-// IR remote keypad state
 const irKeys = ref<Array<{ key_id: string; name: string; type?: string }>>([])
 const irKeysLoading = ref(false)
 const irControllerName = ref('')
 const showAppBrowser = ref(false)
+const miNameMap = ref<Record<string, string>>({})
+
+function propString(d: UserDevice | null, key: string): string {
+  if (!d) return ''
+  const v = d.props?.[key]
+  return typeof v === 'string' ? v : ''
+}
+function propNumber(d: UserDevice | null, key: string): number | null {
+  if (!d) return null
+  const v = d.props?.[key]
+  if (typeof v === 'number') return v
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
+async function persistCapabilities(newCaps: unknown[]): Promise<void> {
+  if (!device.value) return
+  const newProps = { ...device.value.props, capabilities: newCaps }
+  try {
+    await api.userDevices.update(device.value.id, { props: newProps })
+    device.value = { ...device.value, props: newProps }
+  } catch (e) {
+    console.error('Failed to persist capabilities snapshot', e)
+  }
+}
+
+function miDidOf(d: UserDevice | null): string {
+  return propString(d, 'mi_did')
+}
+function adbIpOf(d: UserDevice | null): string {
+  return propString(d, 'adb_ip')
+}
+function deviceTypeOf(d: UserDevice | null): string {
+  return propString(d, 'device_type') || 'other'
+}
+function miNameFor(did: string): string {
+  if (!did) return ''
+  return miNameMap.value[did] || did
+}
 
 onMounted(async () => {
   loading.value = true
   try {
     const result = await api.userDevices.get(deviceId)
     device.value = result.device ?? null
-    if (device.value?.mi_did || device.value?.adb_ip) {
-      await loadCapabilities()
-    }
+    const snapshot = Array.isArray(device.value?.props?.capabilities)
+      ? (device.value!.props.capabilities as DeviceCapability[])
+      : []
+    capabilities.value = snapshot
     loadHistory()
+    void ensureMiNames()
+    if (miDidOf(device.value) || adbIpOf(device.value)) {
+      void refreshCapabilities()
+    }
   } catch (e) {
     errorMessage.value = (e as Error).message || String(e)
   } finally {
@@ -61,25 +108,53 @@ onMounted(async () => {
   }
 })
 
-async function loadCapabilities(refresh = false) {
-  if (!device.value?.mi_did && !device.value?.adb_ip) return
-  capsLoading.value = true
-  capsError.value = ''
+async function ensureMiNames(): Promise<void> {
+  if (Object.keys(miNameMap.value).length > 0) return
   try {
-    const result = await api.userDevices.capabilities(deviceId, refresh)
-    if (result.status === 'success' && result.data) {
-      capabilities.value = result.data.capabilities ?? []
-    } else {
-      capsError.value = result.message || result.error || 'Failed to load capabilities'
+    const r = await cliApi.run<{ summary: Array<{ did: string; name?: string; model?: string }> }>('mi-cli', {
+      action: 'discover',
+      params: { summary_only: true },
+      ttl_ms: 60_000,
+    })
+    if (r.status === 'success' && r.data?.summary) {
+      const next: Record<string, string> = {}
+      for (const d of r.data.summary) {
+        if (d.did) next[d.did] = d.name || d.model || d.did
+      }
+      miNameMap.value = next
     }
-  } catch (e) {
-    capsError.value = (e as Error).message || String(e)
-  } finally {
-    capsLoading.value = false
-  }
+  } catch {}
 }
 
-// IR keys loaded on demand only
+async function refreshCapabilities(): Promise<void> {
+  if (!device.value) return
+  const collected: DeviceCapability[] = []
+  const miDid = miDidOf(device.value)
+  if (miDid) {
+    const resp = await cliApi.run<{ capabilities: DeviceCapability[] }>('mi-cli', {
+      action: 'device_capabilities',
+      params: { did: miDid },
+      ttl_ms: 60_000,
+    })
+    if (resp.status === 'success' && resp.data?.capabilities) {
+      for (const c of resp.data.capabilities) collected.push({ ...c, source: 'mi' })
+    }
+  }
+  const adbIp = adbIpOf(device.value)
+  if (adbIp) {
+    const resp = await cliApi.run<{ capabilities: DeviceCapability[] }>('adb-cli', {
+      action: 'capabilities',
+      params: { device_type: deviceTypeOf(device.value) },
+      ttl_ms: 60_000,
+    })
+    if (resp.status === 'success' && resp.data?.capabilities) {
+      for (const c of resp.data.capabilities) collected.push(c)
+    }
+  }
+  if (collected.length === 0) return
+  capabilities.value = collected
+  await persistCapabilities(collected)
+}
 
 async function loadHistory() {
   try {
@@ -93,21 +168,30 @@ async function loadHistory() {
       })).reverse()
     }
   } catch {
-    // silent — history is not critical
+    // silent
   }
 }
 
 async function loadIrKeys() {
   irKeysLoading.value = true
   try {
-    const result = await api.userDevices.irKeys(deviceId)
-    if (result.status === 'success' && result.data) {
-      irKeys.value = (result.data.keys ?? []).map((k: { key_id: string | number; name: string; type?: string }) => ({
+    const miDid = miDidOf(device.value)
+    if (!miDid) {
+      irKeys.value = []
+      return
+    }
+    const resp = await cliApi.run<{ keys: Array<{ key_id: string | number; name: string; type?: string }>; name: string }>('mi-cli', {
+      action: 'device_ir_keys',
+      params: { did: miDid },
+      ttl_ms: 60_000,
+    })
+    if (resp.status === 'success' && resp.data) {
+      irKeys.value = (resp.data.keys ?? []).map((k) => ({
         key_id: String(k.key_id),
         name: k.name,
         type: k.type,
       }))
-      irControllerName.value = result.data.name
+      irControllerName.value = resp.data.name
     } else {
       irKeys.value = []
     }
@@ -124,11 +208,18 @@ async function executeIrKey(keyId: string) {
   execResult.value = ''
   execError.value = ''
   try {
-    const result = await api.userDevices.irPress(deviceId, keyId)
-    if (result.status === 'success') {
+    const miDid = miDidOf(device.value)
+    const resp = await cliApi.run('mi-cli', {
+      action: 'device_ir_press',
+      params: { did: miDid, key_id: keyId },
+      ttl_ms: 0,
+      bypass_cache: true,
+    })
+    if (resp.status === 'success') {
       execResult.value = label('按键已发送', 'Key sent')
+      logUsage('mi', 'ir_press', keyId, 'ok')
     } else {
-      execError.value = result.message || result.error || label('发送失败', 'Failed')
+      execError.value = resp.message || resp.error || label('发送失败', 'Failed')
     }
   } catch (e) {
     execError.value = (e as Error).message || String(e)
@@ -140,7 +231,6 @@ async function executeIrKey(keyId: string) {
 async function executeCapability(cap: DeviceCapability) {
   if (executingCap.value) return
   const params = textInputs.value[cap.name]
-  // 播放音乐: optional params — empty click = generic play, text input = play text
   if (cap.type === 'string' && !params && cap.name !== '播放音乐' && cap.name !== 'Play Music') {
     execError.value = label('请输入文本', 'Please enter text')
     return
@@ -149,17 +239,25 @@ async function executeCapability(cap: DeviceCapability) {
   execResult.value = ''
   execError.value = ''
   try {
-    const result = await api.userDevices.executeCapability(deviceId, {
-      capability: cap.name,
-      ...(cap.capability_id ? { capability_id: cap.capability_id } : {}),
-      ...(params !== undefined ? { params } : {}),
-      arguments: buildCapabilityArguments(cap, params),
+    const source = cap.source ?? 'mi'
+    const cli = source === 'adb' ? 'adb-cli' : 'mi-cli'
+    const action = resolveAdbAction(cap) ?? resolveMiAction(cap) ?? ''
+    if (!action) {
+      execError.value = label('无法识别的能力', 'Unrecognized capability')
+      return
+    }
+    const cliParams = buildCliParams(cap, params)
+    const resp = await cliApi.run(cli, {
+      action,
+      params: cliParams,
+      ttl_ms: 0,
+      bypass_cache: true,
     })
-    if (result.status === 'success') {
+    if (resp.status === 'success') {
       execResult.value = label('已发送: ', 'Sent: ') + cap.name
       textInputs.value[cap.name] = ''
     } else {
-      execError.value = result.message || result.error || label('执行失败', 'Execution failed')
+      execError.value = resp.message || resp.error || label('执行失败', 'Execution failed')
     }
     loadHistory()
   } catch (e) {
@@ -170,10 +268,22 @@ async function executeCapability(cap: DeviceCapability) {
   }
 }
 
-function buildCapabilityArguments(cap: DeviceCapability, rawValue?: string): Record<string, unknown> {
+function resolveAdbAction(cap: DeviceCapability): string | null {
+  return typeof cap.capability_id === 'string' && cap.capability_id.startsWith('adb.')
+    ? cap.capability_id.slice(4)
+    : null
+}
+
+function resolveMiAction(cap: DeviceCapability): string | null {
+  if (typeof cap.capability_id === 'string' && cap.capability_id.startsWith('mi.')) {
+    return cap.capability_id.slice(3)
+  }
+  return null
+}
+
+function buildCliParams(cap: DeviceCapability, rawValue?: string): Record<string, unknown> {
   const text = rawValue?.trim()
   if (!text) return {}
-
   const properties = readSchemaProperties(cap.input_schema)
   if (properties.package) return { package: text }
   if (properties.index || (properties.index && properties.text)) {
@@ -202,6 +312,14 @@ function buildCapabilityArguments(cap: DeviceCapability, rawValue?: string): Rec
   if (properties.value) return { value: coerceCapabilityValue(text) }
   if (cap.capability_id === 'mi.ir_key' || cap.name === '遥控按键') return { key_id: text }
   return { value: coerceCapabilityValue(text) }
+}
+
+function logUsage(source: string, capability: string, params: string, status: string): void {
+  fetch('/api/command/usage', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ device_id: deviceId, source, capability, params, status }),
+  }).catch(() => {})
 }
 
 function readSchemaProperties(schema: Record<string, unknown> | undefined): Record<string, unknown> {
@@ -242,8 +360,8 @@ function typeLabel(t: string) {
 
 function sourceTags(d: UserDevice): string[] {
   const tags: string[] = []
-  if (d.mi_did) tags.push('Mi')
-  if (d.adb_ip) tags.push('ADB')
+  if (propString(d, 'mi_did')) tags.push('Mi')
+  if (propString(d, 'adb_ip')) tags.push('ADB')
   return tags
 }
 </script>
@@ -258,17 +376,16 @@ function sourceTags(d: UserDevice): string[] {
 
       <div v-if="!loading && device" class="head-content">
         <div class="head-top">
-          <span class="eyebrow">{{ typeLabel(device.device_type) }}</span>
+          <span class="eyebrow">{{ typeLabel(propString(device, 'device_type') || 'other') }}</span>
           <h1>{{ device.name }}</h1>
           <div class="source-tags">
             <span v-for="tag in sourceTags(device)" :key="tag" class="source-tag" :class="tag === 'ADB' ? 'tag-adb' : 'tag-mi'">{{ tag }}</span>
           </div>
         </div>
         <div class="head-meta">
-          <span v-if="device.room_name" class="meta-chip">{{ device.room_name }}</span>
-          <span v-if="device.mi_did" class="meta-chip monospace">Mi: {{ device.mi_did }}</span>
-          <span v-if="device.adb_ip" class="meta-chip monospace">ADB: {{ device.adb_ip }}</span>
-          <span v-if="device.ip_address" class="meta-chip monospace">IP: {{ device.ip_address }}</span>
+          <span v-if="propString(device, 'mi_did')" class="meta-chip monospace">Mi: {{ miNameFor(propString(device, 'mi_did')) }}</span>
+          <span v-if="propString(device, 'adb_ip')" class="meta-chip monospace">ADB: {{ propString(device, 'adb_ip') }}</span>
+          <span v-if="propString(device, 'ip_address')" class="meta-chip monospace">IP: {{ propString(device, 'ip_address') }}</span>
         </div>
       </div>
     </header>
@@ -277,24 +394,21 @@ function sourceTags(d: UserDevice): string[] {
       {{ errorMessage }}
     </div>
 
-    <!-- Loading -->
     <div v-if="loading" class="empty-state">{{ label('加载中…', 'Loading…') }}</div>
 
-    <!-- Not found -->
     <div v-else-if="!device" class="empty-state">{{ label('设备不存在', 'Device not found') }}</div>
 
     <template v-else>
-      <!-- Capabilities section -->
       <section class="capabilities-section glass-panel">
         <div class="section-head">
           <h2>{{ label('设备能力', 'Capabilities') }}</h2>
-          <button v-if="device.mi_did || device.adb_ip" class="refresh-caps-btn" :disabled="capsLoading" @click="loadCapabilities(true)">
+          <button v-if="propString(device, 'mi_did') || propString(device, 'adb_ip')" class="refresh-caps-btn" :disabled="capsLoading" @click="loadCapabilities(true)">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
             {{ label('刷新', 'Refresh') }}
           </button>
         </div>
 
-        <div v-if="!device.mi_did && !device.adb_ip" class="no-mi">
+        <div v-if="!propString(device, 'mi_did') && !propString(device, 'adb_ip')" class="no-mi">
           {{ label('该设备未绑定 Mi 或 ADB 能力来源，无法获取能力列表。', 'This device has no Mi or ADB capability binding, capabilities are unavailable.') }}
         </div>
 
@@ -309,11 +423,9 @@ function sourceTags(d: UserDevice): string[] {
         </div>
 
         <div v-else class="caps-grid">
-          <!-- Feedback toast -->
           <div v-if="execResult" class="exec-feedback exec-success">{{ execResult }}</div>
           <div v-if="execError" class="exec-feedback exec-error">{{ execError }}</div>
 
-          <!-- IR Remote Keypad (stb/television) -->
           <div v-if="isIrDevice" class="cap-group">
             <h3 class="cap-group-title">{{ label('遥控按键', 'Remote Keys') }} · {{ irKeys.length }}</h3>
             <div v-if="irKeysLoading" class="caps-loading">{{ label('加载按键…', 'Loading keys…') }}</div>
@@ -331,7 +443,6 @@ function sourceTags(d: UserDevice): string[] {
             </div>
           </div>
 
-          <!-- App Browser (ADB only) -->
           <div v-if="isAdbDevice" class="cap-group">
             <h3 class="cap-group-title">{{ label('应用', 'Apps') }}</h3>
             <button class="app-browser-btn" @click="showAppBrowser = true">
@@ -340,7 +451,6 @@ function sourceTags(d: UserDevice): string[] {
             </button>
           </div>
 
-          <!-- MI Actions -->
           <div v-if="miActionCaps.length > 0" class="cap-group">
             <h3 class="cap-group-title">Mi · {{ miActionCaps.length }}</h3>
             <div class="cap-cards">
@@ -371,7 +481,6 @@ function sourceTags(d: UserDevice): string[] {
             </div>
           </div>
 
-          <!-- MI Properties -->
           <div v-if="miPropertyCaps.length > 0" class="cap-group">
             <h3 class="cap-group-title">Mi · {{ miPropertyCaps.length }}</h3>
             <div class="cap-cards">
@@ -387,7 +496,6 @@ function sourceTags(d: UserDevice): string[] {
             </div>
           </div>
 
-          <!-- ADB Actions -->
           <div v-if="adbCaps.length > 0" class="cap-group">
             <h3 class="cap-group-title">ADB · {{ adbCaps.length }}</h3>
             <div class="cap-cards">
@@ -418,7 +526,6 @@ function sourceTags(d: UserDevice): string[] {
             </div>
           </div>
 
-          <!-- Execution History -->
           <div v-if="execHistory.length > 0" class="cap-group">
             <h3 class="cap-group-title">{{ label('执行历史', 'History') }} · {{ execHistory.length }}</h3>
             <div class="exec-history">
@@ -437,8 +544,7 @@ function sourceTags(d: UserDevice): string[] {
         </div>
       </section>
 
-      <!-- App Browser Modal -->
-      <AppBrowserModal v-if="showAppBrowser" :device-id="deviceId" @close="showAppBrowser = false" />
+      <AppBrowserModal v-if="showAppBrowser" :device-id="deviceId" :adb-ip="propString(device, 'adb_ip')" @close="showAppBrowser = false" />
     </template>
   </div>
 </template>
@@ -586,7 +692,6 @@ h1 {
   opacity: 0.4;
 }
 
-/* ── Capabilities section ── */
 .capabilities-section {
   padding: 36px 44px;
 }
@@ -646,7 +751,6 @@ h1 {
   opacity: 0.4;
 }
 
-/* ── Capability groups ── */
 .caps-grid {
   display: flex;
   flex-direction: column;
@@ -754,7 +858,6 @@ h1 {
   opacity: 0.6;
 }
 
-/* ── IR Remote Keypad ── */
 .ir-keypad {
   display: flex;
   flex-wrap: wrap;
@@ -791,7 +894,6 @@ h1 {
   cursor: not-allowed;
 }
 
-/* ── App Browser button ── */
 .app-browser-btn {
   display: inline-flex;
   align-items: center;
@@ -839,7 +941,6 @@ h1 {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* ── Text input for string capabilities ── */
 .cap-card-wrapper {
   display: flex;
   flex-direction: column;
@@ -902,7 +1003,6 @@ h1 {
   cursor: not-allowed;
 }
 
-/* ── Execution History ── */
 .exec-history {
   display: flex;
   flex-direction: column;
@@ -916,7 +1016,7 @@ h1 {
   border-radius: 12px;
   border: 1px solid rgba(229, 231, 235, 0.5);
   background: rgba(255, 255, 255, 0.5);
-  transition: all 0.2s;
+  transition: background 0.2s;
 }
 
 .history-item:hover {

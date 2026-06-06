@@ -73,12 +73,12 @@ const qrLink = computed(() =>
   getString(authData.value?.qr?.lp_url) ||
   getString(authDataRecord.value?.status_url),
 )
-const miBoundCount = computed(() => devices.value.filter((device) => device.mi_did).length)
-const adbBoundCount = computed(() => devices.value.filter((device) => device.adb_ip?.trim()).length)
+const miBoundCount = computed(() => devices.value.filter((device) => typeof device.props?.mi_did === 'string' && device.props.mi_did).length)
+const adbBoundCount = computed(() => devices.value.filter((device) => typeof device.props?.adb_ip === 'string' && (device.props.adb_ip as string).trim()).length)
 
 const adbRows = computed(() => {
   return [...devices.value]
-    .filter((device) => device.adb_ip?.trim())
+    .filter((device) => typeof device.props?.adb_ip === 'string' && (device.props.adb_ip as string).trim())
     .sort((left, right) => left.name.localeCompare(right.name, isZh.value ? 'zh-Hans-CN' : 'en'))
     .map((device) => ({ device }))
 })
@@ -197,7 +197,7 @@ async function openCreateAdbDevice() {
 function openEditAdbDevice(device: UserDevice) {
   editingAdbDevice.value = device
   formName.value = device.name
-  formAdbAddress.value = device.adb_ip
+  formAdbAddress.value = (device.props?.adb_ip as string) ?? ''
   adbFormOpen.value = true
 }
 
@@ -213,12 +213,16 @@ async function submitAdbDevice() {
   const adbAddress = normalizeAdbAddress(formAdbAddress.value)
   if (!adbAddress) return
   const ipAddress = endpointHost(adbAddress)
-  const payload = {
+  const payload: { name: string; props: Record<string, unknown> } = {
     name,
-    device_type: editingAdbDevice.value?.device_type ?? 'other',
-    room_id: editingAdbDevice.value?.room_id ?? null,
-    adb_ip: adbAddress,
-    ip_address: ipAddress || editingAdbDevice.value?.ip_address || '',
+    props: {
+      device_type: editingAdbDevice.value?.props?.device_type ?? 'other',
+      adb_ip: adbAddress,
+      ...(ipAddress ? { ip_address: ipAddress } : {}),
+    },
+  }
+  if (editingAdbDevice.value?.props?.room_id != null) {
+    payload.props.room_id = editingAdbDevice.value.props.room_id
   }
 
   const key = editingAdbDevice.value ? `adb-edit-${editingAdbDevice.value.id}` : 'adb-create'
@@ -559,7 +563,7 @@ function endpointHost(value: string): string {
             </div>
 
             <div class="endpoint-cell">
-              <code>{{ row.device.adb_ip }}</code>
+              <code>{{ row.device.props?.adb_ip }}</code>
             </div>
 
             <div class="row-actions">
