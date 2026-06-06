@@ -35,8 +35,8 @@ let pingTimer: ReturnType<typeof setInterval> | null = null
 
 // 2D Layout State
 const selectedDeviceId = ref<number | null>(null)
-const canvasWidth = 800
-const canvasHeight = 600
+const canvasWidth = 1000
+const canvasHeight = 700
 const zoomedRoomId = ref<number | null>(null)
 
 const selectedDevice = computed(() =>
@@ -99,8 +99,8 @@ async function loadData() {
         r.props = {
           x: Math.floor(Math.random() * 400) + 50,
           y: Math.floor(Math.random() * 300) + 50,
-          w: 240,
-          h: 180,
+          w: 260,
+          h: 200,
         }
         await api.rooms.update(r.id, { props: r.props })
         changed = true
@@ -149,7 +149,7 @@ function onDragRoom(event: PointerEvent) {
   const room = rooms.value.find((r) => r.id === draggingRoomId.value)
   if (!room) return
   const props = room.props as any
-  props.x = Math.max(0, Math.min(canvasWidth - (props.w ?? 200), event.clientX - dragOffsetX.value))
+  props.x = Math.max(0, Math.min(canvasWidth - (props.w ?? 260), event.clientX - dragOffsetX.value))
   props.y = Math.max(0, Math.min(canvasHeight - (props.h ?? 200), event.clientY - dragOffsetY.value))
 }
 
@@ -187,10 +187,10 @@ function onDragDevice(event: PointerEvent) {
   const props = device.props as any
   const roomId = propNumber(device, 'room_id')
   const room = rooms.value.find((r) => r.id === roomId)
-  const roomW = (room?.props as any)?.w ?? 240
-  const roomH = (room?.props as any)?.h ?? 180
-  props.x = Math.max(10, Math.min(roomW - 54, event.clientX - dragDevOffsetX.value))
-  props.y = Math.max(10, Math.min(roomH - 54, event.clientY - dragDevOffsetY.value))
+  const roomW = zoomedRoomId.value === roomId ? canvasWidth - 40 : ((room?.props as any)?.w ?? 260)
+  const roomH = zoomedRoomId.value === roomId ? canvasHeight - 120 : ((room?.props as any)?.h ?? 200)
+  props.x = Math.max(20, Math.min(roomW - 140, event.clientX - dragDevOffsetX.value))
+  props.y = Math.max(20, Math.min(roomH - 140, event.clientY - dragDevOffsetY.value))
 }
 
 async function stopDragDevice() {
@@ -353,10 +353,10 @@ function getRoomConnections(roomId: number) {
       const x2 = (p.props?.x as number) ?? 40
       const y2 = (p.props?.y as number) ?? 40
       lines.push({
-        x1: x1 + 22, // Center of 44px node
-        y1: y1 + 22,
-        x2: x2 + 22,
-        y2: y2 + 22,
+        x1: x1 + 24, // Center of 48px node
+        y1: y1 + 24,
+        x2: x2 + 24,
+        y2: y2 + 24,
         id: key,
       })
     }
@@ -367,11 +367,14 @@ function getRoomConnections(roomId: number) {
 
 <template>
   <div class="devices-page-2d">
-    <!-- Left interactive floor plan canvas -->
-    <main class="canvas-area glass-panel">
+    <!-- Left interactive floor plan canvas (Takes Full Width) -->
+    <main class="canvas-area glass-panel" :class="{ 'room-focused': zoomedRoomId !== null }">
       <header class="canvas-head">
         <h2>{{ label('数字孪生 · 2D 房型布局', 'Digital Twin Canvas') }}</h2>
-        <span class="hint-pill">{{ label('按住房间卡片或设备图标自由拖动摆放', 'Drag rooms & devices to place') }}</span>
+        <span class="hint-pill" v-if="zoomedRoomId === null">{{ label('双击房间卡片放大进入「房间特写视图」，进行详细管理', 'Dblclick room to focus, drag rooms & devices to place') }}</span>
+        <button class="focus-back-btn" v-else @click="zoomedRoomId = null">
+          {{ label('← 返回全局户型图', '← Back to Global View') }}
+        </button>
       </header>
 
       <div class="twin-viewport" :style="{ width: canvasWidth + 'px', height: canvasHeight + 'px' }">
@@ -381,11 +384,11 @@ function getRoomConnections(roomId: number) {
           :key="room.id"
           class="room-card"
           :class="{ 'zoomed-in': zoomedRoomId === room.id, 'zoomed-out': zoomedRoomId !== null && zoomedRoomId !== room.id }"
-          :style="zoomedRoomId === room.id ? {} : {
+          :style="zoomedRoomId === room.id ? { width: (canvasWidth - 40) + 'px', height: (canvasHeight - 120) + 'px' } : {
             left: (room.props.x || 0) + 'px',
             top: (room.props.y || 0) + 'px',
-            width: (room.props.w || 240) + 'px',
-            height: (room.props.h || 180) + 'px',
+            width: (room.props.w || 260) + 'px',
+            height: (room.props.h || 200) + 'px',
           }"
           @pointerdown="zoomedRoomId === room.id ? null : startDragRoom($event, room)"
           @dblclick="handleRoomDblClick(room)"
@@ -418,6 +421,7 @@ function getRoomConnections(roomId: number) {
               online: onlineStatus[dev.id] === true,
               offline: onlineStatus[dev.id] === false,
               'in-group': dev.props?.group_id,
+              'zoomed-mode': zoomedRoomId === room.id
             }"
             :style="{
               left: (dev.props.x ?? 40) + 'px',
@@ -427,136 +431,43 @@ function getRoomConnections(roomId: number) {
             @click.stop="selectDevice(dev)"
             @dblclick.stop="router.push(`/devices/${dev.id}`)"
           >
-            <div class="node-icon" :class="`icon-${deviceIcon(propString(dev, 'device_type'))}`">
+            <!-- Normal Mode Icon -->
+            <div v-if="zoomedRoomId !== room.id" class="node-icon" :class="`icon-${deviceIcon(propString(dev, 'device_type'))}`">
               <svg v-if="deviceIcon(propString(dev, 'device_type')) === 'tv'" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
               <svg v-else-if="deviceIcon(propString(dev, 'device_type')) === 'speaker'" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="4" y="2" width="16" height="20" rx="3"></rect><circle cx="12" cy="14" r="3"></circle><line x1="12" y1="7" x2="12" y2="9"></line></svg>
               <svg v-else-if="deviceIcon(propString(dev, 'device_type')) === 'phone'" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="5" y="2" width="14" height="20" rx="3"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>
               <svg v-else viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
             </div>
-            <span class="node-name">{{ dev.name }}</span>
-            <span v-if="dev.props?.group_id" class="node-group-badge">⛓</span>
+
+            <!-- ZOOMED MODE: High fidelity Detail Card directly inside Room! -->
+            <div v-else class="detailed-card-inside">
+              <div class="detailed-head">
+                <span class="d-dot" :class="onlineStatus[dev.id] ? 'online' : 'offline'"></span>
+                <strong class="d-title">{{ dev.name }}</strong>
+              </div>
+              <p class="d-type">{{ typeLabel(propString(dev, 'device_type') || 'other') }}</p>
+              <div class="d-props monospace" v-if="propString(dev, 'ip_address') || propString(dev, 'adb_ip')">
+                <span>{{ propString(dev, 'ip_address') || propString(dev, 'adb_ip').split(':')[0] }}</span>
+              </div>
+              <div class="d-group-indicator" v-if="dev.props?.group_id">
+                <span>⛓ {{ dev.props.group_name }}</span>
+              </div>
+              <div class="d-click-hint">{{ label('双击配置', 'Double-click') }}</div>
+            </div>
+
+            <span v-if="zoomedRoomId !== room.id" class="node-name">{{ dev.name }}</span>
+            <span v-if="dev.props?.group_id && zoomedRoomId !== room.id" class="node-group-badge">⛓</span>
           </div>
         </div>
       </div>
     </main>
-
-    <!-- Right Summary / Detail Panel -->
-    <aside class="control-panel glass-panel">
-      <!-- Group Details View -->
-      <template v-if="selectedDevice && selectedDevice.props?.group_id">
-        <header class="panel-head">
-          <span class="meta-label">⛓ {{ selectedDevice.props.group_name }}</span>
-          <h2>{{ selectedDevice.name }}</h2>
-          <span class="status-indicator" :class="onlineStatus[selectedDevice.id] ? 'status-online' : 'status-offline'">
-            {{ onlineStatus[selectedDevice.id] ? label('在线', 'Online') : label('离线', 'Offline') }}
-          </span>
-        </header>
-
-        <section class="panel-body">
-          <div class="props-list">
-            <!-- Renders all devices inside this group as high-fidelity cards -->
-            <div class="group-member-card-list">
-              <span class="p-key">{{ label('组内关联设备', 'Grouped Devices') }}</span>
-              <div
-                v-for="d in devices.filter(x => x.props?.group_id === selectedDevice!.props.group_id)"
-                :key="d.id"
-                class="member-micro-card"
-                @click="selectDevice(d)"
-                :class="{ active: d.id === selectedDevice.id }"
-              >
-                <div class="member-head">
-                  <span class="m-dot" :class="onlineStatus[d.id] ? 'online' : 'offline'"></span>
-                  <strong>{{ d.name }}</strong>
-                </div>
-                <small class="m-sub">{{ typeLabel(propString(d, 'device_type') || 'other') }}</small>
-              </div>
-            </div>
-
-            <!-- Simple actions -->
-            <button class="disband-btn-heavy" @click="disbandGroup">
-              {{ label('解除当前组合', 'Disband Group') }}
-            </button>
-          </div>
-
-          <div class="actions">
-            <button class="primary-btn-sm" @click="router.push(`/devices/${selectedDevice.id}`)">
-              {{ label('控制与详情', 'Manage & Control') }}
-            </button>
-            <button class="ghost-btn-sm" @click="selectedDeviceId = null">
-              {{ label('取消选中', 'Deselect') }}
-            </button>
-          </div>
-        </section>
-      </template>
-
-      <!-- Single Device View -->
-      <template v-else-if="selectedDevice">
-        <header class="panel-head">
-          <span class="meta-label">{{ typeLabel(propString(selectedDevice, 'device_type') || 'other') }}</span>
-          <h2>{{ selectedDevice.name }}</h2>
-          <span class="status-indicator" :class="onlineStatus[selectedDevice.id] ? 'status-online' : 'status-offline'">
-            {{ onlineStatus[selectedDevice.id] ? label('在线', 'Online') : label('离线', 'Offline') }}
-          </span>
-        </header>
-
-        <section class="panel-body">
-          <div class="props-list">
-            <div v-if="propString(selectedDevice, 'mi_did')" class="prop-item">
-              <span class="p-key">Mi Device</span>
-              <strong class="p-val truncate">{{ miNameFor(propString(selectedDevice, 'mi_did')) }}</strong>
-            </div>
-            <div v-if="propString(selectedDevice, 'adb_ip')" class="prop-item">
-              <span class="p-key">ADB IP</span>
-              <strong class="p-val monospace">{{ propString(selectedDevice, 'adb_ip') }}</strong>
-            </div>
-            <div v-if="propString(selectedDevice, 'ip_address')" class="prop-item">
-              <span class="p-key">Local IP</span>
-              <strong class="p-val monospace">{{ propString(selectedDevice, 'ip_address') }}</strong>
-            </div>
-
-            <!-- Group Management Block -->
-            <div class="prop-item group-block" v-if="groupCandidates.length > 0">
-              <span class="p-key">{{ label('创建设备组', 'Create Group') }}</span>
-              <div class="group-bind-row">
-                <select v-model="groupingWithId" class="group-select">
-                  <option :value="null">{{ label('选择房间内同伴...', 'Select partner...') }}</option>
-                  <option v-for="c in groupCandidates" :key="c.id" :value="c.id">{{ c.name }}</option>
-                </select>
-                <button class="bind-btn-sm" :disabled="!groupingWithId" @click="bindGroupPartner">⛓</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="actions">
-            <button class="primary-btn-sm" @click="router.push(`/devices/${selectedDevice.id}`)">
-              {{ label('控制与详情', 'Manage & Control') }}
-            </button>
-            <button class="ghost-btn-sm" @click="selectedDeviceId = null">
-              {{ label('取消选中', 'Deselect') }}
-            </button>
-          </div>
-        </section>
-      </template>
-
-      <template v-else>
-        <div class="panel-empty">
-          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="empty-icon"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
-          <p>{{ label('在左侧点击设备查看控制和能力，双击进入控制详情页', 'Select a device node on the left twin canvas, dblclick to manage') }}</p>
-          <button class="ghost-btn-sm" @click="router.push('/authorizations')">
-            {{ label('进入授权中心', 'Unified Auth') }}
-          </button>
-        </div>
-      </template>
-    </aside>
   </div>
 </template>
 
 <style scoped>
 .devices-page-2d {
   height: 100%;
-  display: grid;
-  grid-template-columns: 1fr 340px;
-  gap: 24px;
+  display: flex;
   padding: 32px;
   background: #f7f9fa;
   overflow: hidden;
@@ -578,14 +489,18 @@ function getRoomConnections(roomId: number) {
   padding: 32px;
   overflow: hidden;
   position: relative;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .canvas-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 24px;
 }
 
 .canvas-head h2 {
-  margin: 0 0 8px;
+  margin: 0;
   font-size: 24px;
   font-weight: 900;
   color: var(--text-primary);
@@ -602,6 +517,23 @@ function getRoomConnections(roomId: number) {
   border-radius: 8px;
 }
 
+.focus-back-btn {
+  padding: 8px 18px;
+  background: #10b981;
+  color: #fff;
+  border: 0;
+  border-radius: 10px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.25);
+  transition: all 0.2s;
+}
+
+.focus-back-btn:hover {
+  background: #059669;
+  transform: translateY(-1px);
+}
+
 /* 2D Viewport constraints */
 .twin-viewport {
   flex: 1;
@@ -611,6 +543,7 @@ function getRoomConnections(roomId: number) {
   border-radius: 24px;
   position: relative;
   overflow: hidden;
+  margin: 0 auto;
 }
 
 /* Draggable Rooms cards */
@@ -636,19 +569,18 @@ function getRoomConnections(roomId: number) {
 
 .room-card.zoomed-in {
   position: absolute !important;
-  left: 10px !important;
-  top: 10px !important;
-  width: calc(100% - 20px) !important;
-  height: calc(100% - 20px) !important;
+  left: 20px !important;
+  top: 20px !important;
   z-index: 100;
-  background: rgba(255, 255, 255, 0.9) !important;
+  background: rgba(255, 255, 255, 0.85) !important;
   border-color: #10b981 !important;
   cursor: default !important;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.15) !important;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.1) !important;
+  padding: 24px;
 }
 
 .room-card.zoomed-out {
-  opacity: 0.15;
+  opacity: 0.05;
   pointer-events: none;
 }
 
@@ -662,7 +594,7 @@ function getRoomConnections(roomId: number) {
 }
 
 .connection-line {
-  stroke: rgba(99, 102, 241, 0.4);
+  stroke: rgba(99, 102, 241, 0.35);
   stroke-width: 2.5;
   stroke-dasharray: 6, 4;
   animation: group-flow 2s linear infinite;
@@ -697,9 +629,9 @@ function getRoomConnections(roomId: number) {
 /* Draggable inside room device nodes */
 .device-node {
   position: absolute;
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
   background: #fff;
   border: 1px solid rgba(0, 0, 0, 0.08);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
@@ -708,6 +640,7 @@ function getRoomConnections(roomId: number) {
   justify-content: center;
   cursor: grab;
   touch-action: none;
+  transition: width 0.3s, height 0.3s, border-radius 0.3s, box-shadow 0.3s;
 }
 
 .device-node:active {
@@ -775,312 +708,105 @@ function getRoomConnections(roomId: number) {
   pointer-events: none;
 }
 
-/* Right Control Panel */
-.control-panel {
-  padding: 32px;
-  justify-content: space-between;
+/* ZOOMED HIGH-FIDELITY MODE */
+.device-node.zoomed-mode {
+  width: 154px !important;
+  height: 114px !important;
+  border-radius: 18px !important;
+  background: #fff !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04) !important;
+  border: 1px solid rgba(0,0,0,0.06) !important;
+  cursor: grab;
 }
 
-.panel-head {
+.device-node.zoomed-mode.active {
+  border-color: #10b981 !important;
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15) !important;
+}
+
+.detailed-card-inside {
+  width: 100%;
+  height: 100%;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  align-items: flex-start;
+  justify-content: space-between;
+  box-sizing: border-box;
+  pointer-events: none;
+  text-align: left;
 }
 
-.meta-label {
-  font-size: 12px;
-  font-weight: 900;
-  color: #10b981;
-  text-transform: uppercase;
-  background: rgba(16, 185, 129, 0.08);
-  padding: 4px 10px;
-  border-radius: 6px;
-}
-
-.panel-head h2 {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 900;
-  letter-spacing: -0.04em;
-}
-
-.status-indicator {
-  font-size: 13px;
-  font-weight: 800;
+.detailed-head {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.status-indicator::before {
-  content: '';
-  width: 8px;
-  height: 8px;
+.d-dot {
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
+  flex-shrink: 0;
 }
+.d-dot.online { background: #10b981; }
+.d-dot.offline { background: #ef4444; }
 
-.status-online { color: #10b981; }
-.status-online::before { background: #10b981; }
-.status-offline { color: #ef4444; }
-.status-offline::before { background: #ef4444; }
-
-.panel-body {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  margin-top: 32px;
-}
-
-.props-list {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.prop-item {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.03);
-  padding-bottom: 12px;
-}
-
-.p-key {
-  font-size: 12px;
-  font-weight: 800;
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-}
-
-.p-val {
-  font-size: 15px;
-  font-weight: 700;
+.d-title {
+  font-size: 13px;
+  font-weight: 900;
   color: var(--text-primary);
-}
-
-.monospace {
-  font-family: ui-monospace, monospace;
-}
-
-.truncate {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* Grouping panel css */
-.group-block {
-  border-bottom: none;
-  padding-bottom: 0;
-}
-
-.group-info {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  background: rgba(99, 102, 241, 0.05);
-  border: 1px dashed rgba(99, 102, 241, 0.2);
-  padding: 12px;
-  border-radius: 12px;
-  margin-top: 4px;
-}
-
-.group-tag {
-  color: #6366f1;
-  font-size: 14px;
-}
-
-.group-partner-names {
-  font-size: 12px;
-  color: var(--text-tertiary);
-  margin: 0;
-  font-weight: 600;
-}
-
-.disband-btn-heavy {
-  background: #fef2f2;
-  color: #dc2626;
-  border: 1px solid #fecaca;
-  padding: 10px;
-  border-radius: 12px;
-  font-size: 13px;
-  font-weight: 800;
-  cursor: pointer;
-  margin-top: 12px;
-  width: 100%;
-}
-
-.disband-btn-heavy:hover {
-  background: #fee2e2;
-}
-
-.group-member-card-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.member-micro-card {
-  display: flex;
-  flex-direction: column;
-  padding: 12px;
-  background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 12px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.member-micro-card:hover {
-  border-color: #10b981;
-  background: rgba(16, 185, 129, 0.02);
-}
-
-.member-micro-card.active {
-  border-color: #10b981;
-  background: rgba(16, 185, 129, 0.05);
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.15);
-}
-
-.member-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-
-.member-head strong {
-  font-size: 14px;
-  color: var(--text-primary);
-}
-
-.m-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-.m-dot.online { background: #10b981; }
-.m-dot.offline { background: #ef4444; }
-
-.m-sub {
+.d-type {
   font-size: 11px;
-  color: var(--text-tertiary);
   font-weight: 700;
+  color: var(--text-tertiary);
+  margin: 2px 0 0;
 }
 
-.group-bind-row {
-  display: flex;
-  gap: 8px;
-  margin-top: 6px;
-}
-
-.group-select {
-  flex: 1;
-  padding: 6px 10px;
-  border: 1.5px solid rgba(0, 0, 0, 0.08);
-  border-radius: 10px;
-  font-size: 13px;
-  background: #fff;
-}
-
-.bind-btn-sm {
-  width: 32px;
-  height: 32px;
-  background: #6366f1;
-  color: #fff;
-  border: 0;
-  border-radius: 10px;
-  font-size: 14px;
-  cursor: pointer;
-}
-
-.bind-btn-sm:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.empty-val {
-  color: rgba(0,0,0,0.2) !important;
-}
-
-.actions {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 24px;
-}
-
-.primary-btn-sm, .ghost-btn-sm {
-  width: 100%;
-  height: 40px;
-  border-radius: 12px;
-  font-size: 13px;
-  font-weight: 800;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.primary-btn-sm {
-  background: #10b981;
-  color: #fff;
-  border: 0;
-}
-
-.primary-btn-sm:hover { background: #059669; }
-
-.ghost-btn-sm {
-  background: transparent;
+.d-props {
+  font-size: 10px;
   color: var(--text-secondary);
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  opacity: 0.8;
+  margin-top: auto;
 }
 
-.ghost-btn-sm:hover { border-color: #10b981; color: #10b981; }
-
-/* Empty state panel */
-.panel-empty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  gap: 20px;
+.d-group-indicator {
+  font-size: 10px;
+  color: #6366f1;
+  font-weight: 800;
+  margin-top: 2px;
 }
 
-.empty-icon {
-  color: var(--text-tertiary);
-  opacity: 0.4;
-}
-
-.panel-empty p {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-tertiary);
-  line-height: 1.6;
-  max-width: 220px;
+.d-click-hint {
+  font-size: 9px;
+  font-weight: 800;
+  color: #10b981;
+  opacity: 0.7;
+  text-align: right;
+  margin-top: 2px;
 }
 
 @media (max-width: 1024px) {
   .devices-page-2d {
-    grid-template-columns: 1fr;
     overflow-y: auto;
     height: auto;
     min-height: 100%;
     padding: 16px;
-    gap: 16px;
   }
 
   .canvas-area {
     padding: 16px;
-    height: 520px;
+    height: 640px;
     flex: none;
   }
 
   .twin-viewport {
     width: 100% !important;
-    height: 400px !important;
+    height: 500px !important;
   }
 
   .room-card {
@@ -1093,11 +819,6 @@ function getRoomConnections(roomId: number) {
     width: calc(100% - 20px) !important;
     height: calc(100% - 20px) !important;
   }
-
-  .control-panel {
-    padding: 24px;
-    min-height: 300px;
-  }
 }
 
 @media (max-width: 640px) {
@@ -1106,11 +827,11 @@ function getRoomConnections(roomId: number) {
   }
 
   .canvas-area {
-    height: 420px;
+    height: 520px;
   }
 
   .twin-viewport {
-    height: 300px !important;
+    height: 380px !important;
   }
 
   .room-card {
@@ -1119,11 +840,6 @@ function getRoomConnections(roomId: number) {
 
   .room-card.zoomed-in {
     transform: none !important;
-  }
-
-  .control-panel {
-    padding: 16px;
-    border-radius: 20px;
   }
 }
 </style>
