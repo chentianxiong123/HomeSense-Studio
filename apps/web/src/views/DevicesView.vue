@@ -389,6 +389,24 @@ function selectDevice(device: UserDevice) {
   selectedDeviceId.value = device.id
 }
 
+const deviceTypeOptions = [
+  { value: 'television', zh: '电视', en: 'TV' },
+  { value: 'stb', zh: '机顶盒', en: 'STB' },
+  { value: 'speaker', zh: '音箱', en: 'Speaker' },
+  { value: 'router', zh: '路由器', en: 'Router' },
+  { value: 'outlet', zh: '插座', en: 'Outlet' },
+  { value: 'phone', zh: '手机', en: 'Phone' },
+  { value: 'tv_box', zh: '电视盒', en: 'TV Box' },
+  { value: 'tablet', zh: '平板', en: 'Tablet' },
+  { value: 'computer', zh: '电脑', en: 'Computer' },
+  { value: 'other', zh: '其他', en: 'Other' },
+]
+
+function typeLabel(t: string) {
+  const opt = deviceTypeOptions.find(o => o.value === t)
+  return opt ? (isZh.value ? opt.zh : opt.en) : t
+}
+
 function handleRoomDblClick(room: Room) {
   if (zoomedRoomId.value === room.id) {
     zoomedRoomId.value = null // Zoom out
