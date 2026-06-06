@@ -35,8 +35,8 @@ let pingTimer: ReturnType<typeof setInterval> | null = null
 
 // 2D Layout State
 const selectedDeviceId = ref<number | null>(null)
-const canvasWidth = 1000
-const canvasHeight = 700
+const viewportWidth = ref(1000)
+const viewportHeight = ref(700)
 const zoomedRoomId = ref<number | null>(null)
 
 const selectedDevice = computed(() =>
@@ -71,15 +71,27 @@ function propNumber(d: UserDevice | null, key: string): number | null {
   return null
 }
 
+const viewportRef = ref<HTMLElement | null>(null)
+
 onMounted(async () => {
   await loadData()
   startPing()
   void ensureMiNamesLoaded()
+  updateViewportSize()
+  window.addEventListener('resize', updateViewportSize)
 })
 
 onUnmounted(() => {
   if (pingTimer) clearInterval(pingTimer)
+  window.removeEventListener('resize', updateViewportSize)
 })
+
+function updateViewportSize() {
+  if (viewportRef.value) {
+    viewportWidth.value = viewportRef.value.clientWidth
+    viewportHeight.value = viewportRef.value.clientHeight
+  }
+}
 
 async function loadData() {
   loading.value = true
@@ -149,8 +161,8 @@ function onDragRoom(event: PointerEvent) {
   const room = rooms.value.find((r) => r.id === draggingRoomId.value)
   if (!room) return
   const props = room.props as any
-  props.x = Math.max(0, Math.min(canvasWidth - (props.w ?? 260), event.clientX - dragOffsetX.value))
-  props.y = Math.max(0, Math.min(canvasHeight - (props.h ?? 200), event.clientY - dragOffsetY.value))
+  props.x = Math.max(0, Math.min(viewportWidth.value - (props.w ?? 260), event.clientX - dragOffsetX.value))
+  props.y = Math.max(0, Math.min(viewportHeight.value - (props.h ?? 200), event.clientY - dragOffsetY.value))
 }
 
 async function stopDragRoom() {
@@ -187,10 +199,16 @@ function onDragDevice(event: PointerEvent) {
   const props = device.props as any
   const roomId = propNumber(device, 'room_id')
   const room = rooms.value.find((r) => r.id === roomId)
-  const roomW = zoomedRoomId.value === roomId ? canvasWidth - 40 : ((room?.props as any)?.w ?? 260)
-  const roomH = zoomedRoomId.value === roomId ? canvasHeight - 120 : ((room?.props as any)?.h ?? 200)
-  props.x = Math.max(20, Math.min(roomW - 140, event.clientX - dragDevOffsetX.value))
-  props.y = Math.max(20, Math.min(roomH - 140, event.clientY - dragDevOffsetY.value))
+  const isZoomed = zoomedRoomId.value === roomId
+
+  // Real layout container dimensions dynamically matches UI state!
+  const containerW = isZoomed ? viewportWidth.value - 40 : ((room?.props as any)?.w ?? 260)
+  const containerH = isZoomed ? viewportHeight.value - 120 : ((room?.props as any)?.h ?? 200)
+  const nodeW = isZoomed ? 154 : 48
+  const nodeH = isZoomed ? 114 : 48
+
+  props.x = Math.max(0, Math.min(containerW - nodeW, event.clientX - dragDevOffsetX.value))
+  props.y = Math.max(0, Math.min(containerH - nodeH, event.clientY - dragDevOffsetY.value))
 }
 
 async function stopDragDevice() {
@@ -335,8 +353,10 @@ async function disbandGroup() {
 // Generate connection lines inside room SVG
 function getRoomConnections(roomId: number) {
   const roomDevices = devices.value.filter((d) => propNumber(d, 'room_id') === roomId)
+  const isZoomed = zoomedRoomId.value === roomId
   const lines: Array<{ x1: number; y1: number; x2: number; y2: number; id: string }> = []
   const processed = new Set<string>()
+  const nodeOffset = isZoomed ? { x: 77, y: 57 } : { x: 24, y: 24 } // Perfect offset centers for both normal & zoomed mode!
 
   for (const d of roomDevices) {
     const gid = d.props?.group_id
@@ -353,10 +373,10 @@ function getRoomConnections(roomId: number) {
       const x2 = (p.props?.x as number) ?? 40
       const y2 = (p.props?.y as number) ?? 40
       lines.push({
-        x1: x1 + 24, // Center of 48px node
-        y1: y1 + 24,
-        x2: x2 + 24,
-        y2: y2 + 24,
+        x1: x1 + nodeOffset.x,
+        y1: y1 + nodeOffset.y,
+        x2: x2 + nodeOffset.x,
+        y2: y2 + nodeOffset.y,
         id: key,
       })
     }
@@ -377,14 +397,14 @@ function getRoomConnections(roomId: number) {
         </button>
       </header>
 
-      <div class="twin-viewport" :style="{ width: canvasWidth + 'px', height: canvasHeight + 'px' }">
+      <div class="twin-viewport" ref="viewportRef">
         <!-- Renders Rooms -->
         <div
           v-for="room in activeRooms"
           :key="room.id"
           class="room-card"
           :class="{ 'zoomed-in': zoomedRoomId === room.id, 'zoomed-out': zoomedRoomId !== null && zoomedRoomId !== room.id }"
-          :style="zoomedRoomId === room.id ? { width: (canvasWidth - 40) + 'px', height: (canvasHeight - 120) + 'px' } : {
+          :style="zoomedRoomId === room.id ? { width: (viewportWidth - 40) + 'px', height: (viewportHeight - 120) + 'px' } : {
             left: (room.props.x || 0) + 'px',
             top: (room.props.y || 0) + 'px',
             width: (room.props.w || 260) + 'px',
@@ -461,6 +481,50 @@ function getRoomConnections(roomId: number) {
         </div>
       </div>
     </main>
+
+    <!-- Side controls sliding up when focused -->
+    <Teleport to="body">
+      <div v-if="selectedDevice" class="bottom-card-overlay" @click="selectedDeviceId = null">
+        <div class="bottom-panel glass-panel" @click.stop>
+          <header class="bp-head">
+            <span class="bp-badge">{{ typeLabel(propString(selectedDevice, 'device_type') || 'other') }}</span>
+            <h3>{{ selectedDevice.name }}</h3>
+            <span class="bp-indicator" :class="onlineStatus[selectedDevice.id] ? 'online' : 'offline'">
+              {{ onlineStatus[selectedDevice.id] ? label('在线', 'Online') : label('离线', 'Offline') }}
+            </span>
+          </header>
+
+          <div class="bp-body">
+            <div class="bp-props">
+              <span v-if="propString(selectedDevice, 'mi_did')">Mi: {{ miNameFor(propString(selectedDevice, 'mi_did')) }}</span>
+              <span v-if="propString(selectedDevice, 'adb_ip')">ADB: {{ propString(selectedDevice, 'adb_ip') }}</span>
+              <span v-if="propString(selectedDevice, 'ip_address')">IP: {{ propString(selectedDevice, 'ip_address') }}</span>
+              <span v-if="selectedDevice.props?.group_id">组: ⛓ {{ selectedDevice.props.group_name }}</span>
+            </div>
+
+            <div class="bp-group-mgmt" v-if="!selectedDevice.props?.group_id && groupCandidates.length > 0">
+              <select v-model="groupingWithId" class="bp-select">
+                <option :value="null">{{ label('绑定同伴...', 'Select partner...') }}</option>
+                <option v-for="c in groupCandidates" :key="c.id" :value="c.id">{{ c.name }}</option>
+              </select>
+              <button class="bp-bind-btn" :disabled="!groupingWithId" @click="bindGroupPartner">⛓</button>
+            </div>
+            <button v-else-if="selectedDevice.props?.group_id" class="bp-disband-btn" @click="disbandGroup">
+              {{ label('解除编组', 'Disband') }}
+            </button>
+          </div>
+
+          <footer class="bp-actions">
+            <button class="bp-main-btn" @click="router.push(`/devices/${selectedDevice.id}`)">
+              {{ label('控制与详情', 'Control & Details') }}
+            </button>
+            <button class="bp-close-btn" @click="selectedDeviceId = null">
+              {{ label('关闭', 'Close') }}
+            </button>
+          </footer>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -490,6 +554,8 @@ function getRoomConnections(roomId: number) {
   overflow: hidden;
   position: relative;
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
 }
 
 .canvas-head {
@@ -497,6 +563,7 @@ function getRoomConnections(roomId: number) {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 24px;
+  flex-shrink: 0;
 }
 
 .canvas-head h2 {
@@ -534,16 +601,17 @@ function getRoomConnections(roomId: number) {
   transform: translateY(-1px);
 }
 
-/* 2D Viewport constraints */
+/* 2D Viewport constraints - Dynamic size adaptation */
 .twin-viewport {
   flex: 1;
+  width: 100% !important;
+  height: 100% !important;
   background: radial-gradient(rgba(0, 0, 0, 0.03) 1px, transparent 1px);
   background-size: 20px 20px;
   border: 1px solid rgba(0, 0, 0, 0.03);
   border-radius: 24px;
   position: relative;
   overflow: hidden;
-  margin: 0 auto;
 }
 
 /* Draggable Rooms cards */
@@ -788,6 +856,169 @@ function getRoomConnections(roomId: number) {
   opacity: 0.7;
   text-align: right;
   margin-top: 2px;
+}
+
+/* Floating Bottom Drawer Modal for Device Details */
+.bottom-card-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.15);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  animation: overlayFade 0.25s ease;
+}
+
+.bottom-panel {
+  width: min(440px, 100%);
+  border-radius: 32px 32px 0 0 !important;
+  background: #fff;
+  border: 1px solid rgba(229, 231, 235, 0.5);
+  box-shadow: 0 -10px 48px rgba(15, 23, 42, 0.12);
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  animation: panelSlideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-sizing: border-box;
+}
+
+.bp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  padding-bottom: 12px;
+}
+
+.bp-badge {
+  font-size: 11px;
+  font-weight: 900;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.08);
+  padding: 4px 10px;
+  border-radius: 6px;
+  text-transform: uppercase;
+}
+
+.bp-head h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 900;
+  color: var(--text-primary);
+}
+
+.bp-indicator {
+  font-size: 12px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.bp-indicator::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.bp-indicator.online { color: #10b981; }
+.bp-indicator.online::before { background: #10b981; }
+.bp-indicator.offline { color: #ef4444; }
+.bp-indicator.offline::before { background: #ef4444; }
+
+.bp-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.bp-props {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.bp-group-mgmt {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.bp-select {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  font-size: 13px;
+  background: #fff;
+}
+
+.bp-bind-btn {
+  padding: 0 16px;
+  background: #6366f1;
+  color: #fff;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.bp-bind-btn:disabled { opacity: 0.4; }
+
+.bp-disband-btn {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+  padding: 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.bp-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.bp-main-btn, .bp-close-btn {
+  flex: 1;
+  height: 44px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.bp-main-btn {
+  background: #10b981;
+  color: #fff;
+  border: 0;
+}
+.bp-main-btn:hover { background: #059669; }
+
+.bp-close-btn {
+  background: #fff;
+  border: 1px solid rgba(0,0,0,0.08);
+  color: var(--text-secondary);
+}
+.bp-close-btn:hover { border-color: #10b981; color: #10b981; }
+
+@keyframes overlayFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes panelSlideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
 }
 
 @media (max-width: 1024px) {
