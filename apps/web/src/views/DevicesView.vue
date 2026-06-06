@@ -33,11 +33,19 @@ const saving = ref(false)
 const onlineStatus = ref<Record<number, boolean>>({})
 let pingTimer: ReturnType<typeof setInterval> | null = null
 
-// 2D Layout State
+// 2D Layout & Zoom State
 const selectedDeviceId = ref<number | null>(null)
 const viewportWidth = ref(1000)
 const viewportHeight = ref(700)
 const zoomedRoomId = ref<number | null>(null)
+
+// Interactive Scale & Pan (Scrollwheel / Pinch zoom)
+const scale = ref(1)
+const panX = ref(0)
+const panY = ref(0)
+const isPanning = ref(false)
+const panStartRawX = ref(0)
+const panStartRawY = ref(0)
 
 const selectedDevice = computed(() =>
   devices.value.find((d) => d.id === selectedDeviceId.value) || null
@@ -141,17 +149,85 @@ function startPing() {
   pingTimer = setInterval(pingDevices, 60000)
 }
 
-// Draggable room card implementation
+// Zoom & Pan Wheel handlers
+function handleWheel(event: WheelEvent) {
+  if (zoomedRoomId.value !== null) return // Lock pan/zoom when focused in room details
+  event.preventDefault()
+  const zoomFactor = 0.08
+  const nextScale = event.deltaY < 0 ? scale.value + zoomFactor : scale.value - zoomFactor
+  scale.value = Math.max(0.4, Math.min(3, nextScale))
+}
+
+// Pan Canvas (Middle click or Space+Drag on desktop, Two-finger on mobile, or Drag on background)
+function startPan(event: PointerEvent) {
+  if (zoomedRoomId.value !== null) return
+  if (event.target !== event.currentTarget) return // Only pan if dragging background
+  isPanning.value = true
+  panStartRawX.value = event.clientX - panX.value
+  panStartRawY.value = event.clientY - panY.value
+  viewportRef.value?.setPointerCapture(event.pointerId)
+}
+
+function onPan(event: PointerEvent) {
+  if (!isPanning.value) return
+  panX.value = event.clientX - panStartRawX.value
+  panY.value = event.clientY - panStartRawY.value
+}
+
+function stopPan(event: PointerEvent) {
+  if (!isPanning.value) return
+  isPanning.value = false
+  viewportRef.value?.releasePointerCapture(event.pointerId)
+}
+
+// Pinch zoom (Touch fingers gesture for mobile tablet)
+const initialTouchDistance = ref<number | null>(null)
+const initialScale = ref(1)
+
+function handleTouchStart(event: TouchEvent) {
+  if (zoomedRoomId.value !== null) return
+  if (event.touches.length === 2) {
+    const t1 = event.touches[0]!
+    const t2 = event.touches[1]!
+    initialTouchDistance.value = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY)
+    initialScale.value = scale.value
+  }
+}
+
+function handleTouchMove(event: TouchEvent) {
+  if (zoomedRoomId.value !== null) return
+  if (event.touches.length === 2 && initialTouchDistance.value !== null) {
+    event.preventDefault()
+    const t1 = event.touches[0]!
+    const t2 = event.touches[1]!
+    const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY)
+    const factor = dist / initialTouchDistance.value
+    scale.value = Math.max(0.4, Math.min(3, initialScale.value * factor))
+  }
+}
+
+function handleTouchEnd() {
+  initialTouchDistance.value = null
+}
+
+function resetZoom() {
+  scale.value = 1
+  panX.value = 0
+  panY.value = 0
+}
+
+// Draggable room card implementation (adjusted for scale & offset)
 const draggingRoomId = ref<number | null>(null)
 const dragOffsetX = ref(0)
 const dragOffsetY = ref(0)
 
 function startDragRoom(event: PointerEvent, room: Room) {
   event.preventDefault()
+  event.stopPropagation()
   draggingRoomId.value = room.id
   const props = room.props as any
-  dragOffsetX.value = event.clientX - (props.x ?? 0)
-  dragOffsetY.value = event.clientY - (props.y ?? 0)
+  dragOffsetX.value = event.clientX / scale.value - (props.x ?? 0)
+  dragOffsetY.value = event.clientY / scale.value - (props.y ?? 0)
   document.addEventListener('pointermove', onDragRoom)
   document.addEventListener('pointerup', stopDragRoom)
 }
@@ -161,8 +237,8 @@ function onDragRoom(event: PointerEvent) {
   const room = rooms.value.find((r) => r.id === draggingRoomId.value)
   if (!room) return
   const props = room.props as any
-  props.x = Math.max(0, Math.min(viewportWidth.value - (props.w ?? 260), event.clientX - dragOffsetX.value))
-  props.y = Math.max(0, Math.min(viewportHeight.value - (props.h ?? 200), event.clientY - dragOffsetY.value))
+  props.x = Math.max(-500, Math.min(viewportWidth.value / scale.value + 500, event.clientX / scale.value - dragOffsetX.value))
+  props.y = Math.max(-500, Math.min(viewportHeight.value / scale.value + 500, event.clientY / scale.value - dragOffsetY.value))
 }
 
 async function stopDragRoom() {
@@ -176,7 +252,7 @@ async function stopDragRoom() {
   document.removeEventListener('pointerup', stopDragRoom)
 }
 
-// Draggable Device Node implementation (relative inside room)
+// Draggable Device Node implementation (relative inside room, adjusted for scale)
 const draggingDeviceId = ref<number | null>(null)
 const dragDevOffsetX = ref(0)
 const dragDevOffsetY = ref(0)
@@ -186,8 +262,8 @@ function startDragDevice(event: PointerEvent, device: UserDevice) {
   event.preventDefault()
   draggingDeviceId.value = device.id
   const props = device.props as any
-  dragDevOffsetX.value = event.clientX - (props.x ?? 50)
-  dragDevOffsetY.value = event.clientY - (props.y ?? 50)
+  dragDevOffsetX.value = event.clientX / scale.value - (props.x ?? 50)
+  dragDevOffsetY.value = event.clientY / scale.value - (props.y ?? 50)
   document.addEventListener('pointermove', onDragDevice)
   document.addEventListener('pointerup', stopDragDevice)
 }
@@ -201,14 +277,13 @@ function onDragDevice(event: PointerEvent) {
   const room = rooms.value.find((r) => r.id === roomId)
   const isZoomed = zoomedRoomId.value === roomId
 
-  // Real layout container dimensions dynamically matches UI state!
   const containerW = isZoomed ? viewportWidth.value - 40 : ((room?.props as any)?.w ?? 260)
   const containerH = isZoomed ? viewportHeight.value - 120 : ((room?.props as any)?.h ?? 200)
   const nodeW = isZoomed ? 154 : 48
   const nodeH = isZoomed ? 114 : 48
 
-  props.x = Math.max(0, Math.min(containerW - nodeW, event.clientX - dragDevOffsetX.value))
-  props.y = Math.max(0, Math.min(containerH - nodeH, event.clientY - dragDevOffsetY.value))
+  props.x = Math.max(0, Math.min(containerW - nodeW, event.clientX / scale.value - dragDevOffsetX.value))
+  props.y = Math.max(0, Math.min(containerH - nodeH, event.clientY / scale.value - dragDevOffsetY.value))
 }
 
 async function stopDragDevice() {
@@ -391,92 +466,116 @@ function getRoomConnections(roomId: number) {
     <main class="canvas-area glass-panel" :class="{ 'room-focused': zoomedRoomId !== null }">
       <header class="canvas-head">
         <h2>{{ label('数字孪生 · 2D 房型布局', 'Digital Twin Canvas') }}</h2>
-        <span class="hint-pill" v-if="zoomedRoomId === null">{{ label('双击房间卡片放大进入「房间特写视图」，进行详细管理', 'Dblclick room to focus, drag rooms & devices to place') }}</span>
+        <span class="hint-pill" v-if="zoomedRoomId === null">{{ label('使用鼠标滚轮或双指进行「无级缩放 / 画布拖拽」', 'Scroll wheel or pinch zoom to zoom & pan canvas') }}</span>
         <button class="focus-back-btn" v-else @click="zoomedRoomId = null">
           {{ label('← 返回全局户型图', '← Back to Global View') }}
         </button>
+        <button class="reset-zoom-btn" v-if="zoomedRoomId === null && (scale !== 1 || panX !== 0 || panY !== 0)" @click="resetZoom">
+          {{ label('重置缩放', 'Reset View') }}
+        </button>
       </header>
 
-      <div class="twin-viewport" ref="viewportRef">
-        <!-- Renders Rooms -->
+      <!-- Viewport capturing mouse pan/zoom/touch -->
+      <div
+        class="twin-viewport"
+        ref="viewportRef"
+        @wheel="handleWheel"
+        @pointerdown="startPan"
+        @pointermove="onPan"
+        @pointerup="stopPan"
+        @pointerleave="stopPan"
+        @touchstart="handleTouchStart"
+        @touchmove="handleTouchMove"
+        @touchend="handleTouchEnd"
+      >
+        <!-- The Infinite Pan/Zoom Grid Container -->
         <div
-          v-for="room in activeRooms"
-          :key="room.id"
-          class="room-card"
-          :class="{ 'zoomed-in': zoomedRoomId === room.id, 'zoomed-out': zoomedRoomId !== null && zoomedRoomId !== room.id }"
-          :style="zoomedRoomId === room.id ? { width: (viewportWidth - 40) + 'px', height: (viewportHeight - 120) + 'px' } : {
-            left: (room.props.x || 0) + 'px',
-            top: (room.props.y || 0) + 'px',
-            width: (room.props.w || 260) + 'px',
-            height: (room.props.h || 200) + 'px',
+          class="canvas-transform-wrapper"
+          :style="{
+            transform: `translate(${panX}px, ${panY}px) scale(${scale})`,
+            transformOrigin: '0 0',
           }"
-          @pointerdown="zoomedRoomId === room.id ? null : startDragRoom($event, room)"
-          @dblclick="handleRoomDblClick(room)"
         >
-          <!-- SVG Connector Lines for Groups inside Room -->
-          <svg class="room-connections-svg">
-            <line
-              v-for="line in getRoomConnections(room.id)"
-              :key="line.id"
-              :x1="line.x1"
-              :y1="line.y1"
-              :x2="line.x2"
-              :y2="line.y2"
-              class="connection-line"
-            />
-          </svg>
-
-          <div class="room-title">
-            <span class="room-dot"></span>
-            <strong>{{ room.name }}</strong>
-          </div>
-
-          <!-- Renders Devices bounded inside this Room -->
+          <!-- Renders Rooms -->
           <div
-            v-for="dev in devices.filter((d) => propNumber(d, 'room_id') === room.id)"
-            :key="dev.id"
-            class="device-node"
-            :class="{
-              active: selectedDeviceId === dev.id,
-              online: onlineStatus[dev.id] === true,
-              offline: onlineStatus[dev.id] === false,
-              'in-group': dev.props?.group_id,
-              'zoomed-mode': zoomedRoomId === room.id
+            v-for="room in activeRooms"
+            :key="room.id"
+            class="room-card"
+            :class="{ 'zoomed-in': zoomedRoomId === room.id, 'zoomed-out': zoomedRoomId !== null && zoomedRoomId !== room.id }"
+            :style="zoomedRoomId === room.id ? { width: (viewportWidth - 40) + 'px', height: (viewportHeight - 120) + 'px' } : {
+              left: (room.props.x || 0) + 'px',
+              top: (room.props.y || 0) + 'px',
+              width: (room.props.w || 260) + 'px',
+              height: (room.props.h || 200) + 'px',
             }"
-            :style="{
-              left: (dev.props.x ?? 40) + 'px',
-              top: (dev.props.y ?? 40) + 'px',
-            }"
-            @pointerdown="startDragDevice($event, dev)"
-            @click.stop="selectDevice(dev)"
-            @dblclick.stop="router.push(`/devices/${dev.id}`)"
+            @pointerdown="zoomedRoomId === room.id ? null : startDragRoom($event, room)"
+            @dblclick="handleRoomDblClick(room)"
           >
-            <!-- Normal Mode Icon -->
-            <div v-if="zoomedRoomId !== room.id" class="node-icon" :class="`icon-${deviceIcon(propString(dev, 'device_type'))}`">
-              <svg v-if="deviceIcon(propString(dev, 'device_type')) === 'tv'" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-              <svg v-else-if="deviceIcon(propString(dev, 'device_type')) === 'speaker'" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="4" y="2" width="16" height="20" rx="3"></rect><circle cx="12" cy="14" r="3"></circle><line x1="12" y1="7" x2="12" y2="9"></line></svg>
-              <svg v-else-if="deviceIcon(propString(dev, 'device_type')) === 'phone'" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="5" y="2" width="14" height="20" rx="3"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>
-              <svg v-else viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+            <!-- SVG Connector Lines for Groups inside Room -->
+            <svg class="room-connections-svg">
+              <line
+                v-for="line in getRoomConnections(room.id)"
+                :key="line.id"
+                :x1="line.x1"
+                :y1="line.y1"
+                :x2="line.x2"
+                :y2="line.y2"
+                class="connection-line"
+              />
+            </svg>
+
+            <div class="room-title">
+              <span class="room-dot"></span>
+              <strong>{{ room.name }}</strong>
             </div>
 
-            <!-- ZOOMED MODE: High fidelity Detail Card directly inside Room! -->
-            <div v-else class="detailed-card-inside">
-              <div class="detailed-head">
-                <span class="d-dot" :class="onlineStatus[dev.id] ? 'online' : 'offline'"></span>
-                <strong class="d-title">{{ dev.name }}</strong>
+            <!-- Renders Devices bounded inside this Room -->
+            <div
+              v-for="dev in devices.filter((d) => propNumber(d, 'room_id') === room.id)"
+              :key="dev.id"
+              class="device-node"
+              :class="{
+                active: selectedDeviceId === dev.id,
+                online: onlineStatus[dev.id] === true,
+                offline: onlineStatus[dev.id] === false,
+                'in-group': dev.props?.group_id,
+                'zoomed-mode': zoomedRoomId === room.id
+              }"
+              :style="{
+                left: (dev.props.x ?? 40) + 'px',
+                top: (dev.props.y ?? 40) + 'px',
+              }"
+              @pointerdown="startDragDevice($event, dev)"
+              @click.stop="selectDevice(dev)"
+              @dblclick.stop="router.push(`/devices/${dev.id}`)"
+            >
+              <!-- Normal Mode Icon -->
+              <div v-if="zoomedRoomId !== room.id" class="node-icon" :class="`icon-${deviceIcon(propString(dev, 'device_type'))}`">
+                <svg v-if="deviceIcon(propString(dev, 'device_type')) === 'tv'" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                <svg v-else-if="deviceIcon(propString(dev, 'device_type')) === 'speaker'" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="4" y="2" width="16" height="20" rx="3"></rect><circle cx="12" cy="14" r="3"></circle><line x1="12" y1="7" x2="12" y2="9"></line></svg>
+                <svg v-else-if="deviceIcon(propString(dev, 'device_type')) === 'phone'" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="5" y="2" width="14" height="20" rx="3"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>
+                <svg v-else viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
               </div>
-              <p class="d-type">{{ typeLabel(propString(dev, 'device_type') || 'other') }}</p>
-              <div class="d-props monospace" v-if="propString(dev, 'ip_address') || propString(dev, 'adb_ip')">
-                <span>{{ propString(dev, 'ip_address') || propString(dev, 'adb_ip').split(':')[0] }}</span>
-              </div>
-              <div class="d-group-indicator" v-if="dev.props?.group_id">
-                <span>⛓ {{ dev.props.group_name }}</span>
-              </div>
-              <div class="d-click-hint">{{ label('双击配置', 'Double-click') }}</div>
-            </div>
 
-            <span v-if="zoomedRoomId !== room.id" class="node-name">{{ dev.name }}</span>
-            <span v-if="dev.props?.group_id && zoomedRoomId !== room.id" class="node-group-badge">⛓</span>
+              <!-- ZOOMED MODE: High fidelity Detail Card directly inside Room! -->
+              <div v-else class="detailed-card-inside">
+                <div class="detailed-head">
+                  <span class="d-dot" :class="onlineStatus[dev.id] ? 'online' : 'offline'"></span>
+                  <strong class="d-title">{{ dev.name }}</strong>
+                </div>
+                <p class="d-type">{{ typeLabel(propString(dev, 'device_type') || 'other') }}</p>
+                <div class="d-props monospace" v-if="propString(dev, 'ip_address') || propString(dev, 'adb_ip')">
+                  <span>{{ propString(dev, 'ip_address') || propString(dev, 'adb_ip').split(':')[0] }}</span>
+                </div>
+                <div class="d-group-indicator" v-if="dev.props?.group_id">
+                  <span>⛓ {{ dev.props.group_name }}</span>
+                </div>
+                <div class="d-click-hint">{{ label('双击配置', 'Double-click') }}</div>
+              </div>
+
+              <span v-if="zoomedRoomId !== room.id" class="node-name">{{ dev.name }}</span>
+              <span v-if="dev.props?.group_id && zoomedRoomId !== room.id" class="node-group-badge">⛓</span>
+            </div>
           </div>
         </div>
       </div>
@@ -564,6 +663,7 @@ function getRoomConnections(roomId: number) {
   align-items: center;
   margin-bottom: 24px;
   flex-shrink: 0;
+  gap: 16px;
 }
 
 .canvas-head h2 {
@@ -584,22 +684,28 @@ function getRoomConnections(roomId: number) {
   border-radius: 8px;
 }
 
-.focus-back-btn {
+.focus-back-btn, .reset-zoom-btn {
   padding: 8px 18px;
-  background: #10b981;
-  color: #fff;
-  border: 0;
   border-radius: 10px;
   font-weight: 800;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.25);
   transition: all 0.2s;
 }
 
-.focus-back-btn:hover {
-  background: #059669;
-  transform: translateY(-1px);
+.focus-back-btn {
+  background: #10b981;
+  color: #fff;
+  border: 0;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.25);
 }
+.focus-back-btn:hover { background: #059669; transform: translateY(-1px); }
+
+.reset-zoom-btn {
+  background: #fff;
+  color: var(--text-secondary);
+  border: 1px solid rgba(0,0,0,0.08);
+}
+.reset-zoom-btn:hover { border-color: #10b981; color: #10b981; }
 
 /* 2D Viewport constraints - Dynamic size adaptation */
 .twin-viewport {
@@ -612,6 +718,26 @@ function getRoomConnections(roomId: number) {
   border-radius: 24px;
   position: relative;
   overflow: hidden;
+  margin: 0 auto;
+  cursor: grab;
+}
+
+.twin-viewport:active {
+  cursor: grabbing;
+}
+
+/* Infinite transform layer */
+.canvas-transform-wrapper {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none; /* Let pointer events drop to viewport background */
+}
+
+.canvas-transform-wrapper > * {
+  pointer-events: auto; /* Re-enable pointer events for room cards & device nodes inside */
 }
 
 /* Draggable Rooms cards */
