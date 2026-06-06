@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import { useLocale } from './composables/useLocale'
 
 const route = useRoute()
 const router = useRouter()
 const { locale, setLocale, t } = useLocale()
+
+const menuOpen = ref(false)
 
 const navItems = computed(() => [
   { key: 'chat', label: t('app.chat'), route: '/chat' },
@@ -17,32 +19,39 @@ const navItems = computed(() => [
   { key: 'authorizations', label: locale.value === 'zh' ? '授权' : 'Auth', route: '/authorizations' },
 ])
 
-const mobileNavItems = computed(() => [
-  { key: 'chat', label: t('app.chat'), route: '/chat', marker: 'AI' },
-  { key: 'studio', label: t('app.studio'), route: '/studio', marker: 'WF' },
-  { key: 'workspace', label: locale.value === 'zh' ? '工作台' : 'Work', route: '/workspace', marker: 'NAS' },
-  { key: 'devices', label: locale.value === 'zh' ? '设备' : 'Devices', route: '/devices', marker: 'DEV' },
-])
-
 function isActive(target: string) {
   return route.path === target || route.path.startsWith(`${target}/`)
+}
+
+function navigateTo(target: string) {
+  router.push(target)
+  menuOpen.value = false // Auto close menu on nav
 }
 </script>
 
 <template>
   <div class="app-container">
     <header class="app-header">
-      <div class="logo">HomeSense Studio</div>
+      <!-- Hamburger Menu Button for Mobile -->
+      <button class="menu-toggle-btn" @click="menuOpen = !menuOpen" :aria-label="menuOpen ? 'Close Menu' : 'Open Menu'">
+        <svg v-if="!menuOpen" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+        <svg v-else viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+
+      <div class="logo" @click="navigateTo('/chat')" style="cursor: pointer;">HomeSense</div>
+
+      <!-- Desktop Horizontal Navigation -->
       <nav class="tab-nav">
         <button
           v-for="item in navItems"
           :key="item.key"
           :class="['tab-btn', { active: isActive(item.route) }]"
-          @click="router.push(item.route)"
+          @click="navigateTo(item.route)"
         >
           {{ item.label }}
         </button>
       </nav>
+
       <div class="header-actions">
         <div class="locale-switch" :title="t('app.language')">
           <button :class="['locale-btn', { active: locale === 'zh' }]" @click="setLocale('zh')">中</button>
@@ -50,20 +59,32 @@ function isActive(target: string) {
         </div>
       </div>
     </header>
+
+    <!-- Mobile Slide-out Drawer Navigation -->
+    <Teleport to="body">
+      <div v-if="menuOpen" class="mobile-drawer-overlay" @click="menuOpen = false">
+        <nav class="mobile-drawer" @click.stop>
+          <div class="drawer-header">
+            <strong>HomeSense Menu</strong>
+            <button class="drawer-close" @click="menuOpen = false">×</button>
+          </div>
+          <ul class="drawer-menu">
+            <li v-for="item in navItems" :key="item.key">
+              <button
+                :class="['drawer-item-btn', { active: isActive(item.route) }]"
+                @click="navigateTo(item.route)"
+              >
+                {{ item.label }}
+              </button>
+            </li>
+          </ul>
+        </nav>
+      </div>
+    </Teleport>
+
     <main class="app-main">
       <RouterView />
     </main>
-    <nav class="mobile-bottom-nav" :aria-label="locale === 'zh' ? '主导航' : 'Primary navigation'">
-      <button
-        v-for="item in mobileNavItems"
-        :key="item.key"
-        :class="['mobile-nav-btn', { active: isActive(item.route) }]"
-        @click="router.push(item.route)"
-      >
-        <span>{{ item.marker }}</span>
-        <strong>{{ item.label }}</strong>
-      </button>
-    </nav>
   </div>
 </template>
 
@@ -89,7 +110,6 @@ function isActive(target: string) {
   --app-safe-right: env(safe-area-inset-right, 0px);
   --app-safe-bottom: env(safe-area-inset-bottom, 0px);
   --app-safe-left: env(safe-area-inset-left, 0px);
-  --app-mobile-nav-height: 72px;
 }
 
 * {
@@ -126,16 +146,17 @@ html, body, #app {
   border-bottom: 1px solid rgba(229, 231, 235, 0.4);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
   z-index: 100;
+  gap: 16px;
 }
 
 .logo {
   font-size: 15px;
   font-weight: 900;
-  margin-right: 80px;
+  margin-right: 48px;
   color: var(--text-primary);
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   text-transform: uppercase;
   letter-spacing: 0.12em;
 }
@@ -143,13 +164,17 @@ html, body, #app {
 .logo::before {
   content: '';
   display: inline-block;
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   background: #10b981;
-  border-radius: 12px;
-  box-shadow: 0 8px 20px rgba(16, 185, 129, 0.2);
-  mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>') center / 22px no-repeat;
-  -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>') center / 22px no-repeat;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+  mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>') center / 18px no-repeat;
+  -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>') center / 18px no-repeat;
+}
+
+.menu-toggle-btn {
+  display: none;
 }
 
 .tab-nav {
@@ -167,14 +192,14 @@ html, body, #app {
 
 .tab-btn {
   position: relative;
-  padding: 0 28px;
-  height: 48px;
+  padding: 0 20px;
+  height: 44px;
   border: none;
-  border-radius: 14px;
+  border-radius: 12px;
   background: transparent;
   color: var(--text-tertiary);
   cursor: pointer;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 900;
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   text-transform: uppercase;
@@ -195,40 +220,38 @@ html, body, #app {
 .tab-btn.active::after {
   content: '';
   position: absolute;
-  bottom: 6px;
-  left: 28px;
-  right: 28px;
+  bottom: 4px;
+  left: 20px;
+  right: 20px;
   height: 3px;
   background: linear-gradient(90deg, #10b981, #34d399);
   border-radius: 3px;
-  box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
 }
 
 .header-actions {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 32px;
 }
 
 .locale-switch {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  padding: 6px;
-  border-radius: 14px;
+  padding: 4px;
+  border-radius: 12px;
   background: rgba(0, 0, 0, 0.05);
 }
 
 .locale-btn {
-  min-width: 48px;
-  height: 32px;
+  min-width: 40px;
+  height: 28px;
   border: none;
-  border-radius: 9px;
+  border-radius: 8px;
   background: transparent;
   color: var(--text-tertiary);
   cursor: pointer;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 900;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   text-transform: uppercase;
@@ -244,44 +267,6 @@ html, body, #app {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
-.settings-btn {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 24px;
-  height: 48px;
-  border: 1px solid rgba(229, 231, 235, 0.8);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.8);
-  color: var(--text-primary);
-  cursor: pointer;
-  font-size: 16px;
-  font-weight: 900;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
-}
-
-.settings-btn:hover {
-  border-color: #10b981;
-  color: #10b981;
-  transform: translateY(-2px);
-  background: #fff;
-  box-shadow: 0 12px 28px rgba(16, 185, 129, 0.12);
-}
-
-
-.settings-btn::before {
-  content: '';
-  display: inline-block;
-  width: 16px;
-  height: 16px;
-  background-color: currentColor;
-  mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>') center / contain no-repeat;
-  -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>') center / contain no-repeat;
-}
-
 .app-main {
   flex: 1;
   min-height: 0;
@@ -290,30 +275,101 @@ html, body, #app {
   -webkit-overflow-scrolling: touch;
 }
 
-.mobile-bottom-nav {
-  display: none;
+/* Slide Drawer Styles */
+.mobile-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.3);
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.2s ease;
 }
 
-/* Base styles for modern scrollbars */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+.mobile-drawer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 280px;
+  background: #fff;
+  box-shadow: 24px 0 70px rgba(15, 23, 42, 0.15);
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  animation: slideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-::-webkit-scrollbar-track {
+.drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(229, 231, 235, 0.5);
+  padding-bottom: 16px;
+  margin-bottom: 24px;
+}
+
+.drawer-header strong {
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.drawer-close {
   background: transparent;
+  border: 0;
+  font-size: 28px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  line-height: 1;
 }
 
-::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 4px;
+.drawer-menu {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: var(--text-tertiary);
+.drawer-item-btn {
+  width: 100%;
+  height: 48px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 15px;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s;
 }
 
-@media (max-width: 1180px) {
+.drawer-item-btn:hover {
+  background: rgba(0, 0, 0, 0.03);
+  color: var(--text-primary);
+}
+
+.drawer-item-btn.active {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+}
+
+@keyframes slideIn {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (max-width: 1024px) {
   .app-header {
     padding-right: calc(24px + var(--app-safe-right));
     padding-left: calc(24px + var(--app-safe-left));
@@ -322,124 +378,36 @@ html, body, #app {
   .logo {
     margin-right: 28px;
   }
-
-  .tab-btn {
-    padding: 0 18px;
-    font-size: 14px;
-  }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 820px) {
   :root {
-    --app-header-height: 66px;
+    --app-header-height: 64px;
   }
 
-  .app-container {
-    height: 100dvh;
-  }
-
-  .app-header {
-    position: sticky;
-    top: 0;
+  .menu-toggle-btn {
+    display: flex;
     align-items: center;
-    gap: 12px;
-    padding-right: calc(12px + var(--app-safe-right));
-    padding-left: calc(12px + var(--app-safe-left));
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    background: transparent;
+    border: 0;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 10px;
   }
 
-  .logo {
-    width: 44px;
-    min-width: 44px;
-    margin-right: 0;
-    gap: 0;
-    overflow: hidden;
-    color: transparent;
-    letter-spacing: 0;
-  }
-
-  .logo::before {
-    width: 36px;
-    height: 36px;
-    flex: 0 0 36px;
+  .menu-toggle-btn:hover {
+    background: rgba(0,0,0,0.04);
   }
 
   .tab-nav {
     display: none;
   }
 
-  .header-actions {
-    margin-left: 0;
-  }
-
-  .locale-switch {
-    padding: 4px;
-    border-radius: 12px;
-  }
-
-  .locale-btn {
-    min-width: 34px;
-    height: 28px;
-    font-size: 12px;
-  }
-
-  .app-main {
-    padding-bottom: calc(var(--app-mobile-nav-height) + var(--app-safe-bottom));
-  }
-
-  .mobile-bottom-nav {
-    position: fixed;
-    left: calc(10px + var(--app-safe-left));
-    right: calc(10px + var(--app-safe-right));
-    bottom: calc(10px + var(--app-safe-bottom));
-    z-index: 120;
-    height: var(--app-mobile-nav-height);
-    padding: 7px;
-    border: 1px solid rgba(226, 232, 240, 0.92);
-    border-radius: 20px;
-    background: rgba(255, 255, 255, 0.94);
-    backdrop-filter: blur(18px);
-    box-shadow: 0 18px 42px rgba(15, 23, 42, 0.16);
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 5px;
-  }
-
-  .mobile-nav-btn {
-    min-width: 0;
-    border: 1px solid transparent;
-    border-radius: 14px;
-    background: transparent;
-    color: var(--text-tertiary);
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 3px;
-  }
-
-  .mobile-nav-btn span {
-    color: inherit;
-    font-size: 10px;
-    font-weight: 950;
-    line-height: 1;
-  }
-
-  .mobile-nav-btn strong {
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    color: inherit;
-    font-size: 11px;
-    font-weight: 900;
-    line-height: 1.1;
-    white-space: nowrap;
-  }
-
-  .mobile-nav-btn.active {
-    border-color: rgba(16, 185, 129, 0.18);
-    background: rgba(16, 185, 129, 0.1);
-    color: #0f766e;
+  .logo {
+    margin-right: 0;
   }
 }
 </style>
