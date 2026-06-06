@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
 
+const apiTarget = process.env.VITE_DEV_API_TARGET || 'http://127.0.0.1:3000'
+
 export default defineConfig({
   plugins: [vue()],
   resolve: {
@@ -10,9 +12,12 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port: Number(process.env.VITE_DEV_PORT || 5173),
     proxy: {
-      '/api': 'http://localhost:3000',
+      '/api': {
+        target: apiTarget,
+        changeOrigin: true,
+      },
     },
   },
 })
