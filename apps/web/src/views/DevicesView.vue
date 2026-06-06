@@ -39,13 +39,16 @@ const viewportWidth = ref(1000)
 const viewportHeight = ref(700)
 const zoomedRoomId = ref<number | null>(null)
 
-// Interactive Scale & Pan (Scrollwheel / Pinch zoom)
+// Interactive Scale & Pan
 const scale = ref(1)
 const panX = ref(0)
 const panY = ref(0)
 const isPanning = ref(false)
 const panStartRawX = ref(0)
 const panStartRawY = ref(0)
+
+// Orientation Detection (Mobile Portrait vs Desktop/Landscape)
+const isMobilePortrait = ref(false)
 
 const selectedDevice = computed(() =>
   devices.value.find((d) => d.id === selectedDeviceId.value) || null
@@ -54,14 +57,39 @@ const selectedDevice = computed(() =>
 const activeRooms = computed(() => {
   return rooms.value.filter((r) => {
     const props = r.props ?? {}
+    // We check either the normal layout or mobile layout depending on active screen mode!
+    const key = isMobilePortrait.value ? 'mobile' : 'desktop'
+    const layout = props[key] ?? props
     return (
-      typeof props.x === 'number' &&
-      typeof props.y === 'number' &&
-      typeof props.w === 'number' &&
-      typeof props.h === 'number'
+      typeof layout.x === 'number' &&
+      typeof layout.y === 'number' &&
+      typeof layout.w === 'number' &&
+      typeof layout.h === 'number'
     )
   })
 })
+
+function getRoomLayout(room: Room): { x: number; y: number; w: number; h: number } {
+  const props = room.props ?? {}
+  const key = isMobilePortrait.value ? 'mobile' : 'desktop'
+  const layout = props[key] ?? props
+  return {
+    x: layout.x ?? 50,
+    y: layout.y ?? 50,
+    w: layout.w ?? 260,
+    h: layout.h ?? 200,
+  }
+}
+
+function getDeviceLayout(device: UserDevice): { x: number; y: number } {
+  const props = device.props ?? {}
+  const key = isMobilePortrait.value ? 'mobile' : 'desktop'
+  const layout = props[key] ?? props
+  return {
+    x: layout.x ?? 40,
+    y: layout.y ?? 40,
+  }
+}
 
 function propString(d: UserDevice | null, key: string): string {
   if (!d) return ''
@@ -82,17 +110,27 @@ function propNumber(d: UserDevice | null, key: string): number | null {
 const viewportRef = ref<HTMLElement | null>(null)
 
 onMounted(async () => {
+  detectOrientation()
   await loadData()
   startPing()
   void ensureMiNamesLoaded()
   updateViewportSize()
-  window.addEventListener('resize', updateViewportSize)
+  window.addEventListener('resize', onResize)
 })
 
 onUnmounted(() => {
   if (pingTimer) clearInterval(pingTimer)
-  window.removeEventListener('resize', updateViewportSize)
+  window.removeEventListener('resize', onResize)
 })
+
+function onResize() {
+  detectOrientation()
+  updateViewportSize()
+}
+
+function detectOrientation() {
+  isMobilePortrait.value = window.innerWidth <= 760 && window.innerHeight > window.innerWidth
+}
 
 function updateViewportSize() {
   if (viewportRef.value) {
@@ -112,15 +150,17 @@ async function loadData() {
     devices.value = devRes.devices ?? []
     rooms.value = roomRes.rooms ?? []
 
-    // Auto initialize dummy room positions if not present
+    // Auto initialize coordinates if not present, separately for mobile and desktop!
     let changed = false
+    const key = isMobilePortrait.value ? 'mobile' : 'desktop'
     for (const r of rooms.value) {
-      if (!r.props || typeof r.props.x !== 'number') {
-        r.props = {
-          x: Math.floor(Math.random() * 400) + 50,
-          y: Math.floor(Math.random() * 300) + 50,
-          w: 260,
-          h: 200,
+      if (!r.props) r.props = {}
+      if (!r.props[key] || typeof r.props[key].x !== 'number') {
+        r.props[key] = {
+          x: Math.floor(Math.random() * (isMobilePortrait.value ? 100 : 400)) + 30,
+          y: Math.floor(Math.random() * (isMobilePortrait.value ? 150 : 300)) + 30,
+          w: isMobilePortrait.value ? 200 : 260,
+          h: isMobilePortrait.value ? 150 : 200,
         }
         await api.rooms.update(r.id, { props: r.props })
         changed = true
@@ -158,10 +198,10 @@ function handleWheel(event: WheelEvent) {
   scale.value = Math.max(0.4, Math.min(3, nextScale))
 }
 
-// Pan Canvas (Middle click or Space+Drag on desktop, Two-finger on mobile, or Drag on background)
+// Pan Canvas
 function startPan(event: PointerEvent) {
   if (zoomedRoomId.value !== null) return
-  if (event.target !== event.currentTarget) return // Only pan if dragging background
+  if (event.target !== event.currentTarget) return
   isPanning.value = true
   panStartRawX.value = event.clientX - panX.value
   panStartRawY.value = event.clientY - panY.value
@@ -180,7 +220,7 @@ function stopPan(event: PointerEvent) {
   viewportRef.value?.releasePointerCapture(event.pointerId)
 }
 
-// Pinch zoom (Touch fingers gesture for mobile tablet)
+// Pinch zoom
 const initialTouchDistance = ref<number | null>(null)
 const initialScale = ref(1)
 
@@ -216,7 +256,7 @@ function resetZoom() {
   panY.value = 0
 }
 
-// Draggable room card implementation (adjusted for scale & offset)
+// Draggable room card implementation (isolated keys)
 const draggingRoomId = ref<number | null>(null)
 const dragOffsetX = ref(0)
 const dragOffsetY = ref(0)
@@ -225,9 +265,9 @@ function startDragRoom(event: PointerEvent, room: Room) {
   event.preventDefault()
   event.stopPropagation()
   draggingRoomId.value = room.id
-  const props = room.props as any
-  dragOffsetX.value = event.clientX / scale.value - (props.x ?? 0)
-  dragOffsetY.value = event.clientY / scale.value - (props.y ?? 0)
+  const layout = getRoomLayout(room)
+  dragOffsetX.value = event.clientX / scale.value - layout.x
+  dragOffsetY.value = event.clientY / scale.value - layout.y
   document.addEventListener('pointermove', onDragRoom)
   document.addEventListener('pointerup', stopDragRoom)
 }
@@ -236,9 +276,12 @@ function onDragRoom(event: PointerEvent) {
   if (draggingRoomId.value === null) return
   const room = rooms.value.find((r) => r.id === draggingRoomId.value)
   if (!room) return
-  const props = room.props as any
-  props.x = Math.max(-500, Math.min(viewportWidth.value / scale.value + 500, event.clientX / scale.value - dragOffsetX.value))
-  props.y = Math.max(-500, Math.min(viewportHeight.value / scale.value + 500, event.clientY / scale.value - dragOffsetY.value))
+  const layout = getRoomLayout(room)
+  const key = isMobilePortrait.value ? 'mobile' : 'desktop'
+
+  if (!room.props[key]) room.props[key] = { w: layout.w, h: layout.h }
+  room.props[key].x = Math.max(0, Math.min(viewportWidth.value / scale.value - layout.w, event.clientX / scale.value - dragOffsetX.value))
+  room.props[key].y = Math.max(0, Math.min(viewportHeight.value / scale.value - layout.h, event.clientY / scale.value - dragOffsetY.value))
 }
 
 async function stopDragRoom() {
@@ -252,7 +295,7 @@ async function stopDragRoom() {
   document.removeEventListener('pointerup', stopDragRoom)
 }
 
-// Draggable Device Node implementation (relative inside room, adjusted for scale)
+// Draggable Device Node implementation (isolated keys)
 const draggingDeviceId = ref<number | null>(null)
 const dragDevOffsetX = ref(0)
 const dragDevOffsetY = ref(0)
@@ -261,9 +304,9 @@ function startDragDevice(event: PointerEvent, device: UserDevice) {
   event.stopPropagation()
   event.preventDefault()
   draggingDeviceId.value = device.id
-  const props = device.props as any
-  dragDevOffsetX.value = event.clientX / scale.value - (props.x ?? 50)
-  dragDevOffsetY.value = event.clientY / scale.value - (props.y ?? 50)
+  const layout = getDeviceLayout(device)
+  dragDevOffsetX.value = event.clientX / scale.value - layout.x
+  dragDevOffsetY.value = event.clientY / scale.value - layout.y
   document.addEventListener('pointermove', onDragDevice)
   document.addEventListener('pointerup', stopDragDevice)
 }
@@ -272,18 +315,22 @@ function onDragDevice(event: PointerEvent) {
   if (draggingDeviceId.value === null) return
   const device = devices.value.find((d) => d.id === draggingDeviceId.value)
   if (!device) return
-  const props = device.props as any
+  const layout = getDeviceLayout(device)
+  const key = isMobilePortrait.value ? 'mobile' : 'desktop'
+
   const roomId = propNumber(device, 'room_id')
   const room = rooms.value.find((r) => r.id === roomId)
   const isZoomed = zoomedRoomId.value === roomId
 
-  const containerW = isZoomed ? viewportWidth.value - 40 : ((room?.props as any)?.w ?? 260)
-  const containerH = isZoomed ? viewportHeight.value - 120 : ((room?.props as any)?.h ?? 200)
+  const roomLayout = room ? getRoomLayout(room) : { w: 260, h: 200 }
+  const containerW = isZoomed ? viewportWidth.value - 40 : roomLayout.w
+  const containerH = isZoomed ? viewportHeight.value - 120 : roomLayout.h
   const nodeW = isZoomed ? 154 : 48
   const nodeH = isZoomed ? 114 : 48
 
-  props.x = Math.max(0, Math.min(containerW - nodeW, event.clientX / scale.value - dragDevOffsetX.value))
-  props.y = Math.max(0, Math.min(containerH - nodeH, event.clientY / scale.value - dragDevOffsetY.value))
+  if (!device.props[key]) device.props[key] = {}
+  device.props[key].x = Math.max(0, Math.min(containerW - nodeW, event.clientX / scale.value - dragDevOffsetX.value))
+  device.props[key].y = Math.max(0, Math.min(containerH - nodeH, event.clientY / scale.value - dragDevOffsetY.value))
 }
 
 async function stopDragDevice() {
@@ -350,25 +397,6 @@ function handleRoomDblClick(room: Room) {
   }
 }
 
-const deviceTypeOptions = [
-  { value: 'television', zh: '电视', en: 'TV' },
-  { value: 'stb', zh: '机顶盒', en: 'STB' },
-  { value: 'speaker', zh: '音箱', en: 'Speaker' },
-  { value: 'router', zh: '路由器', en: 'Router' },
-  { value: 'outlet', zh: '插座', en: 'Outlet' },
-  { value: 'phone', zh: '手机', en: 'Phone' },
-  { value: 'tv_box', zh: '电视盒', en: 'TV Box' },
-  { value: 'tablet', zh: '平板', en: 'Tablet' },
-  { value: 'computer', zh: '电脑', en: 'Computer' },
-  { value: 'other', zh: '其他', en: 'Other' },
-]
-
-function typeLabel(t: string) {
-  const opt = deviceTypeOptions.find(o => o.value === t)
-  return opt ? (isZh.value ? opt.zh : opt.en) : t
-}
-
-// Simple dynamic grouping
 const groupingWithId = ref<number | null>(null)
 
 const groupCandidates = computed(() => {
@@ -431,13 +459,14 @@ function getRoomConnections(roomId: number) {
   const isZoomed = zoomedRoomId.value === roomId
   const lines: Array<{ x1: number; y1: number; x2: number; y2: number; id: string }> = []
   const processed = new Set<string>()
-  const nodeOffset = isZoomed ? { x: 77, y: 57 } : { x: 24, y: 24 } // Perfect offset centers for both normal & zoomed mode!
+  const nodeOffset = isZoomed ? { x: 77, y: 57 } : { x: 24, y: 24 }
 
   for (const d of roomDevices) {
     const gid = d.props?.group_id
     if (!gid) continue
-    const x1 = (d.props?.x as number) ?? 40
-    const y1 = (d.props?.y as number) ?? 40
+    const layout = getDeviceLayout(d)
+    const x1 = layout.x
+    const y1 = layout.y
 
     const partners = roomDevices.filter((p) => p.id !== d.id && p.props?.group_id === gid)
     for (const p of partners) {
@@ -445,8 +474,9 @@ function getRoomConnections(roomId: number) {
       if (processed.has(key)) continue
       processed.add(key)
 
-      const x2 = (p.props?.x as number) ?? 40
-      const y2 = (p.props?.y as number) ?? 40
+      const pLayout = getDeviceLayout(p)
+      const x2 = pLayout.x
+      const y2 = pLayout.y
       lines.push({
         x1: x1 + nodeOffset.x,
         y1: y1 + nodeOffset.y,
@@ -503,10 +533,10 @@ function getRoomConnections(roomId: number) {
             class="room-card"
             :class="{ 'zoomed-in': zoomedRoomId === room.id, 'zoomed-out': zoomedRoomId !== null && zoomedRoomId !== room.id }"
             :style="zoomedRoomId === room.id ? { width: (viewportWidth - 40) + 'px', height: (viewportHeight - 120) + 'px' } : {
-              left: (room.props.x || 0) + 'px',
-              top: (room.props.y || 0) + 'px',
-              width: (room.props.w || 260) + 'px',
-              height: (room.props.h || 200) + 'px',
+              left: getRoomLayout(room).x + 'px',
+              top: getRoomLayout(room).y + 'px',
+              width: getRoomLayout(room).w + 'px',
+              height: getRoomLayout(room).h + 'px',
             }"
             @pointerdown="zoomedRoomId === room.id ? null : startDragRoom($event, room)"
             @dblclick="handleRoomDblClick(room)"
@@ -542,8 +572,8 @@ function getRoomConnections(roomId: number) {
                 'zoomed-mode': zoomedRoomId === room.id
               }"
               :style="{
-                left: (dev.props.x ?? 40) + 'px',
-                top: (dev.props.y ?? 40) + 'px',
+                left: getDeviceLayout(dev).x + 'px',
+                top: getDeviceLayout(dev).y + 'px',
               }"
               @pointerdown="startDragDevice($event, dev)"
               @click.stop="selectDevice(dev)"
