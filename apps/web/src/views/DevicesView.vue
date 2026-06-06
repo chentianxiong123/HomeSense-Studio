@@ -751,7 +751,6 @@ function getRoomConnections(roomId: number) {
   touch-action: none;
   padding: 16px;
   box-sizing: border-box;
-  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s, left 0.4s, top 0.4s, width 0.4s, height 0.4s;
 }
 
 .room-card:active {
