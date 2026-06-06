@@ -47,7 +47,7 @@ const isPanning = ref(false)
 const panStartRawX = ref(0)
 const panStartRawY = ref(0)
 
-// Orientation Detection (Mobile Portrait vs Desktop/Landscape)
+// Orientation Detection
 const isMobilePortrait = ref(false)
 
 const selectedDevice = computed(() =>
@@ -57,7 +57,6 @@ const selectedDevice = computed(() =>
 const activeRooms = computed(() => {
   return rooms.value.filter((r) => {
     const props = r.props ?? {}
-    // We check either the normal layout or mobile layout depending on active screen mode!
     const key = isMobilePortrait.value ? 'mobile' : 'desktop'
     const layout = props[key] ?? props
     return (
@@ -150,7 +149,7 @@ async function loadData() {
     devices.value = devRes.devices ?? []
     rooms.value = roomRes.rooms ?? []
 
-    // Auto initialize coordinates if not present, separately for mobile and desktop!
+    // Auto initialize coordinates
     let changed = false
     const key = isMobilePortrait.value ? 'mobile' : 'desktop'
     for (const r of rooms.value) {
@@ -191,7 +190,7 @@ function startPing() {
 
 // Zoom & Pan Wheel handlers
 function handleWheel(event: WheelEvent) {
-  if (zoomedRoomId.value !== null) return // Lock pan/zoom when focused in room details
+  if (zoomedRoomId.value !== null) return
   event.preventDefault()
   const zoomFactor = 0.08
   const nextScale = event.deltaY < 0 ? scale.value + zoomFactor : scale.value - zoomFactor
@@ -256,7 +255,7 @@ function resetZoom() {
   panY.value = 0
 }
 
-// Draggable room card implementation (isolated keys)
+// Draggable room card implementation
 const draggingRoomId = ref<number | null>(null)
 const dragOffsetX = ref(0)
 const dragOffsetY = ref(0)
@@ -295,7 +294,7 @@ async function stopDragRoom() {
   document.removeEventListener('pointerup', stopDragRoom)
 }
 
-// Draggable Device Node implementation (isolated keys)
+// Draggable Device Node implementation
 const draggingDeviceId = ref<number | null>(null)
 const dragDevOffsetX = ref(0)
 const dragDevOffsetY = ref(0)
@@ -389,6 +388,14 @@ function selectDevice(device: UserDevice) {
   selectedDeviceId.value = device.id
 }
 
+function handleRoomDblClick(room: Room) {
+  if (zoomedRoomId.value === room.id) {
+    zoomedRoomId.value = null // Zoom out
+  } else {
+    zoomedRoomId.value = room.id // Zoom in
+  }
+}
+
 const deviceTypeOptions = [
   { value: 'television', zh: '电视', en: 'TV' },
   { value: 'stb', zh: '机顶盒', en: 'STB' },
@@ -407,14 +414,7 @@ function typeLabel(t: string) {
   return opt ? (isZh.value ? opt.zh : opt.en) : t
 }
 
-function handleRoomDblClick(room: Room) {
-  if (zoomedRoomId.value === room.id) {
-    zoomedRoomId.value = null // Zoom out
-  } else {
-    zoomedRoomId.value = room.id // Zoom in
-  }
-}
-
+// Simple dynamic grouping
 const groupingWithId = ref<number | null>(null)
 
 const groupCandidates = computed(() => {
