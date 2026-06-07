@@ -687,6 +687,11 @@ let deviceDragState: ElementMoveState | null = null
 
 function startDragRoom(event: PointerEvent, room: Room) {
   if (!isEditMode.value || zoomedRoomId.value === room.id) return
+  // If the pointerdown came from a child device, let the device handler own it.
+  // Devices have their own drag (reposition within the room); the room only
+  // moves when the user grabs the room's own background.
+  const target = event.target as HTMLElement | null
+  if (target?.closest?.('.device-node')) return
   const roomEl = roomElementRefs.get(room.id)
   const viewportEl = viewportRef.value
   if (!roomEl || !viewportEl) return
@@ -794,49 +799,41 @@ async function stopResizeRoom() {
 // Draggable Device Node implementation
 const draggingDeviceId = ref<number | null>(null)
 
-// Drag-from-device: in edit mode, dragging a device node drags the room
-// (the device is a child of the room, so grabbing it moves the whole room).
-// To reposition a single device inside the room, hold Alt while dragging.
 function startDragDevice(event: PointerEvent, device: UserDevice) {
   if (!isEditMode.value) return
+  const deviceEl = deviceElementRefs.get(device.id)
+  if (!deviceEl) return
+  // Don't stop propagation: the room's pointerdown will still bubble up to
+  // the room card, but `startDragRoom` checks `event.target.closest('.device-node')`
+  // and ignores device-originated pointerdowns, so the room won't try to drag.
+  event.preventDefault()
+
   const room = findParentRoom(device)
   if (!room) return
+  const roomEl = roomElementRefs.get(room.id) ?? null
+  const boundaryEl = roomEl ?? viewportRef.value
+  if (!boundaryEl) return
 
-  if (event.altKey) {
-    // Alt-drag: reposition the device within the room.
-    const deviceEl = deviceElementRefs.get(device.id)
-    if (!deviceEl) return
-    event.stopPropagation()
-    event.preventDefault()
-
-    const roomEl = roomElementRefs.get(room.id) ?? null
-    const boundaryEl = roomEl ?? viewportRef.value
-    if (!boundaryEl) return
-
-    const layout = getDeviceLayout(device)
-    const roomLayout = getRoomLayout(room)
-    const domScale = roomEl
-      ? getRoomDomScale(room, roomEl)
-      : { x: getCanvasDomScale(), y: getCanvasDomScale() }
-    draggingDeviceId.value = device.id
-    deviceDragState = {
-      layoutX: layout.x,
-      layoutY: layout.y,
-      roomW: roomLayout.w,
-      roomH: roomLayout.h,
-      clientX: event.clientX,
-      clientY: event.clientY,
-      elementRect: deviceEl.getBoundingClientRect(),
-      boundaryRect: boundaryEl.getBoundingClientRect(),
-      scaleX: domScale.x || 1,
-      scaleY: domScale.y || 1,
-    }
-    document.addEventListener('pointermove', onDragDevice)
-    document.addEventListener('pointerup', stopDragDevice)
-  } else {
-    // Plain drag on a device: treat it as grabbing the room.
-    startDragRoom(event, room)
+  const layout = getDeviceLayout(device)
+  const roomLayout = getRoomLayout(room)
+  const domScale = roomEl
+    ? getRoomDomScale(room, roomEl)
+    : { x: getCanvasDomScale(), y: getCanvasDomScale() }
+  draggingDeviceId.value = device.id
+  deviceDragState = {
+    layoutX: layout.x,
+    layoutY: layout.y,
+    roomW: roomLayout.w,
+    roomH: roomLayout.h,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    elementRect: deviceEl.getBoundingClientRect(),
+    boundaryRect: boundaryEl.getBoundingClientRect(),
+    scaleX: domScale.x || 1,
+    scaleY: domScale.y || 1,
   }
+  document.addEventListener('pointermove', onDragDevice)
+  document.addEventListener('pointerup', stopDragDevice)
 }
 
 function onDragDevice(event: PointerEvent) {
@@ -1155,7 +1152,7 @@ function getRoomConnections(roomId: number) {
         <h2>{{ label('数字孪生 · 2D 房型布局', 'Digital Twin Canvas') }}</h2>
         <div class="canvas-head-actions">
           <span class="hint-pill" v-if="zoomedRoomId === null">
-            {{ isEditMode ? label('编辑模式：拖拽房间或设备节点移动整个房间；按住 Alt 拖拽设备以调整位置；右下角拉伸', 'Edit mode: drag room or any device to move the room; hold Alt while dragging a device to reposition it; resize from bottom-right') : label('使用鼠标滚轮或双指进行「无级缩放 / 画布拖拽」', 'Scroll wheel or pinch zoom to zoom & pan canvas') }}
+            {{ isEditMode ? label('编辑模式：拖拽房间或设备调整位置，右下角拉伸', 'Edit mode: drag rooms or devices to reposition; resize from bottom-right') : label('使用鼠标滚轮或双指进行「无级缩放 / 画布拖拽」', 'Scroll wheel or pinch zoom to zoom & pan canvas') }}
           </span>
           <button class="focus-back-btn" v-else @click="zoomedRoomId = null">
             {{ label('← 返回全局户型图', '← Back to Global View') }}
