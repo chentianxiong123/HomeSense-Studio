@@ -29,6 +29,7 @@ const miCandidatesLoading = ref(false)
 const roomsLoaded = ref(false)
 const roomsLoading = ref(false)
 const creating = ref(false)
+const creatingDevice = ref(false)
 const saving = ref(false)
 const onlineStatus = ref<Record<number, boolean>>({})
 let pingTimer: ReturnType<typeof setInterval> | null = null
@@ -64,6 +65,10 @@ const editingRoomId = ref<number | null>(null)
 const editingRoomName = ref('')
 const editingRoomColor = ref('')
 const editingRoomDeviceIds = ref<number[]>([])
+const deviceCreatorOpen = ref(false)
+const newDeviceName = ref('')
+const newDeviceType = ref('other')
+const newDeviceRoomId = ref<number | null>(null)
 const editingRoom = computed(() =>
   rooms.value.find((room) => room.id === editingRoomId.value) || null
 )
@@ -360,6 +365,149 @@ function toggleEditMode() {
     selectedDeviceId.value = null
   } else {
     closeRoomSettings()
+    closeDeviceCreator()
+  }
+}
+
+function nextRoomName() {
+  const baseName = label('新房间', 'New Room')
+  const usedNames = new Set(rooms.value.map((room) => room.name.trim()))
+  if (!usedNames.has(baseName)) return baseName
+
+  let index = 2
+  while (usedNames.has(`${baseName} ${index}`)) index += 1
+  return `${baseName} ${index}`
+}
+
+function getRoomSpawnLayout(): { x: number; y: number; w: number; h: number } {
+  const w = isMobilePortrait.value ? 200 : 260
+  const h = isMobilePortrait.value ? 150 : 200
+  const viewportEl = viewportRef.value
+  const wrapperEl = transformWrapperRef.value
+  const domScale = getCanvasDomScale() || 1
+
+  if (viewportEl && wrapperEl) {
+    const viewportRect = viewportEl.getBoundingClientRect()
+    const wrapperRect = wrapperEl.getBoundingClientRect()
+    const visibleLeft = (viewportRect.left - wrapperRect.left) / domScale
+    const visibleTop = (viewportRect.top - wrapperRect.top) / domScale
+    const visibleRight = (viewportRect.right - wrapperRect.left) / domScale
+    const visibleBottom = (viewportRect.bottom - wrapperRect.top) / domScale
+    const maxX = Math.max(visibleLeft, visibleRight - w)
+    const maxY = Math.max(visibleTop, visibleBottom - h)
+    const x = Math.min(Math.max(visibleLeft, (visibleLeft + visibleRight - w) / 2), maxX)
+    const y = Math.min(Math.max(visibleTop, (visibleTop + visibleBottom - h) / 2), maxY)
+
+    return { x: Math.round(x), y: Math.round(y), w, h }
+  }
+
+  return {
+    x: Math.round((viewportWidth.value / 2 - panX.value) / scale.value - w / 2),
+    y: Math.round((viewportHeight.value / 2 - panY.value) / scale.value - h / 2),
+    w,
+    h,
+  }
+}
+
+async function createRoomInView() {
+  if (!isEditMode.value || creating.value) return
+
+  creating.value = true
+  errorMessage.value = ''
+  try {
+    const key = currentLayoutKey()
+    const props: RoomPropsDraft = {}
+    props[key] = getRoomSpawnLayout()
+
+    const result = await api.rooms.create({
+      name: nextRoomName(),
+      props,
+    })
+    const room = result.data.room
+    rooms.value = [...rooms.value, room]
+    openRoomSettings(room)
+    showSuccess(label('房间已创建', 'Room created'))
+  } catch (error) {
+    errorMessage.value = (error as Error).message || String(error)
+  } finally {
+    creating.value = false
+  }
+}
+
+function nextDeviceName() {
+  const baseName = label('新设备', 'New Device')
+  const usedNames = new Set(devices.value.map((device) => device.name.trim()))
+  if (!usedNames.has(baseName)) return baseName
+
+  let index = 2
+  while (usedNames.has(`${baseName} ${index}`)) index += 1
+  return `${baseName} ${index}`
+}
+
+function getDeviceSpawnLayout(room: Room | null): { x: number; y: number } {
+  if (!room) return { x: 40, y: 40 }
+  const layout = getRoomLayout(room)
+  return {
+    x: Math.max(16, Math.round(layout.w / 2 - 24)),
+    y: Math.max(16, Math.round(layout.h / 2 - 24)),
+  }
+}
+
+function openDeviceCreator(room?: Room | null) {
+  if (!isEditMode.value) return
+  const targetRoom = room ?? editingRoom.value ?? activeRooms.value[0] ?? rooms.value[0] ?? null
+  deviceCreatorOpen.value = true
+  newDeviceName.value = nextDeviceName()
+  newDeviceType.value = 'other'
+  newDeviceRoomId.value = targetRoom?.id ?? null
+  errorMessage.value = ''
+}
+
+function closeDeviceCreator() {
+  deviceCreatorOpen.value = false
+  newDeviceName.value = ''
+  newDeviceType.value = 'other'
+  newDeviceRoomId.value = null
+}
+
+async function createDeviceFromDialog() {
+  if (creatingDevice.value) return
+
+  const name = newDeviceName.value.trim()
+  if (!name) {
+    errorMessage.value = label('设备名不能为空', 'Device name is required')
+    return
+  }
+
+  const roomId = newDeviceRoomId.value
+  const room = roomId == null ? null : rooms.value.find((entry) => entry.id === Number(roomId)) ?? null
+  if (!room) {
+    errorMessage.value = label('请先选择房间', 'Please select a room first')
+    return
+  }
+
+  creatingDevice.value = true
+  errorMessage.value = ''
+  try {
+    const key = currentLayoutKey()
+    const props: DevicePropsDraft = {
+      device_type: newDeviceType.value,
+      room_id: room.id,
+    }
+    props[key] = getDeviceSpawnLayout(room)
+
+    const result = await api.userDevices.create({ name, props })
+    const device = result.data.device
+    devices.value = [...devices.value, device]
+    if (editingRoomId.value === room.id && !editingRoomDeviceIds.value.includes(device.id)) {
+      editingRoomDeviceIds.value = [...editingRoomDeviceIds.value, device.id]
+    }
+    closeDeviceCreator()
+    showSuccess(label('设备已创建', 'Device created'))
+  } catch (error) {
+    errorMessage.value = (error as Error).message || String(error)
+  } finally {
+    creatingDevice.value = false
   }
 }
 
@@ -916,6 +1064,12 @@ function getRoomConnections(roomId: number) {
           <button class="focus-back-btn" v-else @click="zoomedRoomId = null">
             {{ label('← 返回全局户型图', '← Back to Global View') }}
           </button>
+          <button v-if="isEditMode" class="add-room-btn" type="button" :disabled="creating" @click="createRoomInView">
+            {{ creating ? label('创建中...', 'Creating...') : label('新增房间', 'Add Room') }}
+          </button>
+          <button v-if="isEditMode" class="add-device-btn" type="button" :disabled="creatingDevice || rooms.length === 0" @click="openDeviceCreator()">
+            {{ creatingDevice ? label('创建中...', 'Creating...') : label('新增设备', 'Add Device') }}
+          </button>
           <button class="edit-mode-btn" :class="{ active: isEditMode }" type="button" @click="toggleEditMode">
             {{ isEditMode ? label('退出编辑', 'Exit Edit') : label('编辑房间', 'Edit Rooms') }}
           </button>
@@ -1132,6 +1286,9 @@ function getRoomConnections(roomId: number) {
               <span>{{ label('房间设备', 'Room devices') }}</span>
               <small>{{ label('勾选后会把设备移动到这个房间', 'Checked devices move into this room') }}</small>
             </div>
+            <button class="room-add-device-btn" type="button" :disabled="creatingDevice" @click="openDeviceCreator(editingRoom)">
+              {{ creatingDevice ? label('创建中...', 'Creating...') : label('新增设备到此房间', 'Add Device to Room') }}
+            </button>
             <div class="room-device-list">
               <label v-for="device in roomDeviceOptions" :key="device.id" class="room-device-row">
                 <input v-model="editingRoomDeviceIds" type="checkbox" :value="device.id" />
@@ -1153,6 +1310,58 @@ function getRoomConnections(roomId: number) {
               </button>
               <button class="room-save-btn" type="submit" :disabled="saving">
                 {{ saving ? label('保存中...', 'Saving...') : label('保存', 'Save') }}
+              </button>
+            </div>
+          </footer>
+        </form>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div v-if="deviceCreatorOpen" class="room-settings-overlay" @click="closeDeviceCreator">
+        <form class="room-settings-panel glass-panel" @click.stop @submit.prevent="createDeviceFromDialog">
+          <header class="room-settings-head">
+            <div>
+              <span class="room-settings-kicker">{{ label('设备操作', 'Device Operations') }}</span>
+              <h3>{{ label('新增设备', 'Add Device') }}</h3>
+            </div>
+            <button class="room-settings-close" type="button" @click="closeDeviceCreator">×</button>
+          </header>
+
+          <label class="room-form-field">
+            <span>{{ label('设备名称', 'Device name') }}</span>
+            <input v-model="newDeviceName" type="text" :placeholder="label('例如：客厅电视', 'e.g. Living Room TV')" />
+          </label>
+
+          <label class="room-form-field">
+            <span>{{ label('设备类型', 'Device type') }}</span>
+            <select v-model="newDeviceType">
+              <option v-for="option in deviceTypeOptions" :key="option.value" :value="option.value">
+                {{ isZh ? option.zh : option.en }}
+              </option>
+            </select>
+          </label>
+
+          <label class="room-form-field">
+            <span>{{ label('所属房间', 'Room') }}</span>
+            <select v-model="newDeviceRoomId">
+              <option :value="null">{{ label('请选择房间', 'Select a room') }}</option>
+              <option v-for="room in activeRooms" :key="room.id" :value="room.id">
+                {{ room.name }}
+              </option>
+            </select>
+          </label>
+
+          <footer class="room-settings-actions">
+            <span class="device-create-note">
+              {{ label('创建后会出现在房间中心，可继续拖拽调整位置。', 'It will appear in the room center and can be dragged afterward.') }}
+            </span>
+            <div class="room-settings-save-group">
+              <button class="room-cancel-btn" type="button" :disabled="creatingDevice" @click="closeDeviceCreator">
+                {{ label('取消', 'Cancel') }}
+              </button>
+              <button class="room-save-btn" type="submit" :disabled="creatingDevice">
+                {{ creatingDevice ? label('创建中...', 'Creating...') : label('创建设备', 'Create Device') }}
               </button>
             </div>
           </footer>
@@ -1257,6 +1466,41 @@ function getRoomConnections(roomId: number) {
   border: 1px solid rgba(0,0,0,0.08);
 }
 .reset-zoom-btn:hover { border-color: #10b981; color: #10b981; }
+
+.add-room-btn,
+.add-device-btn {
+  padding: 8px 18px;
+  border-radius: 10px;
+  font-weight: 900;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #fff;
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.24);
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.12);
+}
+
+.add-device-btn {
+  color: #2563eb;
+  border-color: rgba(37, 99, 235, 0.22);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.1);
+}
+
+.add-room-btn:hover:not(:disabled),
+.add-device-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: #ecfdf5;
+}
+
+.add-device-btn:hover:not(:disabled) {
+  background: #eff6ff;
+}
+
+.add-room-btn:disabled,
+.add-device-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 
 .edit-mode-btn {
   padding: 8px 18px;
@@ -1840,7 +2084,8 @@ function getRoomConnections(roomId: number) {
   font-weight: 900;
 }
 
-.room-form-field input {
+.room-form-field input,
+.room-form-field select {
   height: 44px;
   padding: 0 14px;
   border: 1px solid rgba(15, 23, 42, 0.1);
@@ -1852,7 +2097,8 @@ function getRoomConnections(roomId: number) {
   outline: none;
 }
 
-.room-form-field input:focus {
+.room-form-field input:focus,
+.room-form-field select:focus {
   border-color: #10b981;
   box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.12);
 }
@@ -1892,6 +2138,26 @@ function getRoomConnections(roomId: number) {
   color: var(--text-tertiary);
   font-size: 11px;
   font-weight: 700;
+}
+
+.room-add-device-btn {
+  height: 40px;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: 14px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.room-add-device-btn:hover:not(:disabled) {
+  background: #dbeafe;
+}
+
+.room-add-device-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .room-device-list {
@@ -1957,6 +2223,13 @@ function getRoomConnections(roomId: number) {
 .room-settings-save-group {
   display: flex;
   gap: 10px;
+}
+
+.device-create-note {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
 }
 
 .room-delete-btn,
