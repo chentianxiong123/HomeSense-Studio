@@ -39,7 +39,6 @@ let pingTimer: ReturnType<typeof setInterval> | null = null
 const selectedDeviceId = ref<number | null>(null)
 const viewportWidth = ref(1000)
 const viewportHeight = ref(700)
-const zoomedRoomId = ref<number | null>(null)
 const isEditMode = ref(false)
 
 type LayoutKey = 'desktop' | 'mobile'
@@ -153,14 +152,6 @@ function ensureRoomLayout(room: Room): RoomLayoutDraft {
 }
 
 function getRoomCardStyle(room: Room) {
-  if (zoomedRoomId.value === room.id) {
-    return {
-      width: `${viewportWidth.value - 40}px`,
-      height: `${viewportHeight.value - 120}px`,
-      background: getRoomBackground(room, 'rgba(255, 255, 255, 0.85)'),
-    }
-  }
-
   const layout = getRoomLayout(room)
   return {
     left: `${layout.x}px`,
@@ -315,14 +306,6 @@ function clampResizeVisualDelta(delta: number, currentSize: number, minSize: num
 }
 
 function getRoomVisualLayout(room: Room): { x: number; y: number; w: number; h: number } {
-  if (zoomedRoomId.value === room.id) {
-    return {
-      x: 20,
-      y: 20,
-      w: viewportWidth.value - 40,
-      h: viewportHeight.value - 120,
-    }
-  }
   return getRoomLayout(room)
 }
 
@@ -430,7 +413,6 @@ function startPing() {
 function toggleEditMode() {
   isEditMode.value = !isEditMode.value
   if (isEditMode.value) {
-    zoomedRoomId.value = null
     selectedDeviceId.value = null
   } else {
     closeRoomSettings()
@@ -585,7 +567,6 @@ function roomNameForDevice(device: UserDevice): string {
 
 // Zoom & Pan Wheel handlers
 function handleWheel(event: WheelEvent) {
-  if (zoomedRoomId.value !== null) return
   event.preventDefault()
   const zoomFactor = 0.08
   const nextScale = event.deltaY < 0 ? scale.value + zoomFactor : scale.value - zoomFactor
@@ -594,7 +575,6 @@ function handleWheel(event: WheelEvent) {
 
 // Pan Canvas
 function startPan(event: PointerEvent) {
-  if (zoomedRoomId.value !== null) return
   if (event.target !== event.currentTarget) return
   isPanning.value = true
   panStartRawX.value = event.clientX - panX.value
@@ -619,7 +599,6 @@ const initialTouchDistance = ref<number | null>(null)
 const initialScale = ref(1)
 
 function handleTouchStart(event: TouchEvent) {
-  if (zoomedRoomId.value !== null) return
   if (event.touches.length === 2) {
     const t1 = event.touches[0]!
     const t2 = event.touches[1]!
@@ -629,7 +608,6 @@ function handleTouchStart(event: TouchEvent) {
 }
 
 function handleTouchMove(event: TouchEvent) {
-  if (zoomedRoomId.value !== null) return
   if (event.touches.length === 2 && initialTouchDistance.value !== null) {
     event.preventDefault()
     const t1 = event.touches[0]!
@@ -686,7 +664,7 @@ let roomResizeState: ElementResizeState | null = null
 let deviceDragState: ElementMoveState | null = null
 
 function startDragRoom(event: PointerEvent, room: Room) {
-  if (!isEditMode.value || zoomedRoomId.value === room.id) return
+  if (!isEditMode.value) return
   // If the pointerdown came from a child device, let the device handler own it.
   // Devices have their own drag (reposition within the room); the room only
   // moves when the user grabs the room's own background.
@@ -744,7 +722,7 @@ async function stopDragRoom() {
 }
 
 function startResizeRoom(event: PointerEvent, room: Room) {
-  if (!isEditMode.value || zoomedRoomId.value === room.id) return
+  if (!isEditMode.value) return
   const roomEl = roomElementRefs.get(room.id)
   const viewportEl = viewportRef.value
   if (!roomEl || !viewportEl) return
@@ -1011,7 +989,6 @@ async function deleteEditingRoom() {
     await Promise.all(deviceUpdates)
     await api.rooms.delete(room.id)
     rooms.value = rooms.value.filter((entry) => entry.id !== room.id)
-    if (zoomedRoomId.value === room.id) zoomedRoomId.value = null
     closeRoomSettings()
     showSuccess(label('房间已删除', 'Room deleted'))
   } catch (error) {
@@ -1107,10 +1084,9 @@ function getRoomConnections(roomId: number) {
   if (!room) return []
   const roomLayout = getRoomLayout(room)
   const roomDevices = devices.value.filter((d) => propNumber(d, 'room_id') === roomId)
-  const isZoomed = zoomedRoomId.value === roomId
   const lines: Array<{ x1: number; y1: number; x2: number; y2: number; id: string }> = []
   const processed = new Set<string>()
-  const nodeOffset = isZoomed ? { x: 77, y: 57 } : { x: 24, y: 24 }
+  const nodeOffset = { x: 24, y: 24 }
 
   // SVG connection lines are rendered inside the room card, so the endpoints
   // are in the room's local coordinate system (relative to the room's origin).
@@ -1147,16 +1123,13 @@ function getRoomConnections(roomId: number) {
 <template>
   <div class="devices-page-2d">
     <!-- Left interactive floor plan canvas (Takes Full Width) -->
-    <main class="canvas-area glass-panel" :class="{ 'room-focused': zoomedRoomId !== null }">
+    <main class="canvas-area glass-panel">
       <header class="canvas-head">
         <h2>{{ label('数字孪生 · 2D 房型布局', 'Digital Twin Canvas') }}</h2>
         <div class="canvas-head-actions">
-          <span class="hint-pill" v-if="zoomedRoomId === null">
+          <span class="hint-pill">
             {{ isEditMode ? label('编辑模式：拖拽房间或设备调整位置，右下角拉伸', 'Edit mode: drag rooms or devices to reposition; resize from bottom-right') : label('使用鼠标滚轮或双指进行「无级缩放 / 画布拖拽」', 'Scroll wheel or pinch zoom to zoom & pan canvas') }}
           </span>
-          <button class="focus-back-btn" v-else @click="zoomedRoomId = null">
-            {{ label('← 返回全局户型图', '← Back to Global View') }}
-          </button>
           <button v-if="isEditMode" class="add-room-btn" type="button" :disabled="creating" @click="createRoomInView">
             {{ creating ? label('创建中...', 'Creating...') : label('新增房间', 'Add Room') }}
           </button>
@@ -1166,7 +1139,7 @@ function getRoomConnections(roomId: number) {
           <button class="edit-mode-btn" :class="{ active: isEditMode }" type="button" @click="toggleEditMode">
             {{ isEditMode ? label('退出编辑', 'Exit Edit') : label('编辑房间', 'Edit Rooms') }}
           </button>
-          <button class="reset-zoom-btn" v-if="zoomedRoomId === null && (scale !== 1 || panX !== 0 || panY !== 0)" @click="resetZoom">
+          <button class="reset-zoom-btn" v-if="scale !== 1 || panX !== 0 || panY !== 0" @click="resetZoom">
             {{ label('重置缩放', 'Reset View') }}
           </button>
         </div>
@@ -1201,8 +1174,6 @@ function getRoomConnections(roomId: number) {
             :ref="(el) => setRoomElementRef(room.id, el)"
             class="room-card"
             :class="{
-              'zoomed-in': zoomedRoomId === room.id,
-              'zoomed-out': zoomedRoomId !== null && zoomedRoomId !== room.id,
               editing: isEditMode,
               resizing: resizingRoomId === room.id,
             }"
@@ -1229,7 +1200,7 @@ function getRoomConnections(roomId: number) {
             </div>
 
             <button
-              v-if="isEditMode && zoomedRoomId !== room.id"
+              v-if="isEditMode"
               class="room-edit-gear"
               type="button"
               @pointerdown.stop.prevent
@@ -1239,7 +1210,7 @@ function getRoomConnections(roomId: number) {
             </button>
 
             <div
-              v-if="isEditMode && zoomedRoomId !== room.id"
+              v-if="isEditMode"
               class="room-resize-handle"
               @pointerdown="startResizeRoom($event, room)"
             ></div>
@@ -1255,39 +1226,21 @@ function getRoomConnections(roomId: number) {
                 online: onlineStatus[dev.id] === true,
                 offline: onlineStatus[dev.id] === false,
                 'in-group': dev.props?.group_id,
-                'zoomed-mode': zoomedRoomId === room.id
               }"
               :style="getDeviceStyle(dev)"
               @pointerdown="startDragDevice($event, dev)"
               @click.stop="isEditMode ? null : selectDevice(dev)"
               @dblclick.stop="isEditMode ? null : router.push(`/devices/${dev.id}`)"
             >
-              <!-- Normal Mode Icon -->
-              <div v-if="zoomedRoomId !== room.id" class="node-icon" :class="`icon-${deviceIcon(propString(dev, 'device_type'))}`">
+              <div class="node-icon" :class="`icon-${deviceIcon(propString(dev, 'device_type'))}`">
                 <svg v-if="deviceIcon(propString(dev, 'device_type')) === 'tv'" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
                 <svg v-else-if="deviceIcon(propString(dev, 'device_type')) === 'speaker'" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="4" y="2" width="16" height="20" rx="3"></rect><circle cx="12" cy="14" r="3"></circle><line x1="12" y1="7" x2="12" y2="9"></line></svg>
                 <svg v-else-if="deviceIcon(propString(dev, 'device_type')) === 'phone'" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="5" y="2" width="14" height="20" rx="3"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>
                 <svg v-else viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
               </div>
 
-              <!-- ZOOMED MODE: High fidelity Detail Card directly inside Room! -->
-              <div v-else class="detailed-card-inside">
-                <div class="detailed-head">
-                  <span class="d-dot" :class="onlineStatus[dev.id] ? 'online' : 'offline'"></span>
-                  <strong class="d-title">{{ dev.name }}</strong>
-                </div>
-                <p class="d-type">{{ typeLabel(propString(dev, 'device_type') || 'other') }}</p>
-                <div class="d-props monospace" v-if="propString(dev, 'ip_address') || propString(dev, 'adb_ip')">
-                  <span>{{ propString(dev, 'ip_address') || propString(dev, 'adb_ip').split(':')[0] }}</span>
-                </div>
-                <div class="d-group-indicator" v-if="dev.props?.group_id">
-                  <span>⛓ {{ dev.props.group_name }}</span>
-                </div>
-                <div class="d-click-hint">{{ label('双击配置', 'Double-click') }}</div>
-              </div>
-
-              <span v-if="zoomedRoomId !== room.id" class="node-name">{{ dev.name }}</span>
-              <span v-if="dev.props?.group_id && zoomedRoomId !== room.id" class="node-group-badge">⛓</span>
+              <span class="node-name">{{ dev.name }}</span>
+              <span v-if="dev.props?.group_id" class="node-group-badge">⛓</span>
             </div>
           </div>
         </div>
@@ -1719,22 +1672,6 @@ function getRoomConnections(roomId: number) {
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
 }
 
-.room-card.zoomed-in {
-  position: absolute !important;
-  left: 20px !important;
-  top: 20px !important;
-  z-index: 100;
-  border-color: #10b981 !important;
-  cursor: default !important;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.1) !important;
-  padding: 24px;
-}
-
-.room-card.zoomed-out {
-  opacity: 0.05;
-  pointer-events: none;
-}
-
 /* Room connection SVG */
 .room-connections-svg {
   position: absolute;
@@ -1857,88 +1794,6 @@ function getRoomConnections(roomId: number) {
   align-items: center;
   justify-content: center;
   pointer-events: none;
-}
-
-/* ZOOMED HIGH-FIDELITY MODE */
-.device-node.zoomed-mode {
-  width: 154px !important;
-  height: 114px !important;
-  border-radius: 18px !important;
-  background: #fff !important;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04) !important;
-  border: 1px solid rgba(0,0,0,0.06) !important;
-  cursor: grab;
-}
-
-.device-node.zoomed-mode.active {
-  border-color: #10b981 !important;
-  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15) !important;
-}
-
-.detailed-card-inside {
-  width: 100%;
-  height: 100%;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  box-sizing: border-box;
-  pointer-events: none;
-  text-align: left;
-}
-
-.detailed-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.d-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.d-dot.online { background: #10b981; }
-.d-dot.offline { background: #ef4444; }
-
-.d-title {
-  font-size: 13px;
-  font-weight: 900;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.d-type {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-tertiary);
-  margin: 2px 0 0;
-}
-
-.d-props {
-  font-size: 10px;
-  color: var(--text-secondary);
-  opacity: 0.8;
-  margin-top: auto;
-}
-
-.d-group-indicator {
-  font-size: 10px;
-  color: #6366f1;
-  font-weight: 800;
-  margin-top: 2px;
-}
-
-.d-click-hint {
-  font-size: 9px;
-  font-weight: 800;
-  color: #10b981;
-  opacity: 0.7;
-  text-align: right;
-  margin-top: 2px;
 }
 
 /* Floating Bottom Drawer Modal for Device Details */
@@ -2392,12 +2247,6 @@ function getRoomConnections(roomId: number) {
     transform: scale(0.7) !important;
     transform-origin: top left !important;
   }
-
-  .room-card.zoomed-in {
-    transform: none !important;
-    width: calc(100% - 20px) !important;
-    height: calc(100% - 20px) !important;
-  }
 }
 
 @media (max-width: 640px) {
@@ -2415,10 +2264,6 @@ function getRoomConnections(roomId: number) {
 
   .room-card {
     transform: scale(0.55) !important;
-  }
-
-  .room-card.zoomed-in {
-    transform: none !important;
   }
 }
 </style>
