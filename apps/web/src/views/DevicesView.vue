@@ -932,11 +932,7 @@ async function deleteEditingRoom() {
 
 function handleRoomDblClick(room: Room) {
   if (isEditMode.value) return
-  if (zoomedRoomId.value === room.id) {
-    zoomedRoomId.value = null // Zoom out
-  } else {
-    zoomedRoomId.value = room.id // Zoom in
-  }
+  router.push({ name: 'room-detail', params: { id: String(room.id) } })
 }
 
 const deviceTypeOptions = [

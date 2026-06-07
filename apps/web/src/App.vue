@@ -8,6 +8,7 @@ const router = useRouter()
 const { locale, setLocale, t } = useLocale()
 
 const menuOpen = ref(false)
+const isFullscreen = computed(() => Boolean(route.meta?.fullscreen))
 
 const navItems = computed(() => [
   { key: 'chat', label: t('app.chat'), route: '/chat' },
@@ -31,7 +32,7 @@ function navigateTo(target: string) {
 
 <template>
   <div class="app-container">
-    <header class="app-header">
+    <header v-if="!isFullscreen" class="app-header">
       <!-- Hamburger Menu Button for Mobile -->
       <button class="menu-toggle-btn" @click="menuOpen = !menuOpen" :aria-label="menuOpen ? 'Close Menu' : 'Open Menu'">
         <svg v-if="!menuOpen" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
@@ -62,7 +63,7 @@ function navigateTo(target: string) {
 
     <!-- Mobile Slide-out Drawer Navigation -->
     <Teleport to="body">
-      <div v-if="menuOpen" class="mobile-drawer-overlay" @click="menuOpen = false">
+      <div v-if="menuOpen && !isFullscreen" class="mobile-drawer-overlay" @click="menuOpen = false">
         <nav class="mobile-drawer" @click.stop>
           <div class="drawer-header">
             <strong>HomeSense Menu</strong>
