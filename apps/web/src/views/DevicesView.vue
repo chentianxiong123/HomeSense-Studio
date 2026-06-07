@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { api, type UserDevice, type Room, type MiDeviceCandidate } from '@/api'
 import { cliApi } from '@/api/cli'
 import { useLocale } from '@/composables/useLocale'
+import { pixelToRatio, ratioToPixel, looksLikeRatio, clampRatio } from '@/utils/roomCoords'
 
 const { locale } = useLocale()
 const isZh = computed(() => locale.value === 'zh')
@@ -42,15 +43,18 @@ const zoomedRoomId = ref<number | null>(null)
 const isEditMode = ref(false)
 
 type LayoutKey = 'desktop' | 'mobile'
+// Room layout: canvas-pixel coordinates (x, y, w, h) on the floor plan.
 type RoomLayoutDraft = { x?: number; y?: number; w?: number; h?: number }
 type RoomPropsDraft = Record<string, unknown> & {
   desktop?: RoomLayoutDraft
   mobile?: RoomLayoutDraft
   bgColor?: string
 }
+// Device layout: 0..1 ratios relative to the parent room's width/height.
+type DeviceRatio = { x?: number; y?: number }
 type DevicePropsDraft = Record<string, unknown> & {
-  desktop?: RoomLayoutDraft
-  mobile?: RoomLayoutDraft
+  desktop?: DeviceRatio
+  mobile?: DeviceRatio
 }
 
 const roomColorPresets = [
@@ -167,17 +171,17 @@ function getRoomCardStyle(room: Room) {
   }
 }
 
-function getDeviceLayoutSource(device: UserDevice): RoomLayoutDraft {
+function getDeviceLayoutSource(device: UserDevice): DeviceRatio {
   const props = (device.props && typeof device.props === 'object'
     ? device.props
     : {}) as DevicePropsDraft
   if (props !== device.props) device.props = props
   const layout = props[currentLayoutKey()]
   if (layout && typeof layout === 'object') return layout
-  return props as RoomLayoutDraft
+  return {} as DeviceRatio
 }
 
-function ensureDeviceLayout(device: UserDevice): RoomLayoutDraft {
+function ensureDeviceLayout(device: UserDevice): DeviceRatio {
   const props = (device.props && typeof device.props === 'object'
     ? device.props
     : {}) as DevicePropsDraft
@@ -185,18 +189,43 @@ function ensureDeviceLayout(device: UserDevice): RoomLayoutDraft {
   const key = currentLayoutKey()
   const existing = props[key]
   if (!existing || typeof existing !== 'object') {
-    const layout = getDeviceLayout(device)
-    props[key] = { x: layout.x, y: layout.y }
+    props[key] = { x: 0.5, y: 0.5 }
     device.props = props
   }
-  return props[key] as RoomLayoutDraft
+  return props[key] as DeviceRatio
 }
 
+// Returns the device's position as a 0..1 ratio relative to its parent room.
 function getDeviceLayout(device: UserDevice): { x: number; y: number } {
   const layout = getDeviceLayoutSource(device)
   return {
-    x: layout.x ?? 40,
-    y: layout.y ?? 40,
+    x: typeof layout.x === 'number' ? layout.x : 0.5,
+    y: typeof layout.y === 'number' ? layout.y : 0.5,
+  }
+}
+
+// Find the parent room for a device, falling back to the active or first room.
+function findParentRoom(device: UserDevice): Room | null {
+  const explicit = propNumber(device, 'room_id')
+  if (explicit != null) {
+    const r = rooms.value.find((room) => room.id === explicit)
+    if (r) return r
+  }
+  return activeRooms.value[0] ?? rooms.value[0] ?? null
+}
+
+// Returns the device's pixel position **inside its parent room** — the device
+// is rendered as a descendant of the room card, so its CSS left/top are
+// relative to the room's origin, not the canvas. Devices without a parent
+// room are hidden (display: none).
+function getDeviceStyle(device: UserDevice) {
+  const room = findParentRoom(device)
+  if (!room) return { display: 'none' }
+  const roomLayout = getRoomLayout(room)
+  const ratio = getDeviceLayout(device)
+  return {
+    left: `${ratio.x * roomLayout.w}px`,
+    top: `${ratio.y * roomLayout.h}px`,
   }
 }
 
@@ -317,8 +346,8 @@ async function loadData() {
     devices.value = devRes.devices ?? []
     rooms.value = roomRes.rooms ?? []
 
-    // Auto initialize coordinates
-    let changed = false
+    // Auto initialize room coordinates
+    let roomChanged = false
     const key = currentLayoutKey()
     for (const room of rooms.value) {
       const props = roomPropsRecord(room)
@@ -332,17 +361,57 @@ async function loadData() {
         }
         room.props = props
         await api.rooms.update(room.id, { props: room.props })
-        changed = true
+        roomChanged = true
       }
     }
-    if (changed) {
+    if (roomChanged) {
       const roomRes2 = await api.rooms.list()
       rooms.value = roomRes2.rooms ?? []
     }
+
+    // One-time migration: device position used to be canvas-pixel coordinates.
+    // Convert any legacy pixel data to room-relative 0..1 ratios.
+    await migrateLegacyDevicePositions()
   } catch (error) {
     errorMessage.value = (error as Error).message || String(error)
   } finally {
     loading.value = false
+  }
+}
+
+// Detects legacy pixel-coordinate data on devices and converts it to the
+// new ratio system. Idempotent: ratio values are in [0..1] and pass
+// `looksLikeRatio` so already-migrated records are left alone.
+async function migrateLegacyDevicePositions() {
+  const key = currentLayoutKey()
+  for (const device of devices.value) {
+    const roomId = propNumber(device, 'room_id')
+    const room = roomId == null ? null : rooms.value.find((r) => r.id === roomId) ?? null
+    if (!room) continue
+
+    const roomLayout = getRoomLayout(room)
+    if (roomLayout.w <= 0 || roomLayout.h <= 0) continue
+
+    const props = (device.props && typeof device.props === 'object'
+      ? device.props
+      : {}) as DevicePropsDraft
+    if (props !== device.props) device.props = props
+
+    const current = props[key] as DeviceRatio | undefined
+    // Source: prefer the named key, then fall back to legacy top-level x/y.
+    const srcX = current?.x ?? (typeof (props as Record<string, unknown>).x === 'number' ? (props as Record<string, unknown>).x as number : undefined)
+    const srcY = current?.y ?? (typeof (props as Record<string, unknown>).y === 'number' ? (props as Record<string, unknown>).y as number : undefined)
+    if (typeof srcX !== 'number' || typeof srcY !== 'number') continue
+    if (looksLikeRatio(srcX) && looksLikeRatio(srcY)) continue
+
+    const ratio = pixelToRatio(srcX, srcY, roomLayout.x, roomLayout.y, roomLayout.w, roomLayout.h)
+    const clamped = clampRatio(ratio.x, ratio.y)
+    props[key] = { x: clamped.x, y: clamped.y }
+    // Strip legacy top-level x/y so the device doesn't fall back to them.
+    delete (props as Record<string, unknown>).x
+    delete (props as Record<string, unknown>).y
+    device.props = props
+    await api.userDevices.update(device.id, { props })
   }
 }
 
@@ -445,12 +514,9 @@ function nextDeviceName() {
 }
 
 function getDeviceSpawnLayout(room: Room | null): { x: number; y: number } {
-  if (!room) return { x: 40, y: 40 }
-  const layout = getRoomLayout(room)
-  return {
-    x: Math.max(16, Math.round(layout.w / 2 - 24)),
-    y: Math.max(16, Math.round(layout.h / 2 - 24)),
-  }
+  // Returns a ratio [0..1] so the device spawns at the room's center.
+  if (!room) return { x: 0.5, y: 0.5 }
+  return { x: 0.5, y: 0.5 }
 }
 
 function openDeviceCreator(room?: Room | null) {
@@ -599,6 +665,9 @@ type ElementMoveState = {
   boundaryRect: DOMRect
   scaleX: number
   scaleY: number
+  // Only set when the dragged element is a device (in room-relative ratios).
+  roomW?: number
+  roomH?: number
 }
 
 type ElementResizeState = {
@@ -732,20 +801,23 @@ function startDragDevice(event: PointerEvent, device: UserDevice) {
   event.stopPropagation()
   event.preventDefault()
 
-  const layout = getDeviceLayout(device)
-  const roomId = propNumber(device, 'room_id')
-  const room = rooms.value.find((r) => r.id === roomId)
-  const roomEl = room ? roomElementRefs.get(room.id) : null
+  const room = findParentRoom(device)
+  if (!room) return
+  const roomEl = roomElementRefs.get(room.id) ?? null
   const boundaryEl = roomEl ?? viewportRef.value
   if (!boundaryEl) return
 
-  const domScale = room && roomEl
+  const layout = getDeviceLayout(device)
+  const roomLayout = getRoomLayout(room)
+  const domScale = roomEl
     ? getRoomDomScale(room, roomEl)
     : { x: getCanvasDomScale(), y: getCanvasDomScale() }
   draggingDeviceId.value = device.id
   deviceDragState = {
     layoutX: layout.x,
     layoutY: layout.y,
+    roomW: roomLayout.w,
+    roomH: roomLayout.h,
     clientX: event.clientX,
     clientY: event.clientY,
     elementRect: deviceEl.getBoundingClientRect(),
@@ -768,9 +840,21 @@ function onDragDevice(event: PointerEvent) {
   const dx = clampVisualDelta(rawDx, state.elementRect.left, state.elementRect.right, state.boundaryRect.left, state.boundaryRect.right)
   const dy = clampVisualDelta(rawDy, state.elementRect.top, state.elementRect.bottom, state.boundaryRect.top, state.boundaryRect.bottom)
 
+  // Convert canvas-pixel delta to ratio delta. Divide by room width/height,
+  // not by canvas scale — the room's pixel size is the meaningful unit.
   const deviceLayout = ensureDeviceLayout(device)
-  deviceLayout.x = Math.max(0, state.layoutX + dx / state.scaleX)
-  deviceLayout.y = Math.max(0, state.layoutY + dy / state.scaleY)
+  if (state.roomW && state.roomH) {
+    const next = clampRatio(
+      state.layoutX + (dx / state.scaleX) / state.roomW,
+      state.layoutY + (dy / state.scaleY) / state.roomH
+    )
+    deviceLayout.x = next.x
+    deviceLayout.y = next.y
+  } else {
+    // Fallback: write as ratio centered in the room.
+    deviceLayout.x = 0.5
+    deviceLayout.y = 0.5
+  }
 }
 
 async function stopDragDevice() {
@@ -1012,18 +1096,26 @@ async function disbandGroup() {
 
 // Generate connection lines inside room SVG
 function getRoomConnections(roomId: number) {
+  const room = rooms.value.find((r) => r.id === roomId)
+  if (!room) return []
+  const roomLayout = getRoomLayout(room)
   const roomDevices = devices.value.filter((d) => propNumber(d, 'room_id') === roomId)
   const isZoomed = zoomedRoomId.value === roomId
   const lines: Array<{ x1: number; y1: number; x2: number; y2: number; id: string }> = []
   const processed = new Set<string>()
   const nodeOffset = isZoomed ? { x: 77, y: 57 } : { x: 24, y: 24 }
 
+  // SVG connection lines are rendered inside the room card, so the endpoints
+  // are in the room's local coordinate system (relative to the room's origin).
+  function toRoomXY(d: UserDevice) {
+    const r = getDeviceLayout(d)
+    return { x: r.x * roomLayout.w, y: r.y * roomLayout.h }
+  }
+
   for (const d of roomDevices) {
     const gid = d.props?.group_id
     if (!gid) continue
-    const layout = getDeviceLayout(d)
-    const x1 = layout.x
-    const y1 = layout.y
+    const a = toRoomXY(d)
 
     const partners = roomDevices.filter((p) => p.id !== d.id && p.props?.group_id === gid)
     for (const p of partners) {
@@ -1031,14 +1123,12 @@ function getRoomConnections(roomId: number) {
       if (processed.has(key)) continue
       processed.add(key)
 
-      const pLayout = getDeviceLayout(p)
-      const x2 = pLayout.x
-      const y2 = pLayout.y
+      const b = toRoomXY(p)
       lines.push({
-        x1: x1 + nodeOffset.x,
-        y1: y1 + nodeOffset.y,
-        x2: x2 + nodeOffset.x,
-        y2: y2 + nodeOffset.y,
+        x1: a.x + nodeOffset.x,
+        y1: a.y + nodeOffset.y,
+        x2: b.x + nodeOffset.x,
+        y2: b.y + nodeOffset.y,
         id: key,
       })
     }
@@ -1160,10 +1250,7 @@ function getRoomConnections(roomId: number) {
                 'in-group': dev.props?.group_id,
                 'zoomed-mode': zoomedRoomId === room.id
               }"
-              :style="{
-                left: getDeviceLayout(dev).x + 'px',
-                top: getDeviceLayout(dev).y + 'px',
-              }"
+              :style="getDeviceStyle(dev)"
               @pointerdown="startDragDevice($event, dev)"
               @click.stop="isEditMode ? null : selectDevice(dev)"
               @dblclick.stop="isEditMode ? null : router.push(`/devices/${dev.id}`)"

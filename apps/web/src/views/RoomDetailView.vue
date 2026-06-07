@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, type UserDevice, type Room } from '@/api'
 import { useLocale } from '@/composables/useLocale'
+import { ratioToPixel, looksLikeRatio, clampRatio, pixelToRatio } from '@/utils/roomCoords'
 
 const route = useRoute()
 const router = useRouter()
@@ -33,9 +34,11 @@ type RoomPropsDraft = Record<string, unknown> & {
   mobile?: RoomLayoutDraft
   bgColor?: string
 }
+// Device position is stored as a 0..1 ratio relative to the parent room.
+type DeviceRatio = { x?: number; y?: number }
 type DevicePropsDraft = Record<string, unknown> & {
-  desktop?: RoomLayoutDraft
-  mobile?: RoomLayoutDraft
+  desktop?: DeviceRatio
+  mobile?: DeviceRatio
 }
 
 function currentLayoutKey(): 'desktop' | 'mobile' {
@@ -69,30 +72,32 @@ function getRoomLayout(r: Room) {
   }
 }
 
-function getDeviceLayoutSource(d: UserDevice): RoomLayoutDraft {
+function getDeviceLayoutSource(d: UserDevice): DeviceRatio {
   const props = (d.props && typeof d.props === 'object' ? d.props : {}) as DevicePropsDraft
   if (props !== d.props) d.props = props
   const layout = props[currentLayoutKey()]
   if (layout && typeof layout === 'object') return layout
-  return props as RoomLayoutDraft
+  return {} as DeviceRatio
 }
 
-function ensureDeviceLayout(d: UserDevice): RoomLayoutDraft {
+function ensureDeviceLayout(d: UserDevice): DeviceRatio {
   const props = (d.props && typeof d.props === 'object' ? d.props : {}) as DevicePropsDraft
   if (props !== d.props) d.props = props
   const key = currentLayoutKey()
   const existing = props[key]
   if (!existing || typeof existing !== 'object') {
-    const layout = getDeviceLayout(d)
-    props[key] = { x: layout.x, y: layout.y }
+    props[key] = { x: 0.5, y: 0.5 }
     d.props = props
   }
-  return props[key] as RoomLayoutDraft
+  return props[key] as DeviceRatio
 }
 
 function getDeviceLayout(d: UserDevice) {
   const layout = getDeviceLayoutSource(d)
-  return { x: layout.x ?? 40, y: layout.y ?? 40 }
+  return {
+    x: typeof layout.x === 'number' ? layout.x : 0.5,
+    y: typeof layout.y === 'number' ? layout.y : 0.5,
+  }
 }
 
 function propString(d: UserDevice | null, key: string): string {
@@ -170,8 +175,17 @@ const roomStyle = computed(() => {
 })
 
 function getDeviceStyle(d: UserDevice) {
+  if (!room.value) return { display: 'none' }
+  // The device is rendered inside the room card. The room fills the inner
+  // viewport minus 40px margin, so the device's room-relative position is
+  // ratio * (room size).
+  const roomW = Math.max(320, viewportW.value - 80)
+  const roomH = Math.max(240, viewportH.value - 80)
   const layout = getDeviceLayout(d)
-  return { left: `${layout.x}px`, top: `${layout.y}px` }
+  return {
+    left: `${layout.x * roomW}px`,
+    top: `${layout.y * roomH}px`,
+  }
 }
 
 // Drag and resize — single-room context, so simpler than DevicesView
@@ -181,16 +195,17 @@ function setDeviceElementRef(id: number, el: unknown) {
   else deviceElementRefs.delete(id)
 }
 
-type DragState = { x: number; y: number; elRect: DOMRect; scale: number }
-let deviceDragState: DragState | null = null
-
-function getDeviceScale(d: UserDevice, el: HTMLElement) {
-  const layout = getDeviceLayout(d)
-  const r = el.getBoundingClientRect()
-  return layout.x !== 0 || layout.y !== 0
-    ? Math.max(0.0001, r.width / 60)
-    : 1
+type DragState = {
+  x: number
+  y: number
+  clientX: number
+  clientY: number
+  roomW: number
+  roomH: number
+  elRect: DOMRect
+  boundaryRect: DOMRect
 }
+let deviceDragState: DragState | null = null
 
 function startDragDevice(event: PointerEvent, d: UserDevice) {
   if (!isEditMode.value) return
@@ -199,11 +214,17 @@ function startDragDevice(event: PointerEvent, d: UserDevice) {
   event.preventDefault()
   event.stopPropagation()
   const layout = getDeviceLayout(d)
+  const roomW = Math.max(320, viewportW.value - 80)
+  const roomH = Math.max(240, viewportH.value - 80)
   deviceDragState = {
     x: layout.x,
     y: layout.y,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    roomW,
+    roomH,
     elRect: el.getBoundingClientRect(),
-    scale: getDeviceScale(d, el),
+    boundaryRect: (viewportEl.value?.getBoundingClientRect() ?? el.getBoundingClientRect()),
   }
   draggingDeviceId.value = d.id
   document.addEventListener('pointermove', onDragDevice)
@@ -213,11 +234,23 @@ function onDragDevice(event: PointerEvent) {
   if (draggingDeviceId.value === null || !deviceDragState) return
   const d = devices.value.find(x => x.id === draggingDeviceId.value)
   if (!d) return
-  const dx = event.clientX - deviceDragState.elRect.left
-  const dy = event.clientY - deviceDragState.elRect.top
+
+  const state = deviceDragState
+  const dx = event.clientX - state.clientX
+  const dy = event.clientY - state.clientY
+  // Convert pixel delta to ratio delta. Boundary is the viewport itself.
+  const maxDx = state.boundaryRect.right - state.elRect.left
+  const maxDy = state.boundaryRect.bottom - state.elRect.top
+  const clampedDx = Math.max(-state.elRect.width / 2, Math.min(dx, maxDx - state.elRect.width / 2))
+  const clampedDy = Math.max(-state.elRect.height / 2, Math.min(dy, maxDy - state.elRect.height / 2))
+
   const deviceLayout = ensureDeviceLayout(d)
-  deviceLayout.x = Math.max(0, deviceDragState.x + (dx - deviceDragState.elRect.width / 2) / deviceDragState.scale)
-  deviceLayout.y = Math.max(0, deviceDragState.y + (dy - deviceDragState.elRect.height / 2) / deviceDragState.scale)
+  const next = clampRatio(
+    state.x + clampedDx / state.roomW,
+    state.y + clampedDy / state.roomH
+  )
+  deviceLayout.x = next.x
+  deviceLayout.y = next.y
 }
 async function stopDragDevice() {
   if (draggingDeviceId.value === null) return
@@ -296,10 +329,39 @@ async function loadData() {
       room.value = found
     }
     devices.value = devRes.devices ?? []
+    await migrateLegacyDevicePositions()
   } catch (e) {
     errorMessage.value = (e as Error).message || String(e)
   } finally {
     loading.value = false
+  }
+}
+
+async function migrateLegacyDevicePositions() {
+  if (!room.value) return
+  const key = currentLayoutKey()
+  const roomLayout = getRoomLayoutSource(room.value)
+  if (typeof roomLayout.w !== 'number' || typeof roomLayout.h !== 'number') return
+  if (roomLayout.w <= 0 || roomLayout.h <= 0) return
+  if (typeof roomLayout.x !== 'number' || typeof roomLayout.y !== 'number') return
+
+  for (const device of devices.value) {
+    if (propNumber(device, 'room_id') !== room.value.id) continue
+    const props = (device.props && typeof device.props === 'object' ? device.props : {}) as DevicePropsDraft
+    if (props !== device.props) device.props = props
+    const current = props[key] as DeviceRatio | undefined
+    const srcX = current?.x ?? (typeof (props as Record<string, unknown>).x === 'number' ? (props as Record<string, unknown>).x as number : undefined)
+    const srcY = current?.y ?? (typeof (props as Record<string, unknown>).y === 'number' ? (props as Record<string, unknown>).y as number : undefined)
+    if (typeof srcX !== 'number' || typeof srcY !== 'number') continue
+    if (looksLikeRatio(srcX) && looksLikeRatio(srcY)) continue
+
+    const ratio = pixelToRatio(srcX, srcY, roomLayout.x, roomLayout.y, roomLayout.w, roomLayout.h)
+    const clamped = clampRatio(ratio.x, ratio.y)
+    props[key] = { x: clamped.x, y: clamped.y }
+    delete (props as Record<string, unknown>).x
+    delete (props as Record<string, unknown>).y
+    device.props = props
+    await api.userDevices.update(device.id, { props })
   }
 }
 
