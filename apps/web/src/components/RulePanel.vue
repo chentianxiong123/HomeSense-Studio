@@ -148,9 +148,9 @@ const groupedAliases = computed(() => {
   return groups
 })
 
-function deviceIcon(t: string) {
+function deviceIcon(t: string | undefined) {
   const m: Record<string, string> = { television: '📺', stb: '📡', speaker: '🔊', phone: '📱', computer: '💻' }
-  return m[t] ?? '⚙'
+  return t ? (m[t] ?? '⚙') : '⚙'
 }
 
 function l1RuleGroups(policy: L1Policy | null) {

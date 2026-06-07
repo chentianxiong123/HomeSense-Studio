@@ -34,6 +34,8 @@ type RoomPropsDraft = Record<string, unknown> & {
   mobile?: RoomLayoutDraft
   bgColor?: string
 }
+const MIN_ROOM_W = 280
+const MIN_ROOM_H = 200
 // Device position is stored as a 0..1 ratio relative to the parent room.
 type DeviceRatio = { x?: number; y?: number }
 type DevicePropsDraft = Record<string, unknown> & {

@@ -225,13 +225,13 @@ async function saveContextSettings() {
   }
 }
 
-function deviceIcon(t: string) {
+function deviceIcon(t: string | undefined) {
   const m: Record<string, string> = {
     television: '📺', stb: '📡', speaker: '🔊', router: '📶',
     outlet: '🔌', phone: '📱', tv_box: '📦', tablet: '📋',
     computer: '💻',
   }
-  return m[t] ?? '⚙'
+  return t ? (m[t] ?? '⚙') : '⚙'
 }
 
 function deviceStatusTitle(device: DeviceCardProjection) {

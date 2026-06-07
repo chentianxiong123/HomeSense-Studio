@@ -402,7 +402,7 @@ function sourceTags(d: UserDevice): string[] {
       <section class="capabilities-section glass-panel">
         <div class="section-head">
           <h2>{{ label('设备能力', 'Capabilities') }}</h2>
-          <button v-if="propString(device, 'mi_did') || propString(device, 'adb_ip')" class="refresh-caps-btn" :disabled="capsLoading" @click="loadCapabilities(true)">
+          <button v-if="propString(device, 'mi_did') || propString(device, 'adb_ip')" class="refresh-caps-btn" :disabled="capsLoading" @click="refreshCapabilities()">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
             {{ label('刷新', 'Refresh') }}
           </button>
