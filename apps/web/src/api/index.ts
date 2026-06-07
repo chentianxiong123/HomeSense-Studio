@@ -93,12 +93,20 @@ export interface UserDevice {
   props: Record<string, unknown>
   created_at: string
   updated_at: string
+  // Convenience projections read off `props` so list/sidebar views don't
+  // have to drill into the free-form record.
+  device_type?: string
+  room_id?: number | null
+  room_name?: string
 }
 
 export interface DeviceCardProjection {
   id: number
   name: string
   props: Record<string, unknown>
+  device_type?: string
+  room_id?: number | null
+  room_name?: string
   room: {
     id: number | null
     name: string

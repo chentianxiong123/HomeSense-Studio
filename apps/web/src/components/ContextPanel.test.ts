@@ -132,7 +132,7 @@ describe('ContextPanel context sync', () => {
 
     await wrapper.findAll('.ctx-row')[0].trigger('click')
     await flushPromises()
-    const bedroomOption = wrapper.findAll('.ctx-opt').find((option) => option.text().includes('卧室'))
+    const bedroomOption = wrapper.findAll('.ctx-opt').find((option: { text(): string }) => option.text().includes('卧室'))
     expect(bedroomOption).toBeDefined()
     await bedroomOption!.trigger('click')
     await flushPromises()
@@ -148,7 +148,7 @@ describe('ContextPanel context sync', () => {
 
     await wrapper.findAll('.ctx-row')[1].trigger('click')
     await flushPromises()
-    const speakerOption = wrapper.findAll('.ctx-opt').find((option) => option.text().includes('卧室音箱'))
+    const speakerOption = wrapper.findAll('.ctx-opt').find((option: { text(): string }) => option.text().includes('卧室音箱'))
     expect(speakerOption).toBeDefined()
     await speakerOption!.trigger('click')
     await flushPromises()

@@ -7,7 +7,7 @@ const { devices, loading, error, list } = useDevices()
 const emit = defineEmits<{ (e: 'select', device: UserDevice): void }>()
 const { t } = useLocale()
 
-function getTypeIcon(type: string): string {
+function getTypeIcon(type: string | undefined): string {
   switch (type) {
     case 'television': return '📺'
     case 'speaker': return '🔊'
