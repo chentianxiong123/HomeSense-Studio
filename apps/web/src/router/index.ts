@@ -5,6 +5,7 @@ import AssetDetailView from '@/views/AssetDetailView.vue'
 import WorkflowRunsView from '@/views/WorkflowRunsView.vue'
 import DevicesView from '@/views/DevicesView.vue'
 import DeviceDetailView from '@/views/DeviceDetailView.vue'
+import RoomDetailView from '@/views/RoomDetailView.vue'
 import LLMView from '@/views/LLMView.vue'
 import AuthorizationsView from '@/views/AuthorizationsView.vue'
 import RemoteWorkspaceView from '@/views/RemoteWorkspaceView.vue'
@@ -29,6 +30,7 @@ export const router = createRouter({
     { path: '/workspace', name: 'remote-workspace', component: RemoteWorkspaceView },
     { path: '/assets', name: 'assets-home', component: AssetsView },
     { path: '/devices', name: 'devices', component: DevicesView },
+    { path: '/devices/rooms/:id', name: 'room-detail', component: RoomDetailView, meta: { fullscreen: true } },
     { path: '/providers', name: 'llm-models', component: LLMView },
     { path: '/devices/:id', name: 'device-detail', component: DeviceDetailView },
     { path: '/authorizations', name: 'authorizations', component: AuthorizationsView },
