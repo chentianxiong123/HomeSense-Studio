@@ -5,6 +5,7 @@ import { api, type UserDevice } from '@/api'
 import { cliApi } from '@/api/cli'
 import { useLocale } from '@/composables/useLocale'
 import AppBrowserModal from '@/components/AppBrowserModal.vue'
+import AdbWorkbench from '@/components/AdbWorkbench.vue'
 import { formatChinaTime } from '@/utils/chinaTime'
 
 const { locale } = useLocale()
@@ -27,6 +28,15 @@ interface DeviceCapability {
 const route = useRoute()
 const router = useRouter()
 const deviceId = Number(route.params.id)
+const returnTo = computed(() => {
+  const from = route.query.from
+  if (typeof from === 'string' && from.startsWith('/')) return from
+  return '/devices'
+})
+
+function goBack() {
+  router.push(returnTo.value)
+}
 
 const loading = ref(true)
 const device = ref<UserDevice | null>(null)
@@ -364,12 +374,23 @@ function sourceTags(d: UserDevice): string[] {
   if (propString(d, 'adb_ip')) tags.push('ADB')
   return tags
 }
+
+const canOpenConsole = computed(() => {
+  if (!device.value) return false
+  if (propString(device.value, 'ssh_host') && propString(device.value, 'ssh_user')) return true
+  if (propString(device.value, 'adb_serial') || propString(device.value, 'adb_ip')) return true
+  return propString(device.value, 'device_type') === 'windows_pc'
+})
+
+function openConsole() {
+  router.push({ path: '/sessions/terminal', query: { target_device_id: deviceId, from: route.fullPath } })
+}
 </script>
 
 <template>
   <div class="detail-page">
     <header class="page-head glass-panel">
-      <button class="back-btn" @click="router.push('/devices')">
+      <button class="back-btn" @click="goBack">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
         {{ label('返回', 'Back') }}
       </button>
@@ -381,6 +402,10 @@ function sourceTags(d: UserDevice): string[] {
           <div class="source-tags">
             <span v-for="tag in sourceTags(device)" :key="tag" class="source-tag" :class="tag === 'ADB' ? 'tag-adb' : 'tag-mi'">{{ tag }}</span>
           </div>
+          <button v-if="canOpenConsole" class="console-btn" @click="openConsole">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+            {{ label('控制台', 'Console') }}
+          </button>
         </div>
         <div class="head-meta">
           <span v-if="propString(device, 'mi_did')" class="meta-chip monospace">Mi: {{ miNameFor(propString(device, 'mi_did')) }}</span>
@@ -543,6 +568,18 @@ function sourceTags(d: UserDevice): string[] {
           </div>
         </div>
       </section>
+
+      <AdbWorkbench
+        v-if="propString(device, 'adb_ip')"
+        class="glass-panel adb-workbench-section"
+        :device-id="deviceId"
+        :device-name="device.name"
+        :adb-ip="propString(device, 'adb_ip')"
+        :device-type="typeLabel(propString(device, 'device_type') || 'other')"
+        :can-open-console="canOpenConsole"
+        :label="label"
+        @open-console="openConsole"
+      />
 
       <AppBrowserModal v-if="showAppBrowser" :device-id="deviceId" :adb-ip="propString(device, 'adb_ip')" @close="showAppBrowser = false" />
     </template>
@@ -731,6 +768,27 @@ h1 {
   color: #10b981;
   background: #fff;
   box-shadow: 0 6px 16px rgba(16, 185, 129, 0.12);
+}
+
+.console-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  margin-left: 12px;
+  border-radius: 6px;
+  border: 1px solid #10b981;
+  background: transparent;
+  color: #10b981;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.console-btn:hover {
+  background: #10b981;
+  color: #fff;
 }
 
 .no-mi, .no-caps, .caps-loading, .caps-error {

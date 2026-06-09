@@ -13,7 +13,7 @@ from mi_cli.api.auth import (
 )
 from mi_cli.api.device import handle_discover, handle_discover_ir, handle_get_prop, handle_set_prop, handle_run_action, handle_device_action, handle_device_prop, handle_device_info, handle_device_capabilities, handle_device_ir_keys, handle_device_ir_press
 from mi_cli.api.spec import handle_spec_parse
-from mi_cli.api.speaker import handle_speaker_execute, handle_speaker_play, handle_speaker_status, handle_speaker_list
+from mi_cli.api.speaker import handle_speaker_control, handle_speaker_execute, handle_speaker_mina_debug, handle_speaker_play, handle_speaker_play_url, handle_speaker_status, handle_speaker_list
 from mi_cli.api.ir import handle_ir_discover, handle_ir_get_keys, handle_ir_press_key
 from mi_cli.api.scene import handle_scene_list, handle_scene_execute
 from mi_cli.config import handle_config_get, handle_config_set
@@ -36,8 +36,11 @@ ACTION_MAP = {
     "scene_list": handle_scene_list,
     "scene_execute": handle_scene_execute,
     "speaker_list": handle_speaker_list,
+    "speaker_mina_debug": handle_speaker_mina_debug,
     "speaker_execute": handle_speaker_execute,
+    "speaker_control": handle_speaker_control,
     "speaker_play": handle_speaker_play,
+    "speaker_play_url": handle_speaker_play_url,
     "speaker_status": handle_speaker_status,
     "ir_discover": handle_ir_discover,
     "ir_get_keys": handle_ir_get_keys,

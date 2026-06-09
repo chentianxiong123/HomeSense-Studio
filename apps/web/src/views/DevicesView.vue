@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { api, type UserDevice, type Room, type MiDeviceCandidate } from '@/api'
 import { cliApi } from '@/api/cli'
 import { useLocale } from '@/composables/useLocale'
+import { useDeviceGroups } from '@/composables/useDeviceGroups'
 import { pixelToRatio, ratioToPixel, looksLikeRatio, clampRatio } from '@/utils/roomCoords'
 
 const { locale } = useLocale()
@@ -328,6 +329,7 @@ async function loadData() {
     ])
     devices.value = devRes.devices ?? []
     rooms.value = roomRes.rooms ?? []
+    await groups.load()
 
     // Auto initialize room coordinates
     let roomChanged = false
@@ -899,6 +901,15 @@ function selectDevice(device: UserDevice) {
   selectedDeviceId.value = device.id
 }
 
+onMounted(async () => {
+  detectOrientation()
+  await loadData()
+  startPing()
+  void ensureMiNamesLoaded()
+  updateViewportSize()
+  window.addEventListener('resize', onResize)
+})
+
 function closeRoomSettings() {
   editingRoomId.value = null
   editingRoomName.value = ''
@@ -1023,39 +1034,22 @@ function typeLabel(t: string) {
 
 // Simple dynamic grouping
 const groupingWithId = ref<number | null>(null)
+const groups = useDeviceGroups(devices)
 
 const groupCandidates = computed(() => {
   if (!selectedDevice.value) return []
-  const currentRoomId = propNumber(selectedDevice.value, 'room_id')
-  return devices.value.filter(
-    (d) => d.id !== selectedDevice.value!.id && propNumber(d, 'room_id') === currentRoomId
-  )
+  return groups.partnerCandidates.value(selectedDevice.value)
 })
 
 const currentGroupPartners = computed(() => {
-  if (!selectedDevice.value) return []
-  const gid = selectedDevice.value.props?.group_id
-  if (!gid) return []
-  return devices.value.filter(
-    (d) => d.id !== selectedDevice.value!.id && d.props?.group_id === gid
-  )
+  return groups.partnersOf.value(selectedDevice.value)
 })
 
 async function bindGroupPartner() {
   if (!selectedDevice.value || !groupingWithId.value) return
   const partner = devices.value.find((d) => d.id === groupingWithId.value)
   if (!partner) return
-
-  const gid = selectedDevice.value.props?.group_id || Date.now()
-  const name = selectedDevice.value.props?.group_name || '电视组合'
-
-  selectedDevice.value.props = { ...selectedDevice.value.props, group_id: gid, group_name: name }
-  partner.props = { ...partner.props, group_id: gid, group_name: name }
-
-  await Promise.all([
-    api.userDevices.update(selectedDevice.value.id, { props: selectedDevice.value.props }),
-    api.userDevices.update(partner.id, { props: partner.props }),
-  ])
+  await groups.bindGroup({ primary: selectedDevice.value, partner })
   groupingWithId.value = null
   showSuccess(label('编组成功', 'Group bound'))
 }
@@ -1063,18 +1057,8 @@ async function bindGroupPartner() {
 async function disbandGroup() {
   if (!selectedDevice.value) return
   const gid = selectedDevice.value.props?.group_id
-  if (!gid) return
-
-  const groupDevices = devices.value.filter((d) => d.props?.group_id === gid)
-  await Promise.all(
-    groupDevices.map((d) => {
-      const p = { ...d.props }
-      delete p.group_id
-      delete p.group_name
-      d.props = p
-      return api.userDevices.update(d.id, { props: p })
-    })
-  )
+  if (typeof gid !== 'number') return
+  await groups.disbandGroup(gid)
   showSuccess(label('编组已拆除', 'Group disbanded'))
 }
 
@@ -1230,7 +1214,7 @@ function getRoomConnections(roomId: number) {
               :style="getDeviceStyle(dev)"
               @pointerdown="startDragDevice($event, dev)"
               @click.stop="isEditMode ? null : selectDevice(dev)"
-              @dblclick.stop="isEditMode ? null : router.push(`/devices/${dev.id}`)"
+              @dblclick.stop="isEditMode ? null : router.push(`/devices/${dev.id}?from=/devices`)"
             >
               <div class="node-icon" :class="`icon-${deviceIcon(propString(dev, 'device_type'))}`">
                 <svg v-if="deviceIcon(propString(dev, 'device_type')) === 'tv'" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
@@ -1247,49 +1231,7 @@ function getRoomConnections(roomId: number) {
       </div>
     </main>
 
-    <!-- Side controls sliding up when focused -->
-    <Teleport to="body">
-      <div v-if="selectedDevice" class="bottom-card-overlay" @click="selectedDeviceId = null">
-        <div class="bottom-panel glass-panel" @click.stop>
-          <header class="bp-head">
-            <span class="bp-badge">{{ typeLabel(propString(selectedDevice, 'device_type') || 'other') }}</span>
-            <h3>{{ selectedDevice.name }}</h3>
-            <span class="bp-indicator" :class="onlineStatus[selectedDevice.id] ? 'online' : 'offline'">
-              {{ onlineStatus[selectedDevice.id] ? label('在线', 'Online') : label('离线', 'Offline') }}
-            </span>
-          </header>
-
-          <div class="bp-body">
-            <div class="bp-props">
-              <span v-if="propString(selectedDevice, 'mi_did')">Mi: {{ miNameFor(propString(selectedDevice, 'mi_did')) }}</span>
-              <span v-if="propString(selectedDevice, 'adb_ip')">ADB: {{ propString(selectedDevice, 'adb_ip') }}</span>
-              <span v-if="propString(selectedDevice, 'ip_address')">IP: {{ propString(selectedDevice, 'ip_address') }}</span>
-              <span v-if="selectedDevice.props?.group_id">组: ⛓ {{ selectedDevice.props.group_name }}</span>
-            </div>
-
-            <div class="bp-group-mgmt" v-if="!selectedDevice.props?.group_id && groupCandidates.length > 0">
-              <select v-model="groupingWithId" class="bp-select">
-                <option :value="null">{{ label('绑定同伴...', 'Select partner...') }}</option>
-                <option v-for="c in groupCandidates" :key="c.id" :value="c.id">{{ c.name }}</option>
-              </select>
-              <button class="bp-bind-btn" :disabled="!groupingWithId" @click="bindGroupPartner">⛓</button>
-            </div>
-            <button v-else-if="selectedDevice.props?.group_id" class="bp-disband-btn" @click="disbandGroup">
-              {{ label('解除编组', 'Disband') }}
-            </button>
-          </div>
-
-          <footer class="bp-actions">
-            <button class="bp-main-btn" @click="router.push(`/devices/${selectedDevice.id}`)">
-              {{ label('控制与详情', 'Control & Details') }}
-            </button>
-            <button class="bp-close-btn" @click="selectedDeviceId = null">
-              {{ label('关闭', 'Close') }}
-            </button>
-          </footer>
-        </div>
-      </div>
-    </Teleport>
+    <!-- (No device detail UI on the floor plan — see /devices/rooms/:id for per-room device controls.) -->
 
     <Teleport to="body">
       <div v-if="editingRoom" class="room-settings-overlay" @click="closeRoomSettings">
@@ -1796,7 +1738,7 @@ function getRoomConnections(roomId: number) {
   pointer-events: none;
 }
 
-/* Floating Bottom Drawer Modal for Device Details */
+/* Floating Bottom Drawer Modal for Device Details (legacy, no longer used) */
 .bottom-card-overlay {
   position: fixed;
   inset: 0;

@@ -70,6 +70,81 @@ export interface MoonlightWebRuntimeStatus {
   notes: string[]
 }
 
+export interface AdbScrcpySessionInput {
+  device?: string
+  profile?: string
+  max_size?: number | string
+  bit_rate?: string
+  max_fps?: number | string
+  video_codec?: string
+  display_id?: number | string
+  audio?: boolean
+  control?: boolean
+  window?: boolean
+  playback?: boolean
+  tunnel_mode?: string
+  record?: string
+  v4l2_sink?: string
+  extra_args?: string[]
+  label?: string
+  dry_run?: boolean
+}
+
+export interface AdbScrcpyCommandSpec {
+  executable: string
+  args: string[]
+  argv: string[]
+  command_line: string
+  device: string
+  profile: string
+  headless: boolean
+  window: boolean
+  playback: boolean
+  audio: boolean
+  control: boolean
+  tunnel_mode: string
+  direct_cli_video: boolean
+  effective_video: boolean
+  requires_backend_bridge: boolean
+  bridge_strategy: string
+  notes: string[]
+}
+
+export interface AdbScrcpyRawBridge {
+  kind: 'raw_h264'
+  ws_path: string
+  local_host: string
+  local_port: number
+  socket_name: string
+  scid: string
+  device_server_path: string
+  server_version: string
+  ready: boolean
+  mime: 'video/h264'
+  notes: string[]
+}
+
+export interface AdbScrcpySession {
+  id: string
+  label: string
+  device: string
+  state: 'starting' | 'running' | 'prepared' | 'exited' | 'failed' | 'stopped'
+  created_at: string
+  updated_at: string
+  started_at?: string
+  exited_at?: string
+  exit_code?: number | null
+  signal?: string | null
+  pid?: number
+  command: AdbScrcpyCommandSpec
+  stream?: AdbScrcpyRawBridge
+  dry_run: boolean
+  stdout_tail: string[]
+  stderr_tail: string[]
+  error?: string
+  notes: string[]
+}
+
 export const streamingGatewayApi = {
   hosts: () => request<{ status: string; data: StreamingHost[] }>('/api/streaming-gateway/hosts'),
   registerHost: (body: Record<string, unknown>) =>
@@ -92,4 +167,20 @@ export const streamingGatewayApi = {
       body: JSON.stringify({}),
     }),
   runtimeStatus: () => request<{ status: string; data: MoonlightWebRuntimeStatus }>('/api/streaming-gateway/runtime'),
+  adbScrcpySessions: () =>
+    request<{ status: string; data: AdbScrcpySession[] }>('/api/streaming-gateway/adb-scrcpy/sessions'),
+  createAdbScrcpySession: (body: AdbScrcpySessionInput) =>
+    request<{ status: string; data: AdbScrcpySession }>('/api/streaming-gateway/adb-scrcpy/sessions', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  stopAdbScrcpySession: (id: string) =>
+    request<{ status: string; data: AdbScrcpySession }>(`/api/streaming-gateway/adb-scrcpy/sessions/${encodeURIComponent(id)}/stop`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  removeAdbScrcpySession: (id: string) =>
+    request<{ status: string }>(`/api/streaming-gateway/adb-scrcpy/sessions/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
 }

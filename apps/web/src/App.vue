@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import { useLocale } from './composables/useLocale'
+import PlayerDock from './components/media/PlayerDock.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -13,6 +14,9 @@ const isFullscreen = computed(() => Boolean(route.meta?.fullscreen))
 const navItems = computed(() => [
   { key: 'chat', label: t('app.chat'), route: '/chat' },
   { key: 'studio', label: t('app.studio'), route: '/studio' },
+  { key: 'media', label: locale.value === 'zh' ? '媒体' : 'Media', route: '/media' },
+  { key: 'storage', label: locale.value === 'zh' ? '文件' : 'Files', route: '/storage' },
+  { key: 'streaming', label: locale.value === 'zh' ? '串流' : 'Stream', route: '/streaming' },
   { key: 'workspace', label: locale.value === 'zh' ? '远程' : 'Remote', route: '/workspace' },
   { key: 'assets', label: locale.value === 'zh' ? '资产' : 'Assets', route: '/assets' },
   { key: 'providers', label: locale.value === 'zh' ? '供应商' : 'Providers', route: '/providers' },
@@ -86,6 +90,8 @@ function navigateTo(target: string) {
     <main class="app-main">
       <RouterView />
     </main>
+
+    <PlayerDock v-if="!isFullscreen" />
   </div>
 </template>
 

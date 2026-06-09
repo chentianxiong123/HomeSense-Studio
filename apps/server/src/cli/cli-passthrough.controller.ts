@@ -13,7 +13,7 @@ interface CacheEntry {
   expiresAt: number
 }
 
-const BUILT_IN_CLIS = new Set(['mi-cli', 'adb-cli'])
+const BUILT_IN_CLIS = new Set(['mi-cli', 'adb-cli', 'media-cli'])
 const DEFAULT_TTL_MS = 60_000
 const MAX_CACHE_ENTRIES = 500
 
