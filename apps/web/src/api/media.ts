@@ -1,5 +1,5 @@
 import { cliApi } from './cli'
-import type { MediaItem, MediaOutput } from '@/features/media/types'
+import type { MediaCandidate, MediaItem, MediaOutput, MediaSourceSite, MediaSourceSiteKind, PreparedMediaStream } from '@/features/media/types'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const hasBody = init?.body != null
@@ -92,7 +92,48 @@ export interface DlnaStatusResult {
   volume_error?: string
 }
 
+export interface MediaSniffResult {
+  url: string
+  count: number
+  candidates: MediaCandidate[]
+  strategy?: string
+  warning?: string
+}
+
+export interface MediaSourceSiteInput {
+  title?: string
+  url: string
+  provider?: string
+  kind?: MediaSourceSiteKind
+  tags?: string[]
+}
+
 export const mediaApi = {
+  listSourceSites: () =>
+    request<{ sites: MediaSourceSite[] }>('/api/media/source-sites'),
+
+  addSourceSite: (input: MediaSourceSiteInput) =>
+    request<{ site: MediaSourceSite }>('/api/media/source-sites', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  updateSourceSite: (siteId: number, input: Partial<MediaSourceSiteInput>) =>
+    request<{ site: MediaSourceSite }>(`/api/media/source-sites/${encodeURIComponent(String(siteId))}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+
+  removeSourceSite: (siteId: number) =>
+    request<{ status: string }>(`/api/media/source-sites/${encodeURIComponent(String(siteId))}`, {
+      method: 'DELETE',
+    }),
+
+  sniffSourceSite: (siteId: number) =>
+    request<{ status: 'success' | 'error'; data?: MediaSniffResult; site?: MediaSourceSite; error?: string; message?: string }>(`/api/media/source-sites/${encodeURIComponent(String(siteId))}/sniff`, {
+      method: 'POST',
+    }),
+
   listPlaylist: () =>
     request<{ items: MediaItem[] }>('/api/media/playlist'),
 
@@ -201,6 +242,12 @@ export const mediaApi = {
       body: JSON.stringify(input),
     }),
 
+  playUrlOnDlna: (input: { location: string; url: string; title?: string; content_type?: string }) =>
+    request<{ status: 'success' | 'error'; data?: unknown; error?: string; message?: string; url?: string }>('/api/media/outputs/dlna/play-url', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
   getDlnaStatus: (location: string) =>
     cliApi.run<DlnaStatusResult>('media-cli', {
       action: 'dlna_status',
@@ -234,6 +281,18 @@ export const mediaApi = {
 
   bilibiliAudioProxyUrl: (bvid: string, quality = 64) =>
     `/api/media/proxy/audio/bilibili/${encodeURIComponent(bvid)}?quality=${encodeURIComponent(String(quality))}`,
+
+  sniffUrl: (input: { url: string; max_candidates?: number; inspect_page?: boolean }) =>
+    request<{ status: 'success' | 'error'; data?: MediaSniffResult; error?: string; message?: string }>('/api/media/sniff', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  prepareStream: (input: { candidate_id?: string; url: string; mime_type?: string; headers?: Record<string, string> }) =>
+    request<{ stream: PreparedMediaStream }>('/api/media/streams/prepare', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
 }
 
 function isHomeSenseVirtualDlna(device: DlnaDiscoverResult['devices'][number]): boolean {

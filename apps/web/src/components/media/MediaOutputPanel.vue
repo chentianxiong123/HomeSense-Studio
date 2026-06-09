@@ -181,13 +181,20 @@ async function refreshOutputStatus(output: MediaOutput) {
 async function pushCurrentToDlna(output: MediaOutput) {
   const item = props.activeItem
   const location = output.endpoint || ''
-  const bvid = item?.upstream_id || ''
   const title = item?.title || 'HomeSense Media'
-  if (!location || !bvid) return
+  if (!location || !item) return
   pushingOutputId.value = output.id
   outputError.value = ''
   try {
-    const result = await mediaApi.playBilibiliOnDlna({ location, bvid, title })
+    const streamUrl = item.stream_url || item.upstream_url || ''
+    const result = streamUrl
+      ? await mediaApi.playUrlOnDlna({
+        location,
+        url: streamUrl,
+        title,
+        content_type: item.mime_type || contentTypeFromUrl(streamUrl),
+      })
+      : await mediaApi.playBilibiliOnDlna({ location, bvid: item.upstream_id || '', title })
     if (result.status !== 'success') {
       outputError.value = result.message || result.error || label('推送失败', 'Push failed')
       return
@@ -274,7 +281,8 @@ function canPushToXiaoAi(output: MediaOutput): boolean {
 }
 
 function canPushToDlna(output: MediaOutput): boolean {
-  return output.kind === 'dlna' && Boolean(output.endpoint && props.activeItem?.upstream_id)
+  const item = props.activeItem
+  return output.kind === 'dlna' && Boolean(output.endpoint && item && (item.stream_url || item.upstream_url || item.upstream_id))
 }
 
 function outputSubtitle(output: MediaOutput): string {
@@ -310,6 +318,25 @@ function stateText(state: string): string {
     error: label('失败', 'Error'),
   }
   return map[normalized] ?? state
+}
+
+function contentTypeFromUrl(url: string): string {
+  const pathname = url.split('?', 1)[0]?.toLowerCase() || ''
+  if (pathname.endsWith('.mp3')) return 'audio/mpeg'
+  if (pathname.endsWith('.m4a')) return 'audio/mp4'
+  if (pathname.endsWith('.aac')) return 'audio/aac'
+  if (pathname.endsWith('.flac')) return 'audio/flac'
+  if (pathname.endsWith('.wav')) return 'audio/wav'
+  if (pathname.endsWith('.ogg')) return 'audio/ogg'
+  if (pathname.endsWith('.webm')) return 'video/webm'
+  if (pathname.endsWith('.mkv')) return 'video/x-matroska'
+  if (pathname.endsWith('.mov')) return 'video/quicktime'
+  if (pathname.endsWith('.avi')) return 'video/x-msvideo'
+  if (pathname.endsWith('.flv')) return 'video/x-flv'
+  if (pathname.endsWith('.ts')) return 'video/mp2t'
+  if (pathname.endsWith('.m3u8')) return 'application/vnd.apple.mpegurl'
+  if (pathname.endsWith('.mpd')) return 'application/dash+xml'
+  return 'video/mp4'
 }
 </script>
 

@@ -4,7 +4,13 @@ import os from 'node:os'
 import { Readable } from 'node:stream'
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web'
 import { cliBridge } from '../cli/cli-bridge'
-import { MediaService, type MediaPlaylistItem, type MediaPlaylistReorderInput } from './media.service'
+import {
+  MediaService,
+  type MediaPlaylistItem,
+  type MediaPlaylistReorderInput,
+  type MediaSourceSiteInput,
+  type MediaSourceSiteUpdateInput,
+} from './media.service'
 
 interface BilibiliAudioResult {
   stream_url?: string
@@ -25,6 +31,27 @@ interface DlnaPlayBody {
   quality?: number
 }
 
+interface MediaSniffBody {
+  url?: string
+  max_candidates?: number
+  inspect_page?: boolean
+}
+
+interface PrepareStreamBody {
+  candidate_id?: string
+  url?: string
+  mime_type?: string
+  headers?: Record<string, unknown>
+}
+
+interface DlnaPlayUrlBody {
+  location?: string
+  url?: string
+  title?: string
+  content_type?: string
+  mime_type?: string
+}
+
 const BILIBILI_MEDIA_HEADERS = {
   'User-Agent': (
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -39,6 +66,39 @@ const BILIBILI_MEDIA_HEADERS = {
 @Controller('media')
 export class MediaController {
   constructor(private readonly media: MediaService) {}
+
+  @Get('source-sites')
+  listSourceSites() {
+    return this.media.listSourceSites()
+  }
+
+  @Post('source-sites')
+  addSourceSite(@Body() body: MediaSourceSiteInput) {
+    return this.media.addSourceSite(body)
+  }
+
+  @Patch('source-sites/:siteId')
+  updateSourceSite(@Param('siteId') siteId: string, @Body() body: MediaSourceSiteUpdateInput) {
+    return this.media.updateSourceSite(Number(siteId), body)
+  }
+
+  @Delete('source-sites/:siteId')
+  removeSourceSite(@Param('siteId') siteId: string) {
+    return this.media.removeSourceSite(Number(siteId))
+  }
+
+  @Post('source-sites/:siteId/sniff')
+  async sniffSourceSite(@Param('siteId') siteId: string) {
+    const id = Number(siteId)
+    const site = this.media.getSourceSite(id)
+    const result = await this.runSniff(site.url, 20, true)
+    const data = result.status === 'success' && result.data && typeof result.data === 'object'
+      ? result.data as { candidates?: unknown[] }
+      : null
+    const candidatesCount = Array.isArray(data?.candidates) ? data.candidates.length : 0
+    const updated = this.media.markSourceSiteSniffed(id, candidatesCount)
+    return { ...result, site: updated.site }
+  }
 
   @Get('playlist')
   listPlaylist() {
@@ -63,6 +123,19 @@ export class MediaController {
   @Delete('playlist/:itemId')
   removePlaylistItem(@Param('itemId') itemId: string) {
     return this.media.removePlaylistItem(decodeURIComponent(itemId))
+  }
+
+  @Post('sniff')
+  async sniffUrl(@Body() body: MediaSniffBody) {
+    const url = String(body.url || '').trim()
+    if (!url) return { status: 'error', error: 'INVALID_PARAMS', message: 'url is required' }
+    const maxCandidates = Number.isFinite(Number(body.max_candidates)) ? Number(body.max_candidates) : 20
+    return this.runSniff(url, maxCandidates, body.inspect_page !== false)
+  }
+
+  @Post('streams/prepare')
+  prepareStream(@Body() body: PrepareStreamBody, @Req() req: IncomingMessage) {
+    return this.media.prepareStream(body, resolvePublicBaseUrl(req))
   }
 
   @Post('outputs/xiaoai/play-bilibili')
@@ -102,6 +175,32 @@ export class MediaController {
       bvid,
     })
     return { ...result, proxy_url: url }
+  }
+
+  @Post('outputs/dlna/play-url')
+  async playUrlOnDlna(@Body() body: DlnaPlayUrlBody, @Req() req: IncomingMessage) {
+    const location = String(body.location || '').trim()
+    const rawUrl = String(body.url || '').trim()
+    if (!location) return { status: 'error', error: 'INVALID_PARAMS', message: 'location is required' }
+    if (!rawUrl) return { status: 'error', error: 'INVALID_PARAMS', message: 'url is required' }
+
+    let url: string
+    try {
+      url = resolvePlaybackUrl(rawUrl, req)
+    } catch (error) {
+      return {
+        status: 'error',
+        error: 'INVALID_PARAMS',
+        message: error instanceof Error ? error.message : String(error),
+      }
+    }
+    const result = await cliBridge.run('media-cli', 'dlna_play_url', {
+      location,
+      url,
+      title: String(body.title || 'HomeSense Media'),
+      content_type: String(body.content_type || body.mime_type || inferContentType(url)),
+    })
+    return { ...result, url }
   }
 
   @Get('proxy/audio/bilibili/:bvid')
@@ -166,6 +265,63 @@ export class MediaController {
 
     Readable.fromWeb(upstream.body as unknown as NodeReadableStream<Uint8Array>).pipe(res)
   }
+
+  @Get('proxy/stream/:token')
+  async proxyPreparedStream(
+    @Param('token') token: string,
+    @Req() req: IncomingMessage,
+    @Res() res: ServerResponse,
+  ) {
+    let prepared: ReturnType<MediaService['getPreparedStream']>
+    try {
+      prepared = this.media.getPreparedStream(token)
+    } catch (error) {
+      sendJson(res, 404, {
+        status: 'error',
+        error: 'STREAM_NOT_FOUND',
+        message: error instanceof Error ? error.message : String(error),
+      })
+      return
+    }
+
+    const headers: Record<string, string> = { ...prepared.headers }
+    const range = req.headers.range
+    if (range) headers.Range = range
+
+    let upstream: globalThis.Response
+    try {
+      upstream = await fetch(prepared.upstreamUrl, { headers })
+    } catch (error) {
+      sendJson(res, 502, {
+        status: 'error',
+        error: 'UPSTREAM_FETCH_FAILED',
+        message: error instanceof Error ? error.message : String(error),
+      })
+      return
+    }
+
+    res.statusCode = upstream.status
+    setPassthroughHeader(res, 'content-type', upstream.headers.get('content-type') || prepared.mimeType)
+    setPassthroughHeader(res, 'content-length', upstream.headers.get('content-length'))
+    setPassthroughHeader(res, 'content-range', upstream.headers.get('content-range'))
+    setPassthroughHeader(res, 'accept-ranges', upstream.headers.get('accept-ranges') || 'bytes')
+    res.setHeader('Cache-Control', 'no-store')
+
+    if (!upstream.body) {
+      res.end()
+      return
+    }
+
+    Readable.fromWeb(upstream.body as unknown as NodeReadableStream<Uint8Array>).pipe(res)
+  }
+
+  private runSniff(url: string, maxCandidates: number, inspectPage: boolean) {
+    return cliBridge.run('media-cli', 'sniff_url', {
+      url,
+      max_candidates: Math.min(50, Math.max(1, maxCandidates)),
+      inspect_page: inspectPage,
+    })
+  }
 }
 
 function sendJson(res: ServerResponse, statusCode: number, body: Record<string, unknown>): void {
@@ -187,6 +343,39 @@ function resolvePublicBaseUrl(req: IncomingMessage): string {
   const port = host.includes(':') ? host.split(':').at(-1) || '3100' : String(process.env.PORT || 3100)
   const ip = findLanIpv4() || '127.0.0.1'
   return `http://${ip}:${port}`
+}
+
+function resolvePlaybackUrl(rawUrl: string, req: IncomingMessage): string {
+  if (rawUrl.startsWith('/')) return `${resolvePublicBaseUrl(req)}${rawUrl}`
+  let parsed: URL
+  try {
+    parsed = new URL(rawUrl)
+  } catch {
+    throw new Error('url must be a valid URL')
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('url must be an http(s) URL')
+  }
+  return parsed.toString()
+}
+
+function inferContentType(url: string): string {
+  const pathname = new URL(url).pathname.toLowerCase()
+  if (pathname.endsWith('.mp3')) return 'audio/mpeg'
+  if (pathname.endsWith('.m4a')) return 'audio/mp4'
+  if (pathname.endsWith('.aac')) return 'audio/aac'
+  if (pathname.endsWith('.flac')) return 'audio/flac'
+  if (pathname.endsWith('.wav')) return 'audio/wav'
+  if (pathname.endsWith('.ogg')) return 'audio/ogg'
+  if (pathname.endsWith('.webm')) return 'video/webm'
+  if (pathname.endsWith('.mkv')) return 'video/x-matroska'
+  if (pathname.endsWith('.mov')) return 'video/quicktime'
+  if (pathname.endsWith('.avi')) return 'video/x-msvideo'
+  if (pathname.endsWith('.flv')) return 'video/x-flv'
+  if (pathname.endsWith('.ts')) return 'video/mp2t'
+  if (pathname.endsWith('.m3u8')) return 'application/vnd.apple.mpegurl'
+  if (pathname.endsWith('.mpd')) return 'application/dash+xml'
+  return 'video/mp4'
 }
 
 function findLanIpv4(): string | null {

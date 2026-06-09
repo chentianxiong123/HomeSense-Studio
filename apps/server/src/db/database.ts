@@ -58,6 +58,19 @@ const tables = [
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (id AUTOINCREMENT)
     )`,
+  `CREATE TABLE IF NOT EXISTS media_source_sites (
+      id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      url TEXT NOT NULL UNIQUE,
+      provider TEXT NOT NULL DEFAULT 'generic',
+      kind TEXT NOT NULL DEFAULT 'page',
+      tags_json TEXT NOT NULL DEFAULT '[]',
+      last_sniffed_at TEXT,
+      last_candidates_count INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (id AUTOINCREMENT)
+    )`,
   `CREATE TABLE IF NOT EXISTS alist_authorizations (
       id INTEGER NOT NULL,
       name TEXT NOT NULL,
@@ -90,6 +103,8 @@ const indexes = [
   `CREATE INDEX IF NOT EXISTS idx_devices_adb_ip ON devices(json_extract(props, '$.adb_ip'))`,
   `CREATE INDEX IF NOT EXISTS idx_devices_group_id ON devices(json_extract(props, '$.group_id'))`,
   `CREATE INDEX IF NOT EXISTS idx_media_playlist_sort ON media_playlist_items(sort_order, id)`,
+  `CREATE INDEX IF NOT EXISTS idx_media_source_sites_kind ON media_source_sites(kind)`,
+  `CREATE INDEX IF NOT EXISTS idx_media_source_sites_provider ON media_source_sites(provider)`,
   `CREATE INDEX IF NOT EXISTS idx_alist_authorizations_driver ON alist_authorizations(driver)`,
   `CREATE INDEX IF NOT EXISTS idx_storage_mounts_authorization ON storage_mounts(authorization_id)`,
   `CREATE INDEX IF NOT EXISTS idx_storage_mounts_driver ON storage_mounts(driver)`,
