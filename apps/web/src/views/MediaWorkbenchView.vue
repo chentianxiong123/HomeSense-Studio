@@ -2,10 +2,10 @@
 import { computed, onMounted, ref } from 'vue'
 import { mediaApi } from '@/api/media'
 import MediaOutputPanel from '@/components/media/MediaOutputPanel.vue'
+import MediaSourceSitesPanel from '@/components/media/MediaSourceSitesPanel.vue'
 import { useLocale } from '@/composables/useLocale'
 import { useMediaPlayer } from '@/features/media/player'
-import type { MediaPlayMode } from '@/features/media/types'
-import type { MediaItem } from '@/features/media/types'
+import type { MediaCandidate, MediaItem, MediaPlayMode, MediaSourceSite } from '@/features/media/types'
 
 const { locale } = useLocale()
 const isZh = computed(() => locale.value === 'zh')
@@ -14,6 +14,10 @@ const urlInput = ref('')
 const titleInput = ref('')
 const artistInput = ref('')
 const formError = ref('')
+const sniffLoading = ref(false)
+const sniffError = ref('')
+const sniffCandidates = ref<MediaCandidate[]>([])
+const preparingCandidateId = ref('')
 const biliKeyword = ref('')
 const biliLoading = ref(false)
 const biliError = ref('')
@@ -66,6 +70,98 @@ async function queueUrl() {
   player.addToQueue(item)
   await persistPlaylistItem(item)
   clearUrlForm()
+}
+
+async function sniffMediaUrl() {
+  const url = urlInput.value.trim()
+  sniffError.value = ''
+  formError.value = ''
+  sniffCandidates.value = []
+  if (!url) {
+    sniffError.value = label('请输入要嗅探的 URL', 'Enter a URL to sniff')
+    return
+  }
+  try {
+    new URL(url)
+  } catch {
+    sniffError.value = label('URL 格式不正确', 'Invalid URL')
+    return
+  }
+
+  sniffLoading.value = true
+  try {
+    const result = await mediaApi.sniffUrl({ url, max_candidates: 16 })
+    if (result.status === 'success' && result.data) {
+      sniffCandidates.value = result.data.candidates
+      if (result.data.candidates.length === 0) {
+        sniffError.value = result.data.warning || label('没有发现可播放候选', 'No playable candidates found')
+      }
+      return
+    }
+    sniffError.value = result.message || result.error || label('嗅探失败', 'Sniff failed')
+  } catch (error) {
+    sniffError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    sniffLoading.value = false
+  }
+}
+
+function selectSourceSiteUrl(url: string) {
+  urlInput.value = url
+  formError.value = ''
+  sniffError.value = ''
+}
+
+function applySourceSiteSniff(payload: { site: MediaSourceSite; candidates: MediaCandidate[] }) {
+  urlInput.value = payload.site.url
+  titleInput.value = payload.site.title
+  sniffCandidates.value = payload.candidates
+  sniffError.value = payload.candidates.length === 0
+    ? label('没有发现可播放候选', 'No playable candidates found')
+    : ''
+}
+
+async function playCandidate(candidate: MediaCandidate) {
+  const item = await createCandidateItem(candidate)
+  if (!item) return
+  await player.playItem(item)
+  if (player.state.session.state !== 'error') await persistPlaylistItem(item)
+}
+
+async function queueCandidate(candidate: MediaCandidate) {
+  const item = await createCandidateItem(candidate)
+  if (!item) return
+  player.addToQueue(item)
+  await persistPlaylistItem(item)
+}
+
+async function createCandidateItem(candidate: MediaCandidate): Promise<MediaItem | null> {
+  preparingCandidateId.value = candidate.id
+  sniffError.value = ''
+  try {
+    const prepared = await mediaApi.prepareStream({
+      candidate_id: candidate.id,
+      url: candidate.url,
+      mime_type: candidate.mime_type,
+      headers: candidate.headers,
+    })
+    return {
+      id: `candidate:${candidate.id}`,
+      source: candidate.source,
+      title: candidate.title || titleFromUrl(candidate.url),
+      artist: candidate.provider || 'Sniff',
+      duration_sec: candidate.duration_sec,
+      upstream_url: prepared.stream.upstream_url,
+      stream_url: prepared.stream.url,
+      mime_type: prepared.stream.mime_type,
+      stream_kind: candidate.stream_kind,
+    }
+  } catch (error) {
+    sniffError.value = error instanceof Error ? error.message : String(error)
+    return null
+  } finally {
+    preparingCandidateId.value = ''
+  }
 }
 
 function createUrlItem(): MediaItem | null {
@@ -218,8 +314,36 @@ function sourceLabel(source: string): string {
     bilibili: 'Bilibili',
     url: 'URL',
     local: label('本地', 'Local'),
+    storage: label('存储', 'Storage'),
   }
   return map[source] ?? source
+}
+
+function candidateSubtitle(candidate: MediaCandidate): string {
+  return [
+    streamKindLabel(candidate.stream_kind || candidate.kind),
+    candidate.mime_type,
+    candidate.provider,
+    confidenceLabel(candidate.confidence),
+  ].filter(Boolean).join(' · ')
+}
+
+function streamKindLabel(kind: string): string {
+  const map: Record<string, string> = {
+    audio: label('音频', 'Audio'),
+    video: label('视频', 'Video'),
+    hls: 'HLS',
+    dash: 'DASH',
+    playlist: label('播放清单', 'Playlist'),
+    stream: label('媒体流', 'Stream'),
+    page: label('页面', 'Page'),
+  }
+  return map[kind] ?? kind
+}
+
+function confidenceLabel(confidence: number | undefined): string {
+  if (typeof confidence !== 'number') return ''
+  return `${Math.round(confidence * 100)}%`
 }
 
 function stateText(state: string): string {
@@ -325,6 +449,16 @@ function titleFromUrl(url: string): string {
           <span>{{ label('直连 URL', 'Direct URL') }}</span>
         </div>
 
+        <MediaSourceSitesPanel
+          :current-url="urlInput"
+          @select="selectSourceSiteUrl"
+          @sniff="applySourceSiteSniff"
+        />
+
+        <div class="source-divider">
+          <span>URL</span>
+        </div>
+
         <form class="url-form" @submit.prevent="submitUrl">
           <label class="form-field full">
             <span>URL</span>
@@ -339,6 +473,13 @@ function titleFromUrl(url: string): string {
             <input v-model="artistInput" type="text" :placeholder="label('可选', 'Optional')" autocomplete="off" />
           </label>
           <div class="form-actions full">
+            <button class="plain-btn" type="button" :disabled="sniffLoading" @click="sniffMediaUrl">
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                <path d="M21 3v6h-6" />
+              </svg>
+              {{ sniffLoading ? label('嗅探中', 'Sniffing') : label('嗅探', 'Sniff') }}
+            </button>
             <button class="plain-btn" type="button" @click="queueUrl">
               <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
                 <path d="M12 5v14" />
@@ -355,7 +496,31 @@ function titleFromUrl(url: string): string {
           </div>
         </form>
 
+        <div v-if="sniffCandidates.length > 0" class="candidate-list">
+          <div v-for="candidate in sniffCandidates" :key="candidate.id" class="candidate-row">
+            <span class="candidate-kind">{{ streamKindLabel(candidate.stream_kind || candidate.kind) }}</span>
+            <button class="candidate-main" type="button" @click="playCandidate(candidate)">
+              <strong>{{ candidate.title }}</strong>
+              <small>{{ candidateSubtitle(candidate) }}</small>
+            </button>
+            <div class="row-actions">
+              <button class="row-icon" type="button" :disabled="preparingCandidateId === candidate.id" :title="label('加入队列', 'Add to queue')" @click="queueCandidate(candidate)">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
+                  <path d="M12 5v14" />
+                  <path d="M5 12h14" />
+                </svg>
+              </button>
+              <button class="row-icon" type="button" :disabled="preparingCandidateId === candidate.id" :title="label('播放', 'Play')" @click="playCandidate(candidate)">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
         <p v-if="formError" class="notice error">{{ formError }}</p>
+        <p v-if="sniffError" class="notice warn">{{ sniffError }}</p>
         <p v-if="session.state === 'error'" class="notice error">{{ session.error }}</p>
       </section>
 
@@ -618,7 +783,7 @@ h2 {
 
 .form-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -753,6 +918,71 @@ button:disabled {
   gap: 8px;
   max-height: 420px;
   overflow: auto;
+}
+
+.candidate-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.candidate-row {
+  min-height: 56px;
+  padding: 7px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.candidate-kind {
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 8px;
+  background: #f0fdfa;
+  color: #0f766e;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.candidate-main {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.candidate-main strong,
+.candidate-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidate-main strong {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.candidate-main small {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .result-row {
@@ -1061,6 +1291,14 @@ button:disabled {
 
   .queue-row {
     grid-template-columns: 1fr;
+  }
+
+  .candidate-row {
+    grid-template-columns: 1fr;
+  }
+
+  .candidate-row .row-actions {
+    justify-content: flex-end;
   }
 
   .queue-main {
