@@ -517,4 +517,96 @@ export const api = {
 workflowRuns: (workflowId: number) =>
       request<{ runs: Array<Record<string, unknown>> }>(`/api/workflows/${workflowId}/runs`),
   },
+  deviceGroups: {
+    list: () =>
+      request<{ groups: Array<{ id: number; name: string; member_ids: number[]; created_at: string; updated_at: string }> }>(
+        '/api/device-groups',
+      ),
+    get: (id: number) =>
+      request<{ group: { id: number; name: string; member_ids: number[]; created_at: string; updated_at: string } }>(
+        `/api/device-groups/${id}`,
+      ),
+    create: (body: { name: string; device_ids?: number[] }) =>
+      request<{ status: string; data: { group: { id: number; name: string; member_ids: number[]; created_at: string; updated_at: string } } }>(
+        '/api/device-groups',
+        { method: 'POST', body: JSON.stringify(body) },
+      ),
+    update: (id: number, body: { name?: string; device_ids?: number[] }) =>
+      request<{ status: string; data: { group: { id: number; name: string; member_ids: number[]; created_at: string; updated_at: string } } }>(
+        `/api/device-groups/${id}`,
+        { method: 'PUT', body: JSON.stringify(body) },
+      ),
+    remove: (id: number) =>
+      request<{ status: string }>(`/api/device-groups/${id}`, { method: 'DELETE' }),
+  },
+  terminal: {
+    resolveTarget: (targetId: number) =>
+      request<{
+        status: string
+        data: {
+          target: {
+            kind: 'local' | 'ssh' | 'adb'
+            shell?: string
+            cwd?: string
+            host?: string
+            port?: number
+            user?: string
+            auth?: 'password' | 'key'
+            password?: string
+            keyName?: string
+            serial?: string
+            command?: string
+          }
+          label: string
+          device_id?: number
+          target_id?: number
+          kind?: 'local' | 'ssh' | 'adb'
+        }
+      }>(`/api/terminal/target/${targetId}`),
+    resolveDeviceTarget: (deviceId: number) =>
+      request<{
+        status: string
+        data: {
+          target: {
+            kind: 'local' | 'ssh' | 'adb'
+            shell?: string
+            cwd?: string
+            host?: string
+            port?: number
+            user?: string
+            auth?: 'password' | 'key'
+            password?: string
+            keyName?: string
+            serial?: string
+            command?: string
+          }
+          label: string
+          device_id: number
+          kind: 'local' | 'ssh' | 'adb'
+        }
+      }>(`/api/terminal/device-target/${deviceId}`),
+    listTargets: () =>
+      request<{
+        status: string
+        data: Array<{
+          id: number
+          name: string
+          kind: 'local' | 'ssh' | 'adb'
+          target: Record<string, unknown>
+          created_at: string
+          updated_at: string
+        }>
+      }>('/api/terminal/targets'),
+    createTarget: (body: { name: string; kind: 'local' | 'ssh' | 'adb'; target: Record<string, unknown> }) =>
+      request<{ status: string; data: { id: number; name: string; kind: string; target: Record<string, unknown> } }>(
+        '/api/terminal/targets',
+        { method: 'POST', body: JSON.stringify(body) },
+      ),
+    updateTarget: (id: number, body: { name?: string; target?: Record<string, unknown> }) =>
+      request<{ status: string; data: unknown }>(`/api/terminal/targets/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+    removeTarget: (id: number) =>
+      request<{ status: string }>(`/api/terminal/targets/${id}`, { method: 'DELETE' }),
+    testTarget: (id: number) =>
+      request<{ status: string; data: { ok: boolean; message: string } }>(`/api/terminal/targets/${id}/test`, { method: 'POST' }),
+  },
 }

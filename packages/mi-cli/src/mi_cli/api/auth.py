@@ -227,6 +227,11 @@ def _api_headers(auth_data: dict) -> dict:
 
 def _get_location(auth_data: dict) -> dict:
     """用已有 token 尝试刷新 serviceToken — 同时更新 ssecurity"""
+    return _get_service_token(auth_data, MI_SID, service_token_key="serviceToken")
+
+
+def _get_service_token(auth_data: dict, sid: str, service_token_key: str = "serviceToken") -> dict:
+    """Use passToken/userId to refresh a service-specific serviceToken."""
     if not auth_data.get("passToken") or not auth_data.get("userId"):
         return {"code": -1, "message": "缺少 passToken/userId"}
 
@@ -244,7 +249,7 @@ def _get_location(auth_data: dict) -> dict:
 
     resp = session.get(
         SERVICE_LOGIN_URL,
-        params={"sid": MI_SID, "_json": "true"},
+        params={"sid": sid, "_json": "true"},
     )
     service_data = _json_decode(resp.text)
     # 更新 ssecurity — 即使 location 后续失败也要更新
@@ -254,16 +259,45 @@ def _get_location(auth_data: dict) -> dict:
         if service_data.get("passToken"):
             auth_data["passToken"] = service_data["passToken"]
     location = service_data.get("location", "")
+    if location and sid != "mijia" and "clientSign=" not in location:
+        nonce = service_data.get("nonce")
+        ssecurity = service_data.get("ssecurity") or auth_data.get("ssecurity", "")
+        if nonce and ssecurity:
+            sign = hashlib.sha1(f"nonce={nonce}&{ssecurity}".encode()).digest()
+            client_sign = base64.b64encode(sign).decode()
+            location += "&clientSign=" + parse.quote(client_sign)
     if service_data.get("code") == 0 and location:
         resp2 = session.get(location)
-        if resp2.status_code == 200 and resp2.text == "ok":
-            cookies = resp2.cookies.get_dict()
-            auth_data.update(cookies)
+        cookies = resp2.cookies.get_dict()
+        if resp2.status_code == 200 and cookies.get("serviceToken"):
+            if service_token_key == "serviceToken":
+                auth_data.update(cookies)
+            elif cookies.get("serviceToken"):
+                auth_data[service_token_key] = cookies["serviceToken"]
             _save_auth_data(auth_data)
             return {"code": 0, "message": "刷新Token成功"}
+        _save_auth_data(auth_data)
+        return {
+            "code": -1,
+            "message": "刷新Token失败",
+            "sid": sid,
+            "service_code": service_data.get("code"),
+            "service_desc": service_data.get("desc") or service_data.get("description") or service_data.get("message"),
+            "has_location": bool(location),
+            "location_status": resp2.status_code,
+            "location_text": (resp2.text or "")[:80],
+            "cookie_keys": sorted(resp2.cookies.get_dict().keys()),
+        }
     # 即使 location 失败，ssecurity 也已经更新了
     _save_auth_data(auth_data)
-    return {"code": -1, "message": "刷新Token失败（但 ssecurity 已更新）"}
+    return {
+        "code": -1,
+        "message": "刷新Token失败（但 ssecurity 已更新）",
+        "sid": sid,
+        "service_code": service_data.get("code"),
+        "service_desc": service_data.get("desc") or service_data.get("description") or service_data.get("message"),
+        "has_location": bool(location),
+    }
 
 
 def _check_available(auth_data: dict) -> bool:

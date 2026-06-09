@@ -70,3 +70,21 @@ export type LegacyCapabilityExecuteBody = {
   params?: string
   arguments?: Record<string, unknown>
 }
+
+export type DeviceGroup = {
+  id: number
+  name: string
+  member_ids: number[]
+  created_at: string
+  updated_at: string
+}
+
+export type CreateDeviceGroupInput = {
+  name: string
+  device_ids?: number[]
+}
+
+export type UpdateDeviceGroupInput = {
+  name?: string
+  device_ids?: number[]
+}

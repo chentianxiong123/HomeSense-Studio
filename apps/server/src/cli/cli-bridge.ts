@@ -12,7 +12,7 @@ interface PythonCommand {
   env: NodeJS.ProcessEnv
 }
 
-const BUILT_IN_CLIS = new Set(['mi-cli', 'adb-cli'])
+const BUILT_IN_CLIS = new Set(['mi-cli', 'adb-cli', 'media-cli'])
 const commandCache = new Map<string, PythonCommand>()
 
 function repoRoot(): string {
@@ -36,6 +36,7 @@ function cleanPythonEnv(extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 function getEnvPythonOverride(cliName: string): string | undefined {
   if (cliName === 'mi-cli') return process.env.MI_CLI_PYTHON || process.env.CLI_BRIDGE_PYTHON
   if (cliName === 'adb-cli') return process.env.ADB_CLI_PYTHON || process.env.CLI_BRIDGE_PYTHON
+  if (cliName === 'media-cli') return process.env.MEDIA_CLI_PYTHON || process.env.CLI_BRIDGE_PYTHON
   return process.env.CLI_BRIDGE_PYTHON
 }
 

@@ -1,6 +1,9 @@
 node_modules
 dist
 data/
+.logs/
+.vite/
+apps/web/.vite/
 .env
 .env.*
 !.env.example
@@ -11,3 +14,10 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+
+# Project-owned local-network credentials (SSH keys, ADB pairing keys).
+# Keep these on disk for the project to use, but never commit.
+apps/server/runtime-keys/ssh/*
+!apps/server/runtime-keys/ssh/.gitkeep
+apps/server/runtime-keys/adb/*
+!apps/server/runtime-keys/adb/.gitkeep

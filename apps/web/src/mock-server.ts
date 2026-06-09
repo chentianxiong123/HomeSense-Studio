@@ -10,6 +10,7 @@ const REAL_API_PREFIXES = [
   '/api/auth',
   '/api/rooms',
   '/api/user-devices',
+  '/api/terminal',
 ]
 
 // ─── Mock Data ───────────────────────────────────────────────────────────────
@@ -285,6 +286,6 @@ window.fetch = async function mockFetch(input: RequestInfo | URL, init?: Request
   return notFound()
 }
 
-console.info('[mock-server] /api/auth, /api/rooms, and /api/user-devices pass through to the real backend')
+console.info('[mock-server] /api/auth, /api/rooms, /api/user-devices, and /api/terminal pass through to the real backend')
 
 export {}

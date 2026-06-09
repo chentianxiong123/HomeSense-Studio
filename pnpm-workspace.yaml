@@ -4,5 +4,8 @@ packages:
 allowBuilds:
   '@nestjs/core': true
   better-sqlite3: true
+  cpu-features: set this to true or false
   esbuild: true
+  node-pty: set this to true or false
+  ssh2: set this to true or false
   vue-demi: true

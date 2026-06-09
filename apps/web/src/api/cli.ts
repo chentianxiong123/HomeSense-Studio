@@ -26,7 +26,7 @@ async function request<T>(url: string, init: RequestInit): Promise<T> {
 }
 
 export const cliApi = {
-  run: <T = unknown>(cliName: 'mi-cli' | 'adb-cli', body: CliPassThroughRequest) =>
+  run: <T = unknown>(cliName: 'mi-cli' | 'adb-cli' | 'media-cli', body: CliPassThroughRequest) =>
     request<CliPassThroughResponse<T>>(`/api/cli/${cliName}`, {
       method: 'POST',
       body: JSON.stringify(body),

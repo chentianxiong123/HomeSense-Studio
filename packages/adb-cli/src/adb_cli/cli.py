@@ -3,9 +3,16 @@ import sys
 
 from adb_cli.adb import (
     handle_list_devices,
+    handle_scan_network,
     handle_connect,
     handle_disconnect,
+    handle_overview,
+    handle_list_files,
+    handle_read_file,
     handle_screenshot,
+    handle_scrcpy_status,
+    handle_scrcpy_probe,
+    handle_scrcpy_build_command,
     handle_get_display_size,
     handle_get_ui_elements,
     handle_tap_element,
@@ -103,6 +110,30 @@ def _with_tap_element_schema(cap: dict) -> dict:
     return cap
 
 
+def _with_scrcpy_command_schema(cap: dict) -> dict:
+    cap = dict(cap)
+    cap["input_schema"] = {
+        "type": "object",
+        "required": [],
+        "properties": {
+            "profile": {"type": "string"},
+            "max_size": {"type": "integer"},
+            "bit_rate": {"type": "string"},
+            "max_fps": {"type": "integer"},
+            "video_codec": {"type": "string"},
+            "display_id": {"type": "integer"},
+            "audio": {"type": "boolean"},
+            "control": {"type": "boolean"},
+            "window": {"type": "boolean"},
+            "playback": {"type": "boolean"},
+            "tunnel_mode": {"type": "string"},
+            "record": {"type": "string"},
+            "extra_args": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    return cap
+
+
 PHONE_BASE = [
     _make_capability("adb.back", "返回", "action", "back"),
     _make_capability("adb.home", "主页", "action", "home"),
@@ -115,6 +146,9 @@ PHONE_BASE = [
     _with_text_schema(_make_capability("adb.input_text", "输入文本", "action", "input_text")),
     _with_package_schema(_make_capability("adb.launch_app", "启动应用", "action", "launch_app")),
     _make_capability("adb.screenshot", "截屏", "property", "screenshot"),
+    _make_capability("adb.scrcpy.status", "scrcpy 可用性", "property", "scrcpy_status"),
+    _make_capability("adb.scrcpy.probe", "屏幕串流探测", "property", "scrcpy_probe"),
+    _with_scrcpy_command_schema(_make_capability("adb.scrcpy.command", "屏幕串流启动规格", "action", "scrcpy_command")),
     _make_capability("adb.current_app", "当前应用", "property", "current_app"),
     _make_capability("adb.ui_tree", "界面元素", "property", "ui_tree"),
 ]
@@ -152,10 +186,26 @@ def handle_capabilities_action(command: dict) -> dict:
 ACTION_MAP = {
     "list_devices": handle_list_devices,
     "devices": handle_list_devices,
+    "scan_network": handle_scan_network,
+    "scan_adb": handle_scan_network,
+    "adb_scan": handle_scan_network,
     "connect": handle_connect,
     "disconnect": handle_disconnect,
+    "overview": handle_overview,
+    "device_overview": handle_overview,
+    "list_files": handle_list_files,
+    "read_dir": handle_list_files,
+    "read_file": handle_read_file,
+    "preview_file": handle_read_file,
     "screenshot": handle_screenshot,
     "get_screenshot": handle_screenshot,
+    "scrcpy_status": handle_scrcpy_status,
+    "screen_stream_status": handle_scrcpy_status,
+    "scrcpy_probe": handle_scrcpy_probe,
+    "screen_stream_probe": handle_scrcpy_probe,
+    "scrcpy_command": handle_scrcpy_build_command,
+    "scrcpy_build_command": handle_scrcpy_build_command,
+    "screen_stream_command": handle_scrcpy_build_command,
     "get_display_size": handle_get_display_size,
     "get_ui_elements": handle_get_ui_elements,
     "ui_elements": handle_get_ui_elements,

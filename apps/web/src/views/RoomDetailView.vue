@@ -27,6 +27,7 @@ let pingTimer: ReturnType<typeof setInterval> | null = null
 const isEditMode = ref(false)
 const isMobilePortrait = ref(false)
 const draggingDeviceId = ref<number | null>(null)
+const selectedDeviceId = ref<number | null>(null)
 
 type RoomLayoutDraft = { x?: number; y?: number; w?: number; h?: number }
 type RoomPropsDraft = Record<string, unknown> & {
@@ -387,6 +388,14 @@ function toggleEditMode() {
   isEditMode.value = !isEditMode.value
 }
 
+function selectDevice(d: UserDevice) {
+  if (selectedDeviceId.value === d.id) {
+    selectedDeviceId.value = null
+  } else {
+    selectedDeviceId.value = d.id
+  }
+}
+
 onMounted(async () => {
   detectOrientation()
   window.addEventListener('resize', onResize)
@@ -455,8 +464,18 @@ watch(() => route.params.id, async () => {
             :class="{ editing: isEditMode }"
             :style="roomStyle"
           >
-            <span class="rd-room-dot"></span>
-            <strong class="rd-room-name">{{ room.name }}</strong>
+            <header class="rd-room-head">
+              <span class="rd-room-dot"></span>
+              <strong class="rd-room-name">{{ room.name }}</strong>
+              <span class="rd-room-counts">
+                <span class="rd-room-count online">
+                  <span class="rd-room-count-dot"></span>
+                  {{ roomDevices.filter(d => onlineStatus[d.id] === true).length }} {{ label('在线', 'online') }}
+                </span>
+                <span class="rd-room-count-divider">·</span>
+                <span class="rd-room-count total">{{ roomDevices.length }} {{ label('设备', 'devices') }}</span>
+              </span>
+            </header>
 
             <div
               v-if="isEditMode"
@@ -475,10 +494,12 @@ watch(() => route.params.id, async () => {
                 offline: onlineStatus[d.id] === false,
                 'in-group': d.props?.group_id,
                 editing: isEditMode,
+                active: !isEditMode && selectedDeviceId === d.id,
               }"
               :style="getDeviceStyle(d)"
               @pointerdown="startDragDevice($event, d)"
-              @click.stop="isEditMode ? null : null"
+              @click.stop="isEditMode ? null : selectDevice(d)"
+              @dblclick.stop="isEditMode ? null : router.push(`/devices/${d.id}?from=/devices/rooms/${room.id}`)"
             >
               <div class="rd-detailed">
                 <div class="rd-detailed-head">
@@ -538,7 +559,7 @@ watch(() => route.params.id, async () => {
   height: 40px;
   padding: 0 18px;
   border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 10px;
+  border-radius: 6px;
   background: #fff;
   color: var(--text-secondary);
   font-size: 13px;
@@ -583,7 +604,7 @@ watch(() => route.params.id, async () => {
   height: 40px;
   padding: 0 18px;
   border: 1px solid rgba(17, 24, 39, 0.08);
-  border-radius: 10px;
+  border-radius: 6px;
   background: #111827;
   color: #fff;
   font-size: 13px;
@@ -601,7 +622,7 @@ watch(() => route.params.id, async () => {
   height: 40px;
   padding: 0 18px;
   border: 1px solid rgba(0,0,0,0.08);
-  border-radius: 10px;
+  border-radius: 6px;
   background: #fff;
   color: var(--text-secondary);
   font-size: 13px;
@@ -625,7 +646,7 @@ watch(() => route.params.id, async () => {
   background: radial-gradient(rgba(0, 0, 0, 0.03) 1px, transparent 1px);
   background-size: 20px 20px;
   border: 1px solid rgba(0, 0, 0, 0.03);
-  border-radius: 24px;
+  border-radius: 12px;
   overflow: hidden;
   cursor: grab;
 }
@@ -644,33 +665,69 @@ watch(() => route.params.id, async () => {
 .rd-room {
   position: absolute;
   border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 28px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.7);
-  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.01);
   box-sizing: border-box;
-  padding: 24px;
+  padding: 20px;
 }
 .rd-room.editing {
   border-style: dashed;
   border-color: rgba(16, 185, 129, 0.45);
-  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.08), 0 18px 48px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.08), 0 12px 32px rgba(0, 0, 0, 0.04);
+}
+
+.rd-room-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
 }
 
 .rd-room-dot {
   display: inline-block;
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   background: #10b981;
   border-radius: 50%;
-  margin-right: 10px;
-  vertical-align: middle;
+  flex-shrink: 0;
 }
+
 .rd-room-name {
-  font-size: 22px;
+  font-size: 18px;
   color: var(--text-primary);
   font-weight: 900;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.02em;
+  flex-shrink: 0;
 }
+
+.rd-room-counts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+}
+
+.rd-room-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rd-room-count.online { color: #047857; }
+.rd-room-count-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+}
+.rd-room-count-divider { color: rgba(15, 23, 42, 0.2); }
+.rd-room-count.total { color: var(--text-tertiary); }
 
 .rd-room-drag-hint {
   position: absolute;
@@ -690,30 +747,43 @@ watch(() => route.params.id, async () => {
 
 .rd-device {
   position: absolute;
-  width: 154px;
-  height: 114px;
-  border-radius: 18px;
+  width: 168px;
+  height: 124px;
+  border-radius: 6px;
   background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
   cursor: grab;
   touch-action: none;
   box-sizing: border-box;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
 }
 .rd-device:active { cursor: grabbing; }
+
 .rd-device.online {
-  border-color: rgba(16, 185, 129, 0.45);
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.18), 0 10px 30px rgba(0, 0, 0, 0.04);
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.2);
 }
 .rd-device.offline {
-  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.05);
+  border-color: rgba(239, 68, 68, 0.15);
 }
 .rd-device.in-group {
-  border-color: rgba(99, 102, 241, 0.4);
+  border-color: rgba(99, 102, 241, 0.3);
 }
 .rd-device.editing {
   cursor: grab;
+}
+
+/* Single-click focus state — matches .device-node.active on the floor plan. */
+.rd-device.active {
+  border-color: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+  background: rgba(16, 185, 129, 0.08);
+}
+.rd-device.active.offline {
+  background: rgba(239, 68, 68, 0.05);
+  border-color: #10b981;
 }
 
 .rd-detailed {
@@ -770,7 +840,6 @@ watch(() => route.params.id, async () => {
   font-size: 9px;
   font-weight: 800;
   color: #10b981;
-  opacity: 0.7;
   text-align: right;
   margin-top: 2px;
 }

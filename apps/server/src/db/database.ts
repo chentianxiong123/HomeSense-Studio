@@ -24,12 +24,75 @@ const tables = [
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (id AUTOINCREMENT)
     )`,
+  `CREATE TABLE IF NOT EXISTS device_groups (
+      id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      member_ids TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (id AUTOINCREMENT)
+    )`,
+  `CREATE TABLE IF NOT EXISTS terminal_targets (
+      id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      target_json TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (id AUTOINCREMENT)
+    )`,
+  `CREATE TABLE IF NOT EXISTS media_playlist_items (
+      id INTEGER NOT NULL,
+      item_id TEXT NOT NULL UNIQUE,
+      source TEXT NOT NULL,
+      title TEXT NOT NULL,
+      artist TEXT,
+      cover TEXT,
+      duration_sec INTEGER,
+      upstream_id TEXT,
+      upstream_url TEXT,
+      stream_url TEXT,
+      mime_type TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (id AUTOINCREMENT)
+    )`,
+  `CREATE TABLE IF NOT EXISTS alist_authorizations (
+      id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      driver TEXT NOT NULL,
+      endpoint TEXT NOT NULL,
+      username TEXT,
+      secret_json TEXT NOT NULL DEFAULT '{}',
+      props_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (id AUTOINCREMENT)
+    )`,
+  `CREATE TABLE IF NOT EXISTS storage_mounts (
+      id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      virtual_path TEXT NOT NULL UNIQUE,
+      driver TEXT NOT NULL,
+      authorization_id INTEGER NOT NULL,
+      readonly INTEGER NOT NULL DEFAULT 0,
+      props_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (id AUTOINCREMENT)
+    )`,
 ]
 
 const indexes = [
   `CREATE INDEX IF NOT EXISTS idx_devices_room_id ON devices(json_extract(props, '$.room_id'))`,
   `CREATE INDEX IF NOT EXISTS idx_devices_mi_did ON devices(json_extract(props, '$.mi_did'))`,
   `CREATE INDEX IF NOT EXISTS idx_devices_adb_ip ON devices(json_extract(props, '$.adb_ip'))`,
+  `CREATE INDEX IF NOT EXISTS idx_devices_group_id ON devices(json_extract(props, '$.group_id'))`,
+  `CREATE INDEX IF NOT EXISTS idx_media_playlist_sort ON media_playlist_items(sort_order, id)`,
+  `CREATE INDEX IF NOT EXISTS idx_alist_authorizations_driver ON alist_authorizations(driver)`,
+  `CREATE INDEX IF NOT EXISTS idx_storage_mounts_authorization ON storage_mounts(authorization_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_storage_mounts_driver ON storage_mounts(driver)`,
 ]
 
 export function initDb(): Database.Database {
