@@ -1,5 +1,5 @@
 import { cliApi } from './cli'
-import type { MediaCandidate, MediaItem, MediaOutput, MediaSourceSite, MediaSourceSiteKind, PreparedMediaStream } from '@/features/media/types'
+import type { MediaBookmark, MediaCandidate, MediaItem, MediaOutput, MediaSourceSite, MediaSourceSiteKind, PreparedMediaStream } from '@/features/media/types'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const hasBody = init?.body != null
@@ -108,7 +108,51 @@ export interface MediaSourceSiteInput {
   tags?: string[]
 }
 
+export interface MediaBookmarkInput extends MediaItem {
+  tags?: string[]
+  favorite?: boolean
+}
+
+export interface MediaBookmarkQuery {
+  q?: string
+  source?: string
+  favorite?: boolean
+  tag?: string
+}
+
 export const mediaApi = {
+  listBookmarks: (query: MediaBookmarkQuery = {}) => {
+    const params = new URLSearchParams()
+    if (query.q) params.set('q', query.q)
+    if (query.source) params.set('source', query.source)
+    if (query.favorite != null) params.set('favorite', String(query.favorite))
+    if (query.tag) params.set('tag', query.tag)
+    const suffix = params.toString() ? `?${params.toString()}` : ''
+    return request<{ bookmarks: MediaBookmark[] }>(`/api/media/bookmarks${suffix}`)
+  },
+
+  addBookmark: (input: MediaBookmarkInput) =>
+    request<{ bookmark: MediaBookmark }>('/api/media/bookmarks', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  updateBookmark: (itemId: string, input: Partial<MediaBookmarkInput>) =>
+    request<{ bookmark: MediaBookmark }>(`/api/media/bookmarks/${encodeURIComponent(itemId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+
+  removeBookmark: (itemId: string) =>
+    request<{ status: string }>(`/api/media/bookmarks/${encodeURIComponent(itemId)}`, {
+      method: 'DELETE',
+    }),
+
+  markBookmarkPlayed: (itemId: string) =>
+    request<{ bookmark: MediaBookmark }>(`/api/media/bookmarks/${encodeURIComponent(itemId)}/played`, {
+      method: 'POST',
+    }),
+
   listSourceSites: () =>
     request<{ sites: MediaSourceSite[] }>('/api/media/source-sites'),
 

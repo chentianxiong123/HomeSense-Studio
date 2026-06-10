@@ -21,6 +21,43 @@ export interface MediaPlaylistItem {
   stream_kind?: MediaStreamKind
 }
 
+export interface MediaBookmark extends MediaPlaylistItem {
+  bookmark_id: number
+  tags: string[]
+  favorite: boolean
+  play_count: number
+  last_played_at?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface MediaBookmarkInput extends MediaPlaylistItem {
+  tags?: unknown
+  favorite?: unknown
+}
+
+export interface MediaBookmarkUpdateInput {
+  source?: MediaSourceKind
+  title?: string
+  artist?: string
+  cover?: string
+  duration_sec?: number
+  upstream_id?: string
+  upstream_url?: string
+  stream_url?: string
+  mime_type?: string
+  stream_kind?: MediaStreamKind
+  tags?: unknown
+  favorite?: unknown
+}
+
+export interface MediaBookmarkQueryInput {
+  q?: string
+  source?: string
+  favorite?: unknown
+  tag?: string
+}
+
 interface MediaPlaylistRow {
   item_id: string
   source: string
@@ -32,6 +69,27 @@ interface MediaPlaylistRow {
   upstream_url: string | null
   stream_url: string | null
   mime_type: string | null
+}
+
+interface MediaBookmarkRow {
+  id: number
+  item_id: string
+  source: string
+  title: string
+  artist: string | null
+  cover: string | null
+  duration_sec: number | null
+  upstream_id: string | null
+  upstream_url: string | null
+  stream_url: string | null
+  mime_type: string | null
+  stream_kind: string | null
+  tags_json: string
+  favorite: number
+  play_count: number
+  last_played_at: string | null
+  created_at: string
+  updated_at: string
 }
 
 interface MediaSourceSiteRow {
@@ -139,6 +197,180 @@ const BLOCKED_UPSTREAM_HEADERS = new Set([
 @Injectable()
 export class MediaService {
   private readonly preparedStreams = new Map<string, PreparedStreamRecord>()
+
+  listBookmarks(input: MediaBookmarkQueryInput = {}) {
+    const clauses: string[] = []
+    const params: unknown[] = []
+    const q = optionalString(input.q)
+    const source = optionalString(input.source)
+    const favorite = optionalBoolean(input.favorite)
+    const tag = optionalString(input.tag)
+
+    if (q) {
+      clauses.push('(title LIKE ? OR artist LIKE ? OR upstream_url LIKE ? OR stream_url LIKE ?)')
+      const pattern = `%${q}%`
+      params.push(pattern, pattern, pattern, pattern)
+    }
+    if (source && ['bilibili', 'url', 'local', 'storage'].includes(source)) {
+      clauses.push('source = ?')
+      params.push(source)
+    }
+    if (favorite != null) {
+      clauses.push('favorite = ?')
+      params.push(favorite ? 1 : 0)
+    }
+
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
+    const rows = getDb()
+      .prepare(
+        `SELECT id, item_id, source, title, artist, cover, duration_sec, upstream_id, upstream_url,
+                stream_url, mime_type, stream_kind, tags_json, favorite, play_count,
+                last_played_at, created_at, updated_at
+         FROM media_bookmarks
+         ${where}
+         ORDER BY favorite DESC, COALESCE(last_played_at, updated_at) DESC, id DESC`,
+      )
+      .all(...params) as MediaBookmarkRow[]
+    const bookmarks = rows.map(rowToBookmark)
+    return {
+      bookmarks: tag
+        ? bookmarks.filter((bookmark) => bookmark.tags.includes(tag))
+        : bookmarks,
+    }
+  }
+
+  addBookmark(input: MediaBookmarkInput) {
+    const normalized = normalizeBookmarkInput(input)
+    const db = getDb()
+    const existing = db
+      .prepare(
+        `SELECT id, item_id, source, title, artist, cover, duration_sec, upstream_id, upstream_url,
+                stream_url, mime_type, stream_kind, tags_json, favorite, play_count,
+                last_played_at, created_at, updated_at
+         FROM media_bookmarks
+         WHERE item_id = ?`,
+      )
+      .get(normalized.item.id) as MediaBookmarkRow | undefined
+
+    if (existing) {
+      const favorite = normalized.favorite ?? Boolean(existing.favorite)
+      db.prepare(
+        `UPDATE media_bookmarks
+         SET source = ?, title = ?, artist = ?, cover = ?, duration_sec = ?, upstream_id = ?,
+             upstream_url = ?, stream_url = ?, mime_type = ?, stream_kind = ?, tags_json = ?,
+             favorite = ?, updated_at = datetime('now')
+         WHERE item_id = ?`,
+      ).run(
+        normalized.item.source,
+        normalized.item.title,
+        normalized.item.artist ?? null,
+        normalized.item.cover ?? null,
+        normalized.item.duration_sec ?? null,
+        normalized.item.upstream_id ?? null,
+        normalized.item.upstream_url ?? null,
+        normalized.item.stream_url ?? null,
+        normalized.item.mime_type ?? null,
+        normalized.item.stream_kind ?? null,
+        JSON.stringify(normalized.tags),
+        favorite ? 1 : 0,
+        normalized.item.id,
+      )
+      return { bookmark: this.getBookmark(normalized.item.id) }
+    }
+
+    db.prepare(
+      `INSERT INTO media_bookmarks
+       (item_id, source, title, artist, cover, duration_sec, upstream_id, upstream_url,
+        stream_url, mime_type, stream_kind, tags_json, favorite)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      normalized.item.id,
+      normalized.item.source,
+      normalized.item.title,
+      normalized.item.artist ?? null,
+      normalized.item.cover ?? null,
+      normalized.item.duration_sec ?? null,
+      normalized.item.upstream_id ?? null,
+      normalized.item.upstream_url ?? null,
+      normalized.item.stream_url ?? null,
+      normalized.item.mime_type ?? null,
+      normalized.item.stream_kind ?? null,
+      JSON.stringify(normalized.tags),
+      normalized.favorite ? 1 : 0,
+    )
+    return { bookmark: this.getBookmark(normalized.item.id) }
+  }
+
+  updateBookmark(itemId: string, input: MediaBookmarkUpdateInput) {
+    const existing = this.getBookmark(itemId)
+    const normalized = normalizeBookmarkInput({
+      id: existing.id,
+      source: input.source ?? existing.source,
+      title: input.title ?? existing.title,
+      artist: input.artist ?? existing.artist,
+      cover: input.cover ?? existing.cover,
+      duration_sec: input.duration_sec ?? existing.duration_sec,
+      upstream_id: input.upstream_id ?? existing.upstream_id,
+      upstream_url: input.upstream_url ?? existing.upstream_url,
+      stream_url: input.stream_url ?? existing.stream_url,
+      mime_type: input.mime_type ?? existing.mime_type,
+      stream_kind: input.stream_kind ?? existing.stream_kind,
+      tags: input.tags ?? existing.tags,
+      favorite: input.favorite ?? existing.favorite,
+    })
+
+    getDb().prepare(
+      `UPDATE media_bookmarks
+       SET source = ?, title = ?, artist = ?, cover = ?, duration_sec = ?, upstream_id = ?,
+           upstream_url = ?, stream_url = ?, mime_type = ?, stream_kind = ?, tags_json = ?,
+           favorite = ?, updated_at = datetime('now')
+       WHERE item_id = ?`,
+    ).run(
+      normalized.item.source,
+      normalized.item.title,
+      normalized.item.artist ?? null,
+      normalized.item.cover ?? null,
+      normalized.item.duration_sec ?? null,
+      normalized.item.upstream_id ?? null,
+      normalized.item.upstream_url ?? null,
+      normalized.item.stream_url ?? null,
+      normalized.item.mime_type ?? null,
+      normalized.item.stream_kind ?? null,
+      JSON.stringify(normalized.tags),
+      normalized.favorite ? 1 : 0,
+      existing.id,
+    )
+    return { bookmark: this.getBookmark(existing.id) }
+  }
+
+  removeBookmark(itemId: string) {
+    getDb().prepare('DELETE FROM media_bookmarks WHERE item_id = ?').run(itemId)
+    return { status: 'success' }
+  }
+
+  markBookmarkPlayed(itemId: string) {
+    const result = getDb().prepare(
+      `UPDATE media_bookmarks
+       SET play_count = play_count + 1, last_played_at = datetime('now'), updated_at = datetime('now')
+       WHERE item_id = ?`,
+    ).run(itemId)
+    if (result.changes === 0) throw new NotFoundException('Media bookmark not found')
+    return { bookmark: this.getBookmark(itemId) }
+  }
+
+  getBookmark(itemId: string): MediaBookmark {
+    const row = getDb()
+      .prepare(
+        `SELECT id, item_id, source, title, artist, cover, duration_sec, upstream_id, upstream_url,
+                stream_url, mime_type, stream_kind, tags_json, favorite, play_count,
+                last_played_at, created_at, updated_at
+         FROM media_bookmarks
+         WHERE item_id = ?`,
+      )
+      .get(itemId) as MediaBookmarkRow | undefined
+    if (!row) throw new NotFoundException('Media bookmark not found')
+    return rowToBookmark(row)
+  }
 
   listSourceSites() {
     const rows = getDb()
@@ -389,6 +621,29 @@ function rowToItem(row: MediaPlaylistRow): MediaPlaylistItem {
   }
 }
 
+function rowToBookmark(row: MediaBookmarkRow): MediaBookmark {
+  return {
+    id: row.item_id,
+    bookmark_id: row.id,
+    source: row.source as MediaBookmark['source'],
+    title: row.title,
+    tags: parseTagsJson(row.tags_json),
+    favorite: row.favorite === 1,
+    play_count: row.play_count,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    ...(row.artist ? { artist: row.artist } : {}),
+    ...(row.cover ? { cover: row.cover } : {}),
+    ...(row.duration_sec != null ? { duration_sec: row.duration_sec } : {}),
+    ...(row.upstream_id ? { upstream_id: row.upstream_id } : {}),
+    ...(row.upstream_url ? { upstream_url: row.upstream_url } : {}),
+    ...(row.stream_url ? { stream_url: row.stream_url } : {}),
+    ...(row.mime_type ? { mime_type: row.mime_type } : {}),
+    ...(optionalStreamKind(row.stream_kind) ? { stream_kind: optionalStreamKind(row.stream_kind) } : {}),
+    ...(row.last_played_at ? { last_played_at: row.last_played_at } : {}),
+  }
+}
+
 function rowToSourceSite(row: MediaSourceSiteRow): MediaSourceSite {
   return {
     id: row.id,
@@ -401,6 +656,14 @@ function rowToSourceSite(row: MediaSourceSiteRow): MediaSourceSite {
     ...(row.last_candidates_count != null ? { last_candidates_count: row.last_candidates_count } : {}),
     created_at: row.created_at,
     updated_at: row.updated_at,
+  }
+}
+
+function normalizeBookmarkInput(input: MediaBookmarkInput): { item: MediaPlaylistItem; tags: string[]; favorite?: boolean } {
+  return {
+    item: normalizeItem(input),
+    tags: normalizeTags(input.tags),
+    favorite: optionalBoolean(input.favorite),
   }
 }
 
@@ -425,6 +688,20 @@ function optionalString(value: unknown): string | undefined {
 function optionalNumber(value: unknown): number | undefined {
   const num = Number(value)
   return Number.isFinite(num) && num >= 0 ? num : undefined
+}
+
+function optionalBoolean(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') {
+    if (value === 1) return true
+    if (value === 0) return false
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === 'true' || normalized === '1') return true
+    if (normalized === 'false' || normalized === '0') return false
+  }
+  return undefined
 }
 
 function optionalStreamKind(value: unknown): MediaStreamKind | undefined {
