@@ -457,7 +457,7 @@ function errorText(err: unknown): string {
         <button class="plain-btn compact" :disabled="acting" @click="loadTasks">{{ label('刷新任务', 'Refresh Tasks') }}</button>
         <div v-for="task in tasks.slice(0, 4)" :key="task.id" class="task-chip" :class="task.status">
           <strong>{{ task.kind }} · {{ task.status }}</strong>
-          <small>{{ task.error || task.message || `${task.progress}%` }}</small>
+          <small>{{ task.error || `${task.message || ''}${task.message ? ' · ' : ''}${task.progress}%` }}</small>
         </div>
       </div>
 

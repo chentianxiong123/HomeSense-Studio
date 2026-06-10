@@ -14,6 +14,7 @@ import { StorageMountService } from './storage-mount.service'
 import type { StorageMountRecord } from './storage.types'
 
 const DEFAULT_TIMEOUT_MS = 30_000
+type TransferProgressReporter = (patch: { progress?: number; message?: string }) => void
 
 @Injectable()
 export class StorageTransferService {
@@ -45,7 +46,7 @@ export class StorageTransferService {
     throw new BadRequestException(`Upload is not implemented for driver: ${driver}`)
   }
 
-  async copy(input: AlistCopyInput): Promise<AlistDriverMutationResult> {
+  async copy(input: AlistCopyInput, report?: TransferProgressReporter): Promise<AlistDriverMutationResult> {
     const srcDir = requiredVirtualPath(input.src_dir, 'src_dir')
     const dstDir = requiredVirtualPath(input.dst_dir, 'dst_dir')
     const names = requiredNames(input.names)
@@ -55,10 +56,18 @@ export class StorageTransferService {
 
     let copied = 0
     for (const name of names) {
+      report?.({
+        progress: progressFor(copied, names.length),
+        message: `copying ${name}`,
+      })
       const srcPath = cleanVirtualPath(path.posix.join(srcDir, name))
       const dstPath = cleanVirtualPath(path.posix.join(dstDir, name))
       await this.copyOne(srcPath, dstPath)
       copied += 1
+      report?.({
+        progress: progressFor(copied, names.length),
+        message: `copied ${copied}/${names.length}`,
+      })
     }
     return { copied }
   }
@@ -346,4 +355,9 @@ function normalizeDriver(value: unknown): string {
 
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
+}
+
+function progressFor(done: number, total: number): number {
+  if (total <= 0) return 5
+  return 5 + Math.floor((Math.max(0, Math.min(done, total)) / total) * 90)
 }

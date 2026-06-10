@@ -41,7 +41,7 @@ Not implemented:
 - Aria2.
 - File preview/transcode.
 - Dynamic mount discovery.
-- Persisted async large-copy task progress. Current copy tasks are in-memory and coarse-grained.
+- Byte-level async copy progress. Current copy tasks are persisted in SQLite and report file-level progress, but not byte-level progress.
 - Cross-mount directory copy across protocols.
 - Native SMB/NFS client drivers. Current support expects the server OS to mount those shares first.
 
@@ -126,7 +126,7 @@ Different mount:
 StorageTransfer.download(srcPath) -> stream -> StorageTransfer.upload(dstPath)
 ```
 
-The current slice supports cross-mount file copy across local/WebDAV/SFTP/ADB/SMB/NFS. Cross-mount directory copy returns a clear unsupported error; it should become a persisted async task later.
+The current slice supports cross-mount file copy across local/WebDAV/SFTP/ADB/SMB/NFS. Copy tasks are stored in SQLite and update file-level progress; tasks that were queued or running during a server restart are marked as interrupted on the next boot. Cross-mount directory copy returns a clear unsupported error.
 
 ## Verification
 
@@ -147,7 +147,7 @@ cd apps/web
 
 ## Next Steps
 
-- Move storage tasks from memory to SQLite so large copy state survives server restart.
-- Add per-file and byte-level task progress once transfer streams expose counters.
+- Add byte-level task progress once transfer streams expose counters.
+- Add resumable or restartable copy tasks if large file operations become common.
 - Add a real AList/OpenList adapter fork only when a specific driver is needed.
 - Keep `RemoteFileBrowserPanel` as the shared HomeSense browser surface and add protocol-specific actions around it only when the workflow requires them.

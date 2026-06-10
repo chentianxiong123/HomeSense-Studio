@@ -128,6 +128,20 @@ const tables = [
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (id AUTOINCREMENT)
     )`,
+  `CREATE TABLE IF NOT EXISTS storage_tasks (
+      id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      progress INTEGER NOT NULL DEFAULT 0,
+      message TEXT,
+      error TEXT,
+      input_json TEXT NOT NULL DEFAULT '{}',
+      result_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      finished_at TEXT,
+      PRIMARY KEY (id)
+    )`,
 ]
 
 const indexes = [
@@ -146,6 +160,8 @@ const indexes = [
   `CREATE INDEX IF NOT EXISTS idx_alist_authorizations_driver ON alist_authorizations(driver)`,
   `CREATE INDEX IF NOT EXISTS idx_storage_mounts_authorization ON storage_mounts(authorization_id)`,
   `CREATE INDEX IF NOT EXISTS idx_storage_mounts_driver ON storage_mounts(driver)`,
+  `CREATE INDEX IF NOT EXISTS idx_storage_tasks_status ON storage_tasks(status)`,
+  `CREATE INDEX IF NOT EXISTS idx_storage_tasks_created ON storage_tasks(created_at)`,
 ]
 
 export function initDb(): Database.Database {

@@ -18,6 +18,8 @@ import { StorageTransferService } from './storage-transfer.service'
 import { SftpStorageService } from './sftp-storage.service'
 import type { StorageMountRecord, StorageTaskRecord } from './storage.types'
 
+type StorageProgressReporter = (patch: { progress?: number; message?: string }) => void
+
 @Injectable()
 export class StorageService {
   constructor(
@@ -75,24 +77,26 @@ export class StorageService {
     return this.alist.removeForProps(this.buildDriverProps(), input)
   }
 
-  copy(input: AlistCopyInput): Promise<AlistDriverMutationResult> {
+  copy(input: AlistCopyInput, report?: StorageProgressReporter): Promise<AlistDriverMutationResult> {
     this.ensureMounts()
     const srcMount = this.findMount(input.src_dir ?? '')
     const dstMount = this.findMount(input.dst_dir ?? '')
     const crossMount = Boolean(srcMount && dstMount && srcMount.id !== dstMount.id)
     if (crossMount) {
-      return this.transfers.copy(input)
+      return this.transfers.copy(input, report)
     }
     if (srcMount && normalizeDriver(srcMount.driver) === 'sftp') {
       if (!dstMount || dstMount.id !== srcMount.id) {
         throw new BadRequestException('SFTP cross-mount copy is not implemented yet')
       }
+      report?.({ progress: 20, message: 'copying in SFTP mount' })
       return this.sftp.copy(srcMount, input)
     }
     if (srcMount && normalizeDriver(srcMount.driver) === 'adb') {
       if (!dstMount || dstMount.id !== srcMount.id) {
         throw new BadRequestException('ADB cross-mount copy is not implemented yet')
       }
+      report?.({ progress: 20, message: 'copying in ADB mount' })
       return this.adb.copy(srcMount, input)
     }
     if (dstMount && normalizeDriver(dstMount.driver) === 'sftp') {
@@ -101,12 +105,13 @@ export class StorageService {
     if (dstMount && normalizeDriver(dstMount.driver) === 'adb') {
       throw new BadRequestException('ADB cross-mount copy is not implemented yet')
     }
+    report?.({ progress: 20, message: 'copying in storage driver' })
     return this.alist.copyForProps(this.buildDriverProps(), input)
   }
 
   copyTask(input: AlistCopyInput): StorageTaskRecord {
     this.ensureMounts()
-    return this.tasks.createCopyTask(input, () => this.copy(input))
+    return this.tasks.createCopyTask(input, (report) => this.copy(input, report))
   }
 
   private buildDriverProps(): AlistDriverProps {
