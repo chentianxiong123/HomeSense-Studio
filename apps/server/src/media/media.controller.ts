@@ -6,6 +6,9 @@ import type { ReadableStream as NodeReadableStream } from 'node:stream/web'
 import { cliBridge } from '../cli/cli-bridge'
 import {
   MediaService,
+  type MediaBookmarkInput,
+  type MediaBookmarkQueryInput,
+  type MediaBookmarkUpdateInput,
   type MediaPlaylistItem,
   type MediaPlaylistReorderInput,
   type MediaSourceSiteInput,
@@ -66,6 +69,31 @@ const BILIBILI_MEDIA_HEADERS = {
 @Controller('media')
 export class MediaController {
   constructor(private readonly media: MediaService) {}
+
+  @Get('bookmarks')
+  listBookmarks(@Query() query: MediaBookmarkQueryInput) {
+    return this.media.listBookmarks(query)
+  }
+
+  @Post('bookmarks')
+  addBookmark(@Body() body: MediaBookmarkInput) {
+    return this.media.addBookmark(body)
+  }
+
+  @Patch('bookmarks/:itemId')
+  updateBookmark(@Param('itemId') itemId: string, @Body() body: MediaBookmarkUpdateInput) {
+    return this.media.updateBookmark(decodeURIComponent(itemId), body)
+  }
+
+  @Delete('bookmarks/:itemId')
+  removeBookmark(@Param('itemId') itemId: string) {
+    return this.media.removeBookmark(decodeURIComponent(itemId))
+  }
+
+  @Post('bookmarks/:itemId/played')
+  markBookmarkPlayed(@Param('itemId') itemId: string) {
+    return this.media.markBookmarkPlayed(decodeURIComponent(itemId))
+  }
 
   @Get('source-sites')
   listSourceSites() {

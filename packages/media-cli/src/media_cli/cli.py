@@ -6,6 +6,7 @@ from media_cli.dlna import control as control_dlna
 from media_cli.dlna import discover_dlna
 from media_cli.dlna import play_url as play_dlna_url
 from media_cli.dlna import status as status_dlna
+from media_cli.resources import resource_normalize, resource_search
 from media_cli.sniff import sniff_url
 
 
@@ -14,7 +15,7 @@ def handle_health(command: dict) -> dict:
         "status": "success",
         "data": {
             "name": "media-cli",
-            "providers": ["bilibili", "dlna", "sniff"],
+            "providers": ["bilibili", "dlna", "resources", "sniff"],
             "actions": sorted(ACTION_MAP.keys()),
         },
     }
@@ -37,6 +38,10 @@ ACTION_MAP = {
     "control_dlna": control_dlna,
     "dlna_status": status_dlna,
     "status_dlna": status_dlna,
+    "resource_search": resource_search,
+    "resources_search": resource_search,
+    "resource_normalize": resource_normalize,
+    "resources_normalize": resource_normalize,
     "sniff_url": sniff_url,
     "url_sniff": sniff_url,
 }

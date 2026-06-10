@@ -20,6 +20,16 @@ export interface MediaItem {
   stream_kind?: MediaStreamKind
 }
 
+export interface MediaBookmark extends MediaItem {
+  bookmark_id: number
+  tags: string[]
+  favorite: boolean
+  play_count: number
+  last_played_at?: string
+  created_at: string
+  updated_at: string
+}
+
 export interface MediaCandidate {
   id: string
   source: MediaSourceKind

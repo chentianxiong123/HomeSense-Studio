@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { mediaApi } from '@/api/media'
+import type { ResourceSearchHit } from '@/api/resources'
+import MediaBookmarksPanel from '@/components/media/MediaBookmarksPanel.vue'
 import MediaOutputPanel from '@/components/media/MediaOutputPanel.vue'
 import MediaSourceSitesPanel from '@/components/media/MediaSourceSitesPanel.vue'
+import ResourceSearchPanel from '@/components/resources/ResourceSearchPanel.vue'
 import { useLocale } from '@/composables/useLocale'
 import { useMediaPlayer } from '@/features/media/player'
-import type { MediaCandidate, MediaItem, MediaPlayMode, MediaSourceSite } from '@/features/media/types'
+import type { MediaBookmark, MediaCandidate, MediaItem, MediaPlayMode, MediaSourceSite } from '@/features/media/types'
 
 const { locale } = useLocale()
 const isZh = computed(() => locale.value === 'zh')
@@ -24,6 +27,7 @@ const biliError = ref('')
 const biliResults = ref<MediaItem[]>([])
 const resolvingId = ref('')
 const playlistLoading = ref(false)
+const bookmarksPanel = ref<InstanceType<typeof MediaBookmarksPanel> | null>(null)
 
 const activeItem = player.currentItem
 const queue = player.queue
@@ -112,6 +116,19 @@ function selectSourceSiteUrl(url: string) {
   sniffError.value = ''
 }
 
+function selectResourceUrl(url: string) {
+  urlInput.value = url
+  formError.value = ''
+  sniffError.value = ''
+}
+
+async function sniffResourceHit(hit: ResourceSearchHit) {
+  urlInput.value = hit.url
+  titleInput.value = hit.title
+  formError.value = ''
+  await sniffMediaUrl()
+}
+
 function applySourceSiteSniff(payload: { site: MediaSourceSite; candidates: MediaCandidate[] }) {
   urlInput.value = payload.site.url
   titleInput.value = payload.site.title
@@ -133,6 +150,12 @@ async function queueCandidate(candidate: MediaCandidate) {
   if (!item) return
   player.addToQueue(item)
   await persistPlaylistItem(item)
+}
+
+async function bookmarkCandidate(candidate: MediaCandidate) {
+  const item = await createCandidateItem(candidate)
+  if (!item) return
+  await bookmarksPanel.value?.saveItem(durableBookmarkItem(item), candidateBookmarkTags(candidate), true)
 }
 
 async function createCandidateItem(candidate: MediaCandidate): Promise<MediaItem | null> {
@@ -231,6 +254,12 @@ async function queueBilibili(item: MediaItem) {
   await persistPlaylistItem(playableItem)
 }
 
+async function bookmarkBilibili(item: MediaItem) {
+  const playableItem = createBilibiliPlaybackItem(item)
+  if (!playableItem) return
+  await bookmarksPanel.value?.saveItem(playableItem, ['bilibili'], true)
+}
+
 function createBilibiliPlaybackItem(item: MediaItem): MediaItem | null {
   const bvid = item.upstream_id
   if (!bvid) return null
@@ -258,6 +287,25 @@ async function persistPlaylistItem(item: MediaItem) {
   } catch (error) {
     console.warn('failed to persist media playlist item', error)
   }
+}
+
+async function bookmarkUrl() {
+  const item = createUrlItem()
+  if (!item) return
+  await bookmarksPanel.value?.saveItem(item, ['url'], true)
+  clearUrlForm()
+}
+
+async function playBookmark(bookmark: MediaBookmark) {
+  const item = await createBookmarkPlaybackItem(bookmark)
+  await player.playItem(item)
+  if (player.state.session.state !== 'error') await persistPlaylistItem(item)
+}
+
+async function queueBookmark(bookmark: MediaBookmark) {
+  const item = await createBookmarkPlaybackItem(bookmark)
+  player.addToQueue(item)
+  await persistPlaylistItem(item)
 }
 
 async function removeQueued(index: number) {
@@ -326,6 +374,34 @@ function candidateSubtitle(candidate: MediaCandidate): string {
     candidate.provider,
     confidenceLabel(candidate.confidence),
   ].filter(Boolean).join(' · ')
+}
+
+function candidateBookmarkTags(candidate: MediaCandidate): string[] {
+  return Array.from(new Set([
+    candidate.provider,
+    candidate.stream_kind || candidate.kind,
+  ].filter(Boolean)))
+}
+
+function durableBookmarkItem(item: MediaItem): MediaItem {
+  if (!item.id.startsWith('candidate:')) return item
+  const durable = { ...item }
+  delete durable.stream_url
+  return durable
+}
+
+async function createBookmarkPlaybackItem(bookmark: MediaBookmark): Promise<MediaItem> {
+  if (!bookmark.id.startsWith('candidate:') || !bookmark.upstream_url) return bookmark
+  const prepared = await mediaApi.prepareStream({
+    candidate_id: bookmark.id,
+    url: bookmark.upstream_url,
+    mime_type: bookmark.mime_type,
+  })
+  return {
+    ...bookmark,
+    stream_url: prepared.stream.url,
+    mime_type: prepared.stream.mime_type,
+  }
 }
 
 function streamKindLabel(kind: string): string {
@@ -430,6 +506,11 @@ function titleFromUrl(url: string): string {
               <small>{{ result.artist || 'Bilibili' }} · {{ formatTime(result.duration_sec || 0) }}</small>
             </button>
             <div class="row-actions">
+              <button class="row-icon" type="button" :title="label('收藏', 'Bookmark')" @click="bookmarkBilibili(result)">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m12 17.3-6.2 3.4 1.2-7.1-5.1-5 7.1-1L12 1.2l3.1 6.4 7.1 1-5.1 5 1.2 7.1z" />
+                </svg>
+              </button>
               <button class="row-icon" type="button" :title="label('加入队列', 'Add to queue')" @click="queueBilibili(result)">
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
                   <path d="M12 5v14" />
@@ -444,6 +525,15 @@ function titleFromUrl(url: string): string {
             </div>
           </div>
         </div>
+
+        <div class="source-divider">
+          <span>{{ label('互联网资源', 'Internet Resources') }}</span>
+        </div>
+
+        <ResourceSearchPanel
+          @select="selectResourceUrl"
+          @sniff="sniffResourceHit"
+        />
 
         <div class="source-divider">
           <span>{{ label('直连 URL', 'Direct URL') }}</span>
@@ -487,6 +577,12 @@ function titleFromUrl(url: string): string {
               </svg>
               {{ label('加入队列', 'Add') }}
             </button>
+            <button class="plain-btn" type="button" @click="bookmarkUrl">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m12 17.3-6.2 3.4 1.2-7.1-5.1-5 7.1-1L12 1.2l3.1 6.4 7.1 1-5.1 5 1.2 7.1z" />
+              </svg>
+              {{ label('收藏', 'Save') }}
+            </button>
             <button class="primary-btn" type="submit">
               <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true">
                 <path d="M8 5v14l11-7z" />
@@ -504,6 +600,11 @@ function titleFromUrl(url: string): string {
               <small>{{ candidateSubtitle(candidate) }}</small>
             </button>
             <div class="row-actions">
+              <button class="row-icon" type="button" :disabled="preparingCandidateId === candidate.id" :title="label('收藏', 'Bookmark')" @click="bookmarkCandidate(candidate)">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m12 17.3-6.2 3.4 1.2-7.1-5.1-5 7.1-1L12 1.2l3.1 6.4 7.1 1-5.1 5 1.2 7.1z" />
+                </svg>
+              </button>
               <button class="row-icon" type="button" :disabled="preparingCandidateId === candidate.id" :title="label('加入队列', 'Add to queue')" @click="queueCandidate(candidate)">
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
                   <path d="M12 5v14" />
@@ -609,6 +710,14 @@ function titleFromUrl(url: string): string {
           </button>
         </div>
         <div class="mode-line">{{ playModeLabel }}</div>
+      </section>
+
+      <section class="panel bookmarks-shell">
+        <MediaBookmarksPanel
+          ref="bookmarksPanel"
+          @play="playBookmark"
+          @queue="queueBookmark"
+        />
       </section>
 
       <section class="panel queue-panel">
@@ -768,6 +877,10 @@ h2 {
   min-height: 260px;
 }
 
+.bookmarks-shell {
+  min-height: 260px;
+}
+
 .panel-head {
   display: flex;
   align-items: flex-start;
@@ -783,7 +896,7 @@ h2 {
 
 .form-actions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 
