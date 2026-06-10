@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { getDb } from '../db/database'
 import { AlistAuthorizationService } from '../alist/alist-authorization.service'
+import { implementedStorageDrivers } from './storage-protocols'
 import type { CreateStorageMountInput, StorageMountRecord, UpdateStorageMountInput } from './storage.types'
 
 interface StorageMountRow {
@@ -199,9 +200,11 @@ function normalizeVirtualPath(value: string): string {
 
 function normalizeDriver(value: unknown): string {
   const driver = String(value || 'webdav').trim().toLowerCase()
-  if (!driver) return 'webdav'
-  if (driver === 'web_dav') return 'webdav'
-  return driver
+  const normalized = driver === 'web_dav' ? 'webdav' : driver === 'ssh' ? 'sftp' : driver || 'webdav'
+  if (!implementedStorageDrivers().has(normalized)) {
+    throw new BadRequestException(`storage protocol is not implemented: ${normalized}`)
+  }
+  return normalized
 }
 
 function rowToRecord(row: StorageMountRow): StorageMountRecord {

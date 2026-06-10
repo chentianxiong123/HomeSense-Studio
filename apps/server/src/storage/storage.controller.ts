@@ -1,7 +1,10 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, Req, Res } from '@nestjs/common'
 import type { AlistCopyInput, AlistGetInput, AlistListInput, AlistRemoveInput } from '../alist/alist.types'
 import { StorageMountService } from './storage-mount.service'
+import { STORAGE_PROTOCOLS } from './storage-protocols'
 import { StorageService } from './storage.service'
+import { StorageTaskService } from './storage-task.service'
+import { StorageTransferService } from './storage-transfer.service'
 import type { CreateStorageMountInput, UpdateStorageMountInput } from './storage.types'
 
 @Controller('storage')
@@ -9,11 +12,18 @@ export class StorageController {
   constructor(
     private readonly mounts: StorageMountService,
     private readonly storage: StorageService,
+    private readonly tasks: StorageTaskService,
+    private readonly transfers: StorageTransferService,
   ) {}
 
   @Get('mounts')
   listMounts() {
     return this.mounts.list()
+  }
+
+  @Get('protocols')
+  listProtocols() {
+    return { protocols: STORAGE_PROTOCOLS }
   }
 
   @Post('mounts')
@@ -36,6 +46,16 @@ export class StorageController {
     return this.storage.health()
   }
 
+  @Get('tasks')
+  listTasks() {
+    return this.tasks.list()
+  }
+
+  @Get('tasks/:id')
+  getTask(@Param('id') id: string) {
+    return { task: this.tasks.get(id) }
+  }
+
   @Post('fs/list')
   list(@Body() body: AlistListInput) {
     return this.storage.list(body)
@@ -54,5 +74,23 @@ export class StorageController {
   @Post('fs/copy')
   copy(@Body() body: AlistCopyInput) {
     return this.storage.copy(body)
+  }
+
+  @Post('fs/copy-task')
+  copyTask(@Body() body: AlistCopyInput) {
+    return { task: this.storage.copyTask(body) }
+  }
+
+  @Get('fs/download')
+  async download(@Query('path') rawPath: string, @Res() res: any) {
+    const name = String(rawPath || '').split('/').filter(Boolean).at(-1) || 'download'
+    res.setHeader('Content-Type', 'application/octet-stream')
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(name)}"`)
+    await this.transfers.download(rawPath, res)
+  }
+
+  @Put('fs/upload')
+  upload(@Query('path') rawPath: string, @Req() req: any) {
+    return this.transfers.upload(rawPath, req)
   }
 }

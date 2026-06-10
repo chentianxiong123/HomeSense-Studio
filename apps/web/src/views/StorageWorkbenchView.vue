@@ -2,7 +2,9 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { alistApi, type AlistAuthorizationRecord, type AlistDriverEntry, type AlistDriverHealthResult, type AlistDriverListResult } from '@/api/alist'
-import { storageApi, type StorageMountRecord } from '@/api/storage'
+import type { RemoteWorkspaceFileEntry, RemoteWorkspaceFileList } from '@/api/remoteWorkspace'
+import { storageApi, type StorageMountRecord, type StorageTaskRecord } from '@/api/storage'
+import RemoteFileBrowserPanel from '@/components/RemoteFileBrowserPanel.vue'
 import { useLocale } from '@/composables/useLocale'
 
 const router = useRouter()
@@ -20,10 +22,12 @@ const list = ref<AlistDriverListResult | null>(null)
 const pathInput = ref('/')
 const copyTarget = ref('')
 const selected = ref<Record<string, boolean>>({})
+const uploadInput = ref<HTMLInputElement | null>(null)
 const loading = ref(false)
 const acting = ref(false)
 const error = ref('')
 const message = ref('')
+const tasks = ref<StorageTaskRecord[]>([])
 
 const mountFormOpen = ref(false)
 const editingMountId = ref<number | null>(null)
@@ -35,6 +39,25 @@ const mountReadonly = ref(false)
 const selectedNames = computed(() => Object.entries(selected.value).filter(([, value]) => value).map(([name]) => name))
 const currentDir = computed(() => list.value?.path || pathInput.value || '/')
 const selectedAuthorization = computed(() => authorizations.value.find((item) => item.id === mountAuthorizationId.value) ?? null)
+const storageFileList = computed<RemoteWorkspaceFileList | null>(() => {
+  if (!list.value) return null
+  return {
+    target_id: 'storage:system',
+    label: label('中枢文件层', 'Hub Storage'),
+    kind: 'storage',
+    root: list.value.mount_path || '/',
+    path: list.value.path,
+    absolute_path: list.value.path,
+    entries: list.value.entries.map((entry) => ({
+      name: entry.name,
+      path: entry.path,
+      type: entry.is_dir ? 'directory' : 'file',
+      size: entry.is_dir ? null : entry.size,
+      modified_at: entry.modified ?? null,
+    })),
+    truncated: false,
+  }
+})
 
 onMounted(async () => {
   await loadWorkbench()
@@ -42,7 +65,7 @@ onMounted(async () => {
 
 async function loadWorkbench() {
   error.value = ''
-  await Promise.allSettled([loadAuthorizations(), loadMounts(), loadHealth()])
+  await Promise.allSettled([loadAuthorizations(), loadMounts(), loadHealth(), loadTasks()])
   if (!list.value && mounts.value.length > 0) {
     await openPath(mounts.value[0].virtual_path)
   }
@@ -63,6 +86,15 @@ async function loadHealth() {
     health.value = await storageApi.health()
   } catch {
     health.value = null
+  }
+}
+
+async function loadTasks() {
+  try {
+    const result = await storageApi.tasks()
+    tasks.value = result.tasks ?? []
+  } catch {
+    tasks.value = []
   }
 }
 
@@ -88,20 +120,20 @@ async function openPath(path: string) {
   }
 }
 
-function openEntry(entry: AlistDriverEntry) {
-  if (entry.is_dir) {
+function openEntry(entry: AlistDriverEntry | RemoteWorkspaceFileEntry) {
+  if ('is_dir' in entry ? entry.is_dir : entry.type === 'directory') {
     void openPath(entry.path)
     return
   }
-  void loadDetail(entry)
+  void loadDetail(entry.path)
 }
 
-async function loadDetail(entry: AlistDriverEntry) {
+async function loadDetail(entryPath: string) {
   acting.value = true
   error.value = ''
   message.value = ''
   try {
-    const detail = await storageApi.get(entry.path)
+    const detail = await storageApi.get(entryPath)
     message.value = detail.raw_url
       ? propsSafeMessage(label('已获取直链', 'Resolved link'), detail.raw_url)
       : label(`已读取文件: ${detail.name}`, `Loaded file: ${detail.name}`)
@@ -121,6 +153,51 @@ async function copySelected() {
     const result = await storageApi.copy(currentDir.value, copyTarget.value.trim(), selectedNames.value)
     message.value = label(`已复制 ${result.copied ?? selectedNames.value.length} 项`, `Copied ${result.copied ?? selectedNames.value.length} item(s)`)
     selected.value = {}
+  } catch (err) {
+    error.value = errorText(err)
+  } finally {
+    acting.value = false
+  }
+}
+
+async function copySelectedTask() {
+  if (selectedNames.value.length === 0 || !copyTarget.value.trim()) return
+  acting.value = true
+  error.value = ''
+  message.value = ''
+  try {
+    const result = await storageApi.copyTask(currentDir.value, copyTarget.value.trim(), selectedNames.value)
+    message.value = label(`后台任务已创建: ${result.task.id}`, `Background task created: ${result.task.id}`)
+    selected.value = {}
+    await loadTasks()
+  } catch (err) {
+    error.value = errorText(err)
+  } finally {
+    acting.value = false
+  }
+}
+
+function downloadSelected() {
+  const name = selectedNames.value[0]
+  if (!name) return
+  window.open(storageApi.downloadUrl(joinVirtualPath(currentDir.value, name)), '_blank', 'noopener,noreferrer')
+}
+
+function chooseUpload() {
+  uploadInput.value?.click()
+}
+
+async function uploadSelectedFile(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  ;(event.target as HTMLInputElement).value = ''
+  if (!file) return
+  acting.value = true
+  error.value = ''
+  message.value = ''
+  try {
+    await storageApi.upload(joinVirtualPath(currentDir.value, file.name), file)
+    message.value = label('文件已上传', 'File uploaded')
+    await openPath(currentDir.value)
   } catch (err) {
     error.value = errorText(err)
   } finally {
@@ -265,6 +342,10 @@ function normalizeVirtualPath(value: string): string {
   return withSlash.replace(/\/+$/, '') || '/'
 }
 
+function joinVirtualPath(dir: string, name: string): string {
+  return `${dir.replace(/\/+$/, '') || '/'}/${name}`.replace(/\/+/g, '/')
+}
+
 function authorizationName(id: number): string {
   const auth = authorizations.value.find((item) => item.id === id)
   return auth ? auth.name : `#${id}`
@@ -352,44 +433,57 @@ function errorText(err: unknown): string {
     </section>
 
     <section class="file-workbench">
-      <div class="path-row">
-        <button class="plain-btn" :disabled="loading || acting" @click="goParent">{{ label('上级', 'Up') }}</button>
-        <input v-model="pathInput" :disabled="loading || acting" spellcheck="false" @keydown.enter="openPath(pathInput)" />
-        <button class="primary-btn" :disabled="loading || acting || mounts.length === 0" @click="openPath(pathInput)">{{ label('打开', 'Open') }}</button>
-      </div>
-
       <div class="copy-row">
         <input v-model="copyTarget" :disabled="acting" spellcheck="false" :placeholder="label('复制到目标路径，例如 /资料/电影', 'Copy target path, e.g. /files/movies')" />
         <button class="plain-btn" :disabled="acting || selectedNames.length === 0 || !copyTarget.trim()" @click="copySelected">
           {{ label('复制', 'Copy') }} {{ selectedNames.length || '' }}
         </button>
+        <button class="plain-btn" :disabled="acting || selectedNames.length === 0 || !copyTarget.trim()" @click="copySelectedTask">
+          {{ label('后台复制', 'Copy Task') }} {{ selectedNames.length || '' }}
+        </button>
+        <button class="plain-btn" :disabled="acting || selectedNames.length === 0" @click="downloadSelected">
+          {{ label('下载', 'Download') }}
+        </button>
+        <button class="plain-btn" :disabled="acting || !list" @click="chooseUpload">
+          {{ label('上传', 'Upload') }}
+        </button>
+        <input ref="uploadInput" class="hidden-file-input" type="file" @change="uploadSelectedFile" />
         <button class="danger-btn" :disabled="acting || selectedNames.length === 0" @click="removeSelected">
           {{ label('删除', 'Remove') }} {{ selectedNames.length || '' }}
         </button>
       </div>
 
-      <div class="file-table">
-        <div class="file-row table-head">
-          <span></span>
-          <span>{{ label('名称', 'Name') }}</span>
-          <span>{{ label('大小', 'Size') }}</span>
-          <span>{{ label('来源', 'Source') }}</span>
+      <div v-if="tasks.length > 0" class="task-strip">
+        <button class="plain-btn compact" :disabled="acting" @click="loadTasks">{{ label('刷新任务', 'Refresh Tasks') }}</button>
+        <div v-for="task in tasks.slice(0, 4)" :key="task.id" class="task-chip" :class="task.status">
+          <strong>{{ task.kind }} · {{ task.status }}</strong>
+          <small>{{ task.error || task.message || `${task.progress}%` }}</small>
         </div>
-        <button
-          v-for="entry in list?.entries ?? []"
-          :key="entry.path"
-          class="file-row"
-          @click="openEntry(entry)"
-        >
-          <input v-model="selected[entry.name]" type="checkbox" @click.stop />
-          <strong>{{ entry.is_dir ? 'DIR' : 'FILE' }} · {{ entry.name }}</strong>
-          <span>{{ entry.is_dir ? '-' : formatSize(entry.size) }}</span>
-          <span>{{ entry.driver }} · {{ entry.mount_path }}</span>
-        </button>
-        <div v-if="loading" class="empty-line">{{ label('加载中...', 'Loading...') }}</div>
-        <div v-else-if="list && list.entries.length === 0" class="empty-line">{{ label('空目录', 'Empty directory') }}</div>
-        <div v-else-if="!list" class="empty-line">{{ label('选择或创建一个系统挂载开始浏览。', 'Choose or create a system mount to browse.') }}</div>
       </div>
+
+      <RemoteFileBrowserPanel
+        :title="label('统一文件浏览器', 'Unified File Browser')"
+        :subtitle="list ? `${list.provider} · ${list.mount_path || '/'}` : label('选择或创建一个系统挂载开始浏览。', 'Choose or create a system mount to browse.')"
+        :list="storageFileList"
+        :preview="null"
+        :loading="loading || acting"
+        :error="error"
+        :path-input="pathInput"
+        :selectable="true"
+        :selected="selected"
+        root-fallback="/"
+        :empty-text="label('空目录', 'Empty directory')"
+        :loading-text="label('正在读取目录...', 'Loading directory...')"
+        :preview-hint="label('点开文件会读取详情；支持直链的来源会返回直链。', 'Click a file to load details; sources with direct links will return a URL.')"
+        :label="label"
+        :format-file-size="(value) => formatSize(value ?? 0)"
+        @refresh="openPath(currentDir)"
+        @parent="goParent"
+        @open-entry="openEntry"
+        @open-path="openPath"
+        @update:path-input="pathInput = $event"
+        @update:selected="selected = $event"
+      />
     </section>
 
     <Teleport to="body">
@@ -504,7 +598,8 @@ h2 {
 .mount-actions,
 .dialog-actions,
 .path-row,
-.copy-row {
+.copy-row,
+.task-strip {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -607,6 +702,51 @@ code {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 13px;
   font-weight: 700;
+}
+
+.task-strip {
+  min-height: 44px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 8px;
+}
+
+.task-chip {
+  min-width: 150px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 7px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.task-chip strong {
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.task-chip small {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.task-chip.success {
+  border-color: rgba(15, 118, 110, 0.24);
+  background: #f0fdfa;
+}
+
+.task-chip.error {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.hidden-file-input {
+  display: none;
 }
 
 .file-table {

@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { getDb } from '../db/database'
+import { implementedStorageDrivers } from '../storage/storage-protocols'
 import type {
   AlistAuthorizationPrivateRecord,
   AlistAuthorizationRecord,
@@ -194,6 +195,11 @@ function normalizeEndpoint(propsEndpoint: unknown, props: unknown, driver: strin
     return endpoint
   }
 
+  if (driver === 'sftp' || driver === 'adb') {
+    if (!rawEndpoint) return undefined
+    return rawEndpoint.replace(/\/+$/, '')
+  }
+
   if (!rawEndpoint) return undefined
   const endpoint = rawEndpoint.replace(/\/+$/, '')
   if (!/^https?:\/\//i.test(endpoint)) throw new BadRequestException('endpoint must start with http:// or https://')
@@ -202,9 +208,11 @@ function normalizeEndpoint(propsEndpoint: unknown, props: unknown, driver: strin
 
 function normalizeDriver(value: unknown): string {
   const driver = String(value || 'webdav').trim().toLowerCase()
-  if (!driver) return 'webdav'
-  if (driver === 'web_dav') return 'webdav'
-  return driver
+  const normalized = driver === 'web_dav' ? 'webdav' : driver === 'ssh' ? 'sftp' : driver || 'webdav'
+  if (!implementedStorageDrivers().has(normalized)) {
+    throw new BadRequestException(`storage protocol is not implemented: ${normalized}`)
+  }
+  return normalized
 }
 
 function rowToPublicRecord(row: AlistAuthorizationRow): AlistAuthorizationRecord {
