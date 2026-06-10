@@ -2,11 +2,11 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, type AuthStatus, type MiDeviceCandidate, type UserDevice } from '@/api'
-import { alistApi, type AlistAuthorizationRecord } from '@/api/alist'
 import { cliApi } from '@/api/cli'
 import { mediaApi } from '@/api/media'
 import { streamingGatewayApi, type MoonlightWebRuntimeStatus, type StreamingHost, type StreamingHostProbe } from '@/api/streamingGateway'
 import StreamingGatewayPanel from '@/components/remote-workspace/StreamingGatewayPanel.vue'
+import StorageCredentialsPanel from '@/components/storage/StorageCredentialsPanel.vue'
 import { useLocale } from '@/composables/useLocale'
 
 type AuthTab = 'external' | 'local'
@@ -54,15 +54,8 @@ const streamingHostBasePort = ref('47989')
 const streamingHostMac = ref('')
 const streamingHostRoom = ref('')
 const streamingHostNetworkPath = ref('lan')
-const alistAuthorizations = ref<AlistAuthorizationRecord[]>([])
-const alistAuthFormOpen = ref(false)
-const editingAlistAuthId = ref<number | null>(null)
-const alistAuthName = ref('')
-const alistAuthDriver = ref<'webdav' | 'local'>('webdav')
-const alistAuthEndpoint = ref('')
-const alistAuthRootPath = ref('')
-const alistAuthUsername = ref('')
-const alistAuthPassword = ref('')
+const storageCredentialCount = ref(0)
+const storageCredentialsPanel = ref<InstanceType<typeof StorageCredentialsPanel> | null>(null)
 
 const busy = ref<Record<string, boolean>>({})
 const errorMessage = ref('')
@@ -114,7 +107,6 @@ const miBoundCount = computed(() => devices.value.filter((device) => typeof devi
 const adbBoundCount = computed(() => devices.value.filter((device) => typeof device.props?.adb_ip === 'string' && (device.props.adb_ip as string).trim()).length)
 const dlnaBoundCount = computed(() => devices.value.filter((device) => typeof device.props?.dlna_location === 'string' && (device.props.dlna_location as string).trim()).length)
 const streamingHostCount = computed(() => streamingHosts.value.length)
-const alistAuthorizationCount = computed(() => alistAuthorizations.value.length)
 
 type AdbScanCandidate = {
   ip: string
@@ -316,11 +308,11 @@ const localProviders = computed(() => [
   },
   {
     id: 'alist' as const,
-    name: 'AList Driver',
-    subtitle: label('WebDAV / 本地文件', 'WebDAV / local files'),
-    status: alistAuthorizationCount.value > 0 ? label('已配置', 'Configured') : label('未配置', 'Not configured'),
-    tone: alistAuthorizationCount.value > 0 ? 'ok' as const : 'muted' as const,
-    meta: `${alistAuthorizationCount.value} ${label('个凭据', 'credentials')}`,
+    name: label('文件源', 'Storage Sources'),
+    subtitle: label('WebDAV / SFTP / ADB / 本地文件', 'WebDAV / SFTP / ADB / local files'),
+    status: storageCredentialCount.value > 0 ? label('已配置', 'Configured') : label('未配置', 'Not configured'),
+    tone: storageCredentialCount.value > 0 ? 'ok' as const : 'muted' as const,
+    meta: `${storageCredentialCount.value} ${label('个凭据', 'credentials')}`,
   },
   {
     id: 'ssh' as const,
@@ -358,7 +350,14 @@ onUnmounted(() => {
 })
 
 async function loadAll() {
-  await Promise.allSettled([loadAuthStatus(), loadDevices(), loadSshTargets(), loadStreamingHosts(), loadStreamingRuntimeStatus(), loadAlistAuthorizations()])
+  await Promise.allSettled([
+    loadAuthStatus(),
+    loadDevices(),
+    loadSshTargets(),
+    loadStreamingHosts(),
+    loadStreamingRuntimeStatus(),
+    storageCredentialsPanel.value?.refresh(),
+  ])
 }
 
 async function loadAuthStatus(options?: { refresh?: boolean }) {
@@ -595,119 +594,6 @@ function openStreamingRuntime() {
   const endpoint = streamingRuntimeStatus.value?.endpoint || ''
   if (!endpoint.startsWith('http')) return
   window.open(endpoint, '_blank', 'noopener,noreferrer')
-}
-
-async function loadAlistAuthorizations() {
-  setBusy('alist-auths', true)
-  errorMessage.value = ''
-  try {
-    const result = await alistApi.listAuthorizations()
-    alistAuthorizations.value = result.authorizations ?? []
-  } catch (error) {
-    errorMessage.value = (error as Error).message || String(error)
-  } finally {
-    setBusy('alist-auths', false)
-  }
-}
-
-function openCreateAlistAuth() {
-  editingAlistAuthId.value = null
-  alistAuthName.value = ''
-  alistAuthDriver.value = 'webdav'
-  alistAuthEndpoint.value = ''
-  alistAuthRootPath.value = ''
-  alistAuthUsername.value = ''
-  alistAuthPassword.value = ''
-  alistAuthFormOpen.value = true
-}
-
-function openEditAlistAuth(record: AlistAuthorizationRecord) {
-  const rootPath = getString(record.props?.root_path)
-  editingAlistAuthId.value = record.id
-  alistAuthName.value = record.name
-  alistAuthDriver.value = record.driver === 'local' ? 'local' : 'webdav'
-  alistAuthEndpoint.value = record.driver === 'local' ? '' : record.endpoint
-  alistAuthRootPath.value = rootPath || (record.driver === 'local' ? record.endpoint : '')
-  alistAuthUsername.value = record.username ?? ''
-  alistAuthPassword.value = ''
-  alistAuthFormOpen.value = true
-}
-
-function closeAlistAuthForm() {
-  alistAuthFormOpen.value = false
-  editingAlistAuthId.value = null
-}
-
-async function submitAlistAuth() {
-  const name = alistAuthName.value.trim()
-  const driver = alistAuthDriver.value
-  const endpoint = alistAuthEndpoint.value.trim()
-  const rootPath = alistAuthRootPath.value.trim()
-  if (!name) return
-  if (driver === 'webdav' && !endpoint) return
-  if (driver === 'local' && !rootPath) return
-
-  const body: {
-    name: string
-    driver: string
-    endpoint?: string
-    username?: string
-    password?: string
-    secret?: Record<string, unknown>
-    props: Record<string, unknown>
-  } = {
-    name,
-    driver,
-    endpoint: driver === 'local' ? rootPath : endpoint,
-    props: rootPath ? { root_path: rootPath } : {},
-  }
-  if (driver === 'webdav') {
-    body.username = alistAuthUsername.value.trim()
-  } else {
-    body.username = ''
-    body.secret = {}
-  }
-  if (alistAuthPassword.value) {
-    body.password = alistAuthPassword.value
-  }
-
-  const key = editingAlistAuthId.value ? `alist-auth-edit-${editingAlistAuthId.value}` : 'alist-auth-create'
-  setBusy(key, true)
-  errorMessage.value = ''
-  try {
-    if (editingAlistAuthId.value) {
-      await alistApi.updateAuthorization(editingAlistAuthId.value, body)
-      showSuccess(label('AList 授权已更新', 'AList authorization updated'))
-    } else {
-      await alistApi.createAuthorization(body)
-      showSuccess(label('AList 授权已保存', 'AList authorization saved'))
-    }
-    closeAlistAuthForm()
-    await loadAlistAuthorizations()
-  } catch (error) {
-    errorMessage.value = (error as Error).message || String(error)
-  } finally {
-    setBusy(key, false)
-  }
-}
-
-async function deleteAlistAuth(record: AlistAuthorizationRecord) {
-  if (!window.confirm(label(`删除 AList 授权「${record.name}」？`, `Delete AList authorization "${record.name}"?`))) return
-  setBusy(`alist-auth-delete-${record.id}`, true)
-  errorMessage.value = ''
-  try {
-    await alistApi.removeAuthorization(record.id)
-    await loadAlistAuthorizations()
-    showSuccess(label('AList 授权已删除', 'AList authorization removed'))
-  } catch (error) {
-    errorMessage.value = (error as Error).message || String(error)
-  } finally {
-    setBusy(`alist-auth-delete-${record.id}`, false)
-  }
-}
-
-function alistAuthRoot(record: AlistAuthorizationRecord): string {
-  return getString(record.props?.root_path) || (record.driver === 'local' ? record.endpoint : '/')
 }
 
 async function scanAdbTargets() {
@@ -1472,70 +1358,14 @@ function dlnaEndpoint(candidate: DlnaCandidate): string {
         />
       </section>
 
-      <section v-else-if="selectedLocal === 'alist'" class="detail-surface">
-        <div class="detail-head">
-          <div>
-            <span class="eyebrow">{{ label('局域网账号', 'Local Network') }}</span>
-            <h2>AList Driver</h2>
-          </div>
-          <span :class="['pill', alistAuthorizationCount > 0 ? 'ok' : 'muted']">
-            {{ alistAuthorizationCount }} {{ label('个凭据', 'credentials') }}
-          </span>
-        </div>
-
-        <div class="list-toolbar">
-          <div>
-            <strong>{{ label('网盘与文件源凭据', 'Storage Source Credentials') }}</strong>
-            <small>{{ label('授权中心只保存凭据；系统挂载和文件浏览在文件工作台完成。', 'The authorization center only stores credentials; system mounts and file browsing belong to the storage workbench.') }}</small>
-          </div>
-          <div class="toolbar-actions">
-            <button class="primary-btn" :disabled="isBusy('alist-auth-create')" @click="openCreateAlistAuth">
-              {{ label('新增授权', 'Add Authorization') }}
-            </button>
-            <button class="plain-btn" @click="router.push('/storage')">
-              {{ label('打开文件工作台', 'Open Storage') }}
-            </button>
-            <button class="plain-btn" :disabled="isBusy('alist-auths')" @click="loadAlistAuthorizations">
-              {{ label('刷新', 'Refresh') }}
-            </button>
-          </div>
-        </div>
-
-        <div v-if="alistAuthorizations.length === 0" class="empty-line left">
-          {{ label('还没有 AList/WebDAV 授权。先保存凭据，再到文件工作台创建系统挂载。', 'No AList/WebDAV authorization yet. Save credentials here, then create a system mount in the storage workbench.') }}
-        </div>
-
-        <div v-else class="target-table">
-          <div class="target-row header">
-            <span>{{ label('名称', 'Name') }}</span>
-            <span>{{ label('挂载凭据', 'Mount Credential') }}</span>
-            <span>{{ label('操作', 'Actions') }}</span>
-          </div>
-          <div v-for="record in alistAuthorizations" :key="record.id" class="target-row">
-            <div class="device-cell">
-              <strong>{{ record.name }}</strong>
-              <small>auth_ref: alist:{{ record.id }} · authorization_id: {{ record.id }}</small>
-            </div>
-
-            <div class="endpoint-cell">
-              <code>{{ record.driver === 'local' ? alistAuthRoot(record) : record.endpoint }}</code>
-              <small>
-                {{ record.driver }} · {{ record.username || label('无用户名', 'No username') }} ·
-                {{ record.has_secret ? label('已保存密钥', 'Secret saved') : label('无密钥', 'No secret') }}
-              </small>
-            </div>
-
-            <div class="row-actions">
-              <button class="plain-btn compact" :disabled="isBusy(`alist-auth-edit-${record.id}`)" @click="openEditAlistAuth(record)">
-                {{ label('编辑', 'Edit') }}
-              </button>
-              <button class="danger-btn compact" :disabled="isBusy(`alist-auth-delete-${record.id}`)" @click="deleteAlistAuth(record)">
-                {{ label('删除', 'Delete') }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
+      <StorageCredentialsPanel
+        v-else-if="selectedLocal === 'alist'"
+        ref="storageCredentialsPanel"
+        :label="label"
+        @count-change="storageCredentialCount = $event"
+        @error="errorMessage = $event"
+        @success="showSuccess"
+      />
 
       <section v-else-if="selectedLocal === 'ssh'" class="detail-surface">
         <div class="detail-head">
@@ -1703,67 +1533,6 @@ function dlnaEndpoint(candidate: DlnaCandidate): string {
         </form>
       </div>
 
-      <div v-if="alistAuthFormOpen" class="dialog-overlay" @click.self="closeAlistAuthForm">
-        <form class="dialog-panel" @submit.prevent="submitAlistAuth">
-          <div class="dialog-head">
-            <div>
-              <span class="eyebrow">AList Driver</span>
-              <h2>{{ editingAlistAuthId ? label('编辑授权', 'Edit Authorization') : label('新增授权', 'Add Authorization') }}</h2>
-            </div>
-            <button type="button" class="plain-btn compact" @click="closeAlistAuthForm">{{ label('关闭', 'Close') }}</button>
-          </div>
-
-          <div class="form-grid">
-            <label class="form-field">
-              <span>{{ label('名称', 'Name') }}</span>
-              <input v-model="alistAuthName" class="form-input" :placeholder="label('家庭 WebDAV', 'Home WebDAV')" />
-            </label>
-
-            <label class="form-field">
-              <span>Driver</span>
-              <select v-model="alistAuthDriver" class="form-input">
-                <option value="webdav">WebDAV</option>
-                <option value="local">{{ label('本地目录', 'Local Folder') }}</option>
-              </select>
-            </label>
-
-            <label v-if="alistAuthDriver === 'webdav'" class="form-field full">
-              <span>Endpoint</span>
-              <input v-model="alistAuthEndpoint" class="form-input" placeholder="https://example.test/dav" />
-            </label>
-
-            <label class="form-field full">
-              <span>{{ alistAuthDriver === 'local' ? label('本地根路径', 'Local Root Path') : label('远端根路径', 'Remote Root Path') }}</span>
-              <input v-model="alistAuthRootPath" class="form-input" :placeholder="alistAuthDriver === 'local' ? 'D:/files' : '/'" />
-            </label>
-
-            <label v-if="alistAuthDriver === 'webdav'" class="form-field">
-              <span>{{ label('用户名', 'Username') }}</span>
-              <input v-model="alistAuthUsername" class="form-input" autocomplete="username" />
-            </label>
-
-            <label v-if="alistAuthDriver === 'webdav'" class="form-field">
-              <span>{{ editingAlistAuthId ? label('新密码', 'New Password') : label('密码', 'Password') }}</span>
-              <input v-model="alistAuthPassword" class="form-input" type="password" autocomplete="new-password" :placeholder="editingAlistAuthId ? label('留空则不变', 'Leave blank to keep') : ''" />
-            </label>
-          </div>
-
-          <div class="empty-line left">
-            {{ label('保存后到文件工作台创建系统挂载；密码不会出现在设备或前端 props 中。', 'After saving, create a system mount in the storage workbench; secrets will not be written to device or frontend props.') }}
-          </div>
-
-          <div class="dialog-actions">
-            <button type="button" class="plain-btn" @click="closeAlistAuthForm">{{ label('取消', 'Cancel') }}</button>
-            <button
-              type="submit"
-              class="primary-btn"
-              :disabled="!alistAuthName.trim() || (alistAuthDriver === 'webdav' && !alistAuthEndpoint.trim()) || (alistAuthDriver === 'local' && !alistAuthRootPath.trim()) || isBusy('alist-auth-create') || (editingAlistAuthId ? isBusy(`alist-auth-edit-${editingAlistAuthId}`) : false)"
-            >
-              {{ editingAlistAuthId ? label('保存', 'Save') : label('创建', 'Create') }}
-            </button>
-          </div>
-        </form>
-      </div>
     </Teleport>
   </div>
 </template>

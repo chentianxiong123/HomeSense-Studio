@@ -17,11 +17,15 @@ const props = withDefaults(defineProps<{
   previewHint: string
   label: (zh: string, en: string) => string
   formatFileSize: (value: number | null) => string
+  selectable?: boolean
+  selected?: Record<string, boolean>
 }>(), {
   subtitle: '',
   targets: () => [],
   targetId: '',
   rootFallback: '',
+  selectable: false,
+  selected: () => ({}),
 })
 
 const emit = defineEmits<{
@@ -31,6 +35,7 @@ const emit = defineEmits<{
   openPath: [path: string]
   'update:pathInput': [value: string]
   'update:targetId': [value: string]
+  'update:selected': [value: Record<string, boolean>]
 }>()
 
 function entryKindLabel(entry: RemoteWorkspaceFileEntry) {
@@ -54,6 +59,14 @@ function updateTarget(event: Event) {
 
 function updatePath(event: Event) {
   emit('update:pathInput', (event.target as HTMLInputElement).value)
+}
+
+function updateSelected(name: string, event: Event) {
+  const checked = (event.target as HTMLInputElement).checked
+  const next = { ...props.selected }
+  if (checked) next[name] = true
+  else delete next[name]
+  emit('update:selected', next)
 }
 </script>
 
@@ -115,9 +128,17 @@ function updatePath(event: Event) {
           v-for="entry in list.entries"
           :key="entry.path"
           class="file-entry"
-          :class="entry.type"
+          :class="[entry.type, { selectable }]"
           @click="emit('openEntry', entry)"
         >
+          <input
+            v-if="selectable"
+            class="entry-check"
+            type="checkbox"
+            :checked="Boolean(selected[entry.name])"
+            @click.stop
+            @change.stop="updateSelected(entry.name, $event)"
+          />
           <span class="entry-kind">{{ entryKindLabel(entry) }}</span>
           <span class="entry-main">
             <strong>{{ entry.name }}</strong>
@@ -298,6 +319,16 @@ function updatePath(event: Event) {
   padding: 8px 10px;
   text-align: left;
   cursor: pointer;
+}
+
+.file-entry.selectable {
+  grid-template-columns: 18px 50px minmax(0, 1fr);
+}
+
+.entry-check {
+  width: 16px;
+  height: 16px;
+  accent-color: #0f766e;
 }
 
 .file-entry:hover {

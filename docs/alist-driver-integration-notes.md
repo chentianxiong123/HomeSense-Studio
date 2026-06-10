@@ -26,27 +26,39 @@ Implemented:
 - Frontend storage workbench at `/storage`.
 - AList/WebDAV credentials stored in the unified authorization center (`alist_authorizations`), with runtime injection by `authorization_id` / `auth_ref`.
 - System mounts stored in `storage_mounts`; devices do not own AList mounts.
+- SFTP system mounts through the same `/api/storage/fs/*` API. SFTP is handled by the NestJS storage layer with `ssh2`, not by the terminal shell channel.
+- ADB system mounts through the same `/api/storage/fs/*` API for browse/detail/remove/copy. ADB is handled by `adb-cli` and normalized into storage entries.
+- SMB/NFS entries are supported as OS-mounted server paths. HomeSense stores the original share/export endpoint as metadata and uses `props.root_path` as the mounted local path.
+- Browser upload/download streams for local/WebDAV/SFTP/ADB/SMB/NFS through `/api/storage/fs/upload` and `/api/storage/fs/download`. ADB uses `adb-cli pull_file/push_file` plus server-side temp files to preserve the unified HTTP surface.
+- Cross-protocol file copy through the shared transfer layer. Same-mount native copy is still preferred when the protocol provides it; cross-mount copy streams source download into destination upload.
+- The storage workbench reuses `RemoteFileBrowserPanel` so ADB, remote-workspace, and system storage share the same browser surface.
 
 Not implemented:
 
 - Real Baidu/Aliyun/Quark adapter tests.
 - Full AList source fork.
 - AList HTTP daemon.
-- Upload UI.
 - Aria2.
 - File preview/transcode.
 - Dynamic mount discovery.
-- Async large-copy task progress.
+- Persisted async large-copy task progress. Current copy tasks are in-memory and coarse-grained.
+- Cross-mount directory copy across protocols.
+- Native SMB/NFS client drivers. Current support expects the server OS to mount those shares first.
 
 ## System Storage Mounts
 
 The product-level model is:
 
 ```txt
-alist_authorizations -> storage_mounts -> /api/storage/fs/* -> alist-driver
+storage protocol specs -> alist_authorizations -> storage_mounts -> /api/storage/fs/*
 ```
 
 `alist_authorizations` stores WebDAV/local credentials. `storage_mounts` stores the HomeSense virtual path, driver, readonly flag, and authorization reference. The file workbench reads `storage_mounts` and never asks the user to write JSON.
+
+The authorization center is the protocol credential registry. It knows which
+storage protocols are implemented, which fields each protocol needs, and which
+planned protocols should be visible but not selectable yet. Device detail pages
+should not own these credentials.
 
 Inline mount config is still supported for local smoke tests:
 
@@ -62,6 +74,10 @@ The authorization center currently supports:
 
 - `webdav`: `endpoint`, optional `username`, server-side password, optional `props.root_path`.
 - `local`: `props.root_path` for server-side file roots.
+- `sftp`: `endpoint` as `sftp://host:22` or `host:22`, `username`, server-side password, optional `props.root_path`; `props.key_name` can point to a key in `runtime-keys/ssh`.
+- `adb`: `endpoint` as `ip:5555`, optional `props.root_path` defaulting to `/sdcard/`.
+- `smb`: `endpoint` as `//host/share`, required `props.root_path` pointing to the server-mounted path.
+- `nfs`: `endpoint` as `host:/export`, required `props.root_path` pointing to the server-mounted path.
 
 ## API
 
@@ -70,11 +86,17 @@ GET  /api/storage/mounts
 POST /api/storage/mounts
 PUT  /api/storage/mounts/:id
 DELETE /api/storage/mounts/:id
+GET  /api/storage/protocols
 GET  /api/storage/health
 POST /api/storage/fs/list
 POST /api/storage/fs/get
 POST /api/storage/fs/remove
 POST /api/storage/fs/copy
+POST /api/storage/fs/copy-task
+GET  /api/storage/fs/download?path=...
+PUT  /api/storage/fs/upload?path=...
+GET  /api/storage/tasks
+GET  /api/storage/tasks/:id
 ```
 
 The current product path is `/api/storage/*`. The older device-scoped AList API remains as a compatibility surface for previous local tests:
@@ -88,6 +110,7 @@ POST /api/alist/devices/:deviceId/fs/copy
 ```
 
 The storage service resolves `storage_mounts`, spawns `alist-driver`, writes runtime config through stdin JSON, and parses the last stdout JSON line.
+SFTP and ADB are normalized in the NestJS storage layer because they already exist as HomeSense protocol capabilities; they do not require AList to own the runtime.
 
 ## Copy Semantics
 
@@ -100,10 +123,10 @@ driver.Copy(srcRel, dstRel)
 Different mount:
 
 ```txt
-srcDriver.Get -> srcDriver.Open -> dstDriver.Put
+StorageTransfer.download(srcPath) -> stream -> StorageTransfer.upload(dstPath)
 ```
 
-The feasibility slice supports cross-mount file copy. Cross-mount directory copy returns a clear unsupported error; it should become an async task later.
+The current slice supports cross-mount file copy across local/WebDAV/SFTP/ADB/SMB/NFS. Cross-mount directory copy returns a clear unsupported error; it should become a persisted async task later.
 
 ## Verification
 
@@ -124,6 +147,7 @@ cd apps/web
 
 ## Next Steps
 
-- Add a task store for large cross-mount copies.
+- Move storage tasks from memory to SQLite so large copy state survives server restart.
+- Add per-file and byte-level task progress once transfer streams expose counters.
 - Add a real AList/OpenList adapter fork only when a specific driver is needed.
-- Extract the file table into a shared HomeSense file browser once SSH/ADB/AList converge on the same DTO.
+- Keep `RemoteFileBrowserPanel` as the shared HomeSense browser surface and add protocol-specific actions around it only when the workflow requires them.

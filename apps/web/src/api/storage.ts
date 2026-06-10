@@ -49,7 +49,50 @@ export interface StorageMountInput {
   props?: Record<string, unknown>
 }
 
+export interface StorageProtocolField {
+  key: 'endpoint' | 'username' | 'password' | 'root_path' | 'key_name'
+  label: string
+  required: boolean
+  secret?: boolean
+  placeholder?: string
+}
+
+export interface StorageProtocolSpec {
+  id: string
+  name: string
+  status: 'implemented' | 'planned'
+  summary: string
+  default_root_path: string
+  readonly_default: boolean
+  supports: {
+    list: boolean
+    get: boolean
+    remove: boolean
+    copy: boolean
+    upload: boolean
+    cross_mount_copy: boolean
+  }
+  fields: StorageProtocolField[]
+}
+
+export interface StorageTaskRecord {
+  id: string
+  kind: 'copy'
+  status: 'queued' | 'running' | 'success' | 'error'
+  progress: number
+  message?: string
+  error?: string
+  input: Record<string, unknown>
+  result?: Record<string, unknown>
+  created_at: string
+  updated_at: string
+  finished_at?: string
+}
+
 export const storageApi = {
+  protocols: () =>
+    request<{ protocols: StorageProtocolSpec[] }>('/api/storage/protocols'),
+
   listMounts: () =>
     request<{ mounts: StorageMountRecord[] }>('/api/storage/mounts'),
 
@@ -73,6 +116,12 @@ export const storageApi = {
   health: () =>
     request<AlistDriverHealthResult>('/api/storage/health'),
 
+  tasks: () =>
+    request<{ tasks: StorageTaskRecord[] }>('/api/storage/tasks'),
+
+  task: (id: string) =>
+    request<{ task: StorageTaskRecord }>(`/api/storage/tasks/${encodeURIComponent(id)}`),
+
   list: (path: string) =>
     request<AlistDriverListResult>('/api/storage/fs/list', {
       method: 'POST',
@@ -95,5 +144,21 @@ export const storageApi = {
     request<AlistDriverMutationResult>('/api/storage/fs/copy', {
       method: 'POST',
       body: JSON.stringify({ src_dir: srcDir, dst_dir: dstDir, names }),
+    }),
+
+  copyTask: (srcDir: string, dstDir: string, names: string[]) =>
+    request<{ task: StorageTaskRecord }>('/api/storage/fs/copy-task', {
+      method: 'POST',
+      body: JSON.stringify({ src_dir: srcDir, dst_dir: dstDir, names }),
+    }),
+
+  downloadUrl: (path: string) =>
+    `/api/storage/fs/download?path=${encodeURIComponent(path)}`,
+
+  upload: (path: string, file: File) =>
+    request<{ uploaded: number }>(`/api/storage/fs/upload?path=${encodeURIComponent(path)}`, {
+      method: 'PUT',
+      body: file,
+      headers: { 'Content-Type': file.type || 'application/octet-stream' },
     }),
 }

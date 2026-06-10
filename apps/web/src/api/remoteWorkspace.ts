@@ -111,7 +111,7 @@ export interface RemoteWorkspaceFileEntry {
 export interface RemoteWorkspaceFileList {
   target_id: string
   label: string
-  kind: 'local_source' | 'ssh' | 'adb'
+  kind: 'local_source' | 'ssh' | 'adb' | 'storage'
   root: string
   path: string
   absolute_path: string
@@ -122,7 +122,7 @@ export interface RemoteWorkspaceFileList {
 export interface RemoteWorkspaceFilePreview {
   target_id: string
   label: string
-  kind: 'local_source' | 'ssh' | 'adb'
+  kind: 'local_source' | 'ssh' | 'adb' | 'storage'
   root: string
   path: string
   absolute_path: string
