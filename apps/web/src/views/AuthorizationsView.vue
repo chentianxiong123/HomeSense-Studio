@@ -5,6 +5,7 @@ import { api, type AuthStatus, type MiDeviceCandidate, type UserDevice } from '@
 import { cliApi } from '@/api/cli'
 import { mediaApi } from '@/api/media'
 import { streamingGatewayApi, type MoonlightWebRuntimeStatus, type StreamingHost, type StreamingHostProbe } from '@/api/streamingGateway'
+import SshAuthPanel from '@/components/auth/SshAuthPanel.vue'
 import StreamingGatewayPanel from '@/components/remote-workspace/StreamingGatewayPanel.vue'
 import StorageCredentialsPanel from '@/components/storage/StorageCredentialsPanel.vue'
 import { useLocale } from '@/composables/useLocale'
@@ -56,6 +57,8 @@ const streamingHostRoom = ref('')
 const streamingHostNetworkPath = ref('lan')
 const storageCredentialCount = ref(0)
 const storageCredentialsPanel = ref<InstanceType<typeof StorageCredentialsPanel> | null>(null)
+const sshAuthPanel = ref<InstanceType<typeof SshAuthPanel> | null>(null)
+const sshTargetCount = ref(0)
 
 const busy = ref<Record<string, boolean>>({})
 const errorMessage = ref('')
@@ -140,113 +143,6 @@ type StreamingGatewaySpec = {
   detail: string
   capabilities: string[]
 }
-
-// ─── SSH terminal targets ────────────────────────────────────────────────────
-type TerminalTarget = {
-  id: number
-  name: string
-  kind: 'local' | 'ssh' | 'adb'
-  target: Record<string, unknown>
-  created_at: string
-  updated_at: string
-}
-const sshTargets = ref<TerminalTarget[]>([])
-const sshForm = ref({
-  name: '',
-  host: '',
-  port: 22,
-  user: '',
-  auth: 'key' as 'key' | 'password',
-  keyName: 'n8n_watchdog',
-  password: '',
-})
-const sshEditingId = ref<number | null>(null)
-const sshTestingId = ref<number | null>(null)
-const sshTestResult = ref<{ id: number; ok: boolean; message: string } | null>(null)
-
-async function loadSshTargets() {
-  try {
-    const res = await api.terminal.listTargets()
-    sshTargets.value = res.data.filter((t) => t.kind === 'ssh')
-  } catch (e) {
-    console.warn('failed to load ssh targets', e)
-  }
-}
-
-async function saveSshTarget() {
-  if (!sshForm.value.name || !sshForm.value.host || !sshForm.value.user) {
-    errorMessage.value = label('名称 / 主机 / 用户必填', 'name / host / user required')
-    return
-  }
-  setBusy('ssh-save', true)
-  errorMessage.value = ''
-  try {
-    const target: Record<string, unknown> = {
-      host: sshForm.value.host,
-      port: sshForm.value.port,
-      user: sshForm.value.user,
-      auth: sshForm.value.auth,
-    }
-    if (sshForm.value.auth === 'key') {
-      target.keyName = sshForm.value.keyName
-    } else {
-      target.password = sshForm.value.password
-    }
-    if (sshEditingId.value) {
-      await api.terminal.updateTarget(sshEditingId.value, { name: sshForm.value.name, target })
-    } else {
-      await api.terminal.createTarget({ name: sshForm.value.name, kind: 'ssh', target })
-    }
-    await loadSshTargets()
-    resetSshForm()
-    showSuccess(label('已保存', 'Saved'))
-  } catch (e) {
-    errorMessage.value = (e as Error).message
-  } finally {
-    setBusy('ssh-save', false)
-  }
-}
-
-function resetSshForm() {
-  sshForm.value = { name: '', host: '', port: 22, user: '', auth: 'key', keyName: 'n8n_watchdog', password: '' }
-  sshEditingId.value = null
-}
-
-function editSshTarget(t: TerminalTarget) {
-  const tgt = t.target as any
-  sshForm.value = {
-    name: t.name,
-    host: tgt.host ?? '',
-    port: tgt.port ?? 22,
-    user: tgt.user ?? '',
-    auth: tgt.auth ?? 'key',
-    keyName: tgt.keyName ?? 'n8n_watchdog',
-    password: tgt.password ?? '',
-  }
-  sshEditingId.value = t.id
-}
-
-async function removeSshTarget(id: number) {
-  if (!confirm(label('确认删除?', 'Confirm delete?'))) return
-  await api.terminal.removeTarget(id)
-  await loadSshTargets()
-  if (sshEditingId.value === id) resetSshForm()
-}
-
-async function testSshTarget(id: number) {
-  sshTestingId.value = id
-  sshTestResult.value = null
-  try {
-    const res = await api.terminal.testTarget(id)
-    sshTestResult.value = { id, ...res.data }
-  } catch (e) {
-    sshTestResult.value = { id, ok: false, message: (e as Error).message }
-  } finally {
-    sshTestingId.value = null
-  }
-}
-
-const sshTargetCount = computed(() => sshTargets.value.length)
 
 const adbRows = computed(() => {
   return [...devices.value]
@@ -353,11 +249,21 @@ async function loadAll() {
   await Promise.allSettled([
     loadAuthStatus(),
     loadDevices(),
-    loadSshTargets(),
+    loadSshTargetCount(),
+    sshAuthPanel.value?.refresh(),
     loadStreamingHosts(),
     loadStreamingRuntimeStatus(),
     storageCredentialsPanel.value?.refresh(),
   ])
+}
+
+async function loadSshTargetCount() {
+  try {
+    const res = await api.terminal.listTargets()
+    sshTargetCount.value = res.data.filter((target) => target.kind === 'ssh').length
+  } catch (error) {
+    console.warn('failed to load ssh target count', error)
+  }
 }
 
 async function loadAuthStatus(options?: { refresh?: boolean }) {
@@ -1367,99 +1273,14 @@ function dlnaEndpoint(candidate: DlnaCandidate): string {
         @success="showSuccess"
       />
 
-      <section v-else-if="selectedLocal === 'ssh'" class="detail-surface">
-        <div class="detail-head">
-          <div>
-            <span class="eyebrow">{{ label('局域网账号', 'Local Network') }}</span>
-            <h2>SSH</h2>
-          </div>
-          <span class="pill" :class="sshTargetCount > 0 ? 'ok' : 'muted'">
-            {{ sshTargetCount > 0 ? label('已配置', 'Configured') : label('待接入', 'Pending') }}
-          </span>
-        </div>
-
-        <div class="ssh-grid">
-          <div class="ssh-form">
-            <h3 class="form-title">
-              {{ sshEditingId ? label('编辑接入', 'Edit target') : label('新增接入', 'Add target') }}
-            </h3>
-            <label class="form-row">
-              <span>{{ label('名称', 'Name') }}</span>
-              <input v-model="sshForm.name" :placeholder="label('客厅 Linux', 'Living-room Linux')" />
-            </label>
-            <div class="form-row form-row--split">
-              <label class="form-col">
-                <span>{{ label('主机', 'Host') }}</span>
-                <input v-model="sshForm.host" placeholder="192.168.1.10" />
-              </label>
-              <label class="form-col form-col--port">
-                <span>{{ label('端口', 'Port') }}</span>
-                <input v-model.number="sshForm.port" type="number" min="1" max="65535" />
-              </label>
-            </div>
-            <label class="form-row">
-              <span>{{ label('用户', 'User') }}</span>
-              <input v-model="sshForm.user" placeholder="root" />
-            </label>
-            <div class="form-row form-row--split">
-              <label class="form-col">
-                <span>{{ label('认证', 'Auth') }}</span>
-                <select v-model="sshForm.auth">
-                  <option value="key">SSH Key</option>
-                  <option value="password">Password</option>
-                </select>
-              </label>
-              <label v-if="sshForm.auth === 'key'" class="form-col">
-                <span>{{ label('私钥文件', 'Key file') }}</span>
-                <input v-model="sshForm.keyName" placeholder="n8n_watchdog" />
-              </label>
-              <label v-else class="form-col">
-                <span>{{ label('密码', 'Password') }}</span>
-                <input v-model="sshForm.password" type="password" />
-              </label>
-            </div>
-            <div class="form-actions">
-              <button class="btn-primary" :disabled="isBusy('ssh-save')" @click="saveSshTarget">
-                {{ sshEditingId ? label('保存', 'Save') : label('新增', 'Add') }}
-              </button>
-              <button v-if="sshEditingId" class="btn-secondary" @click="resetSshForm">
-                {{ label('取消', 'Cancel') }}
-              </button>
-            </div>
-            <p v-if="errorMessage" class="form-error">{{ errorMessage }}</p>
-          </div>
-
-          <div class="ssh-list">
-            <h3 class="form-title">
-              {{ label('已配置', 'Configured') }} · {{ sshTargets.length }}
-            </h3>
-            <div v-if="sshTargets.length === 0" class="empty-line">
-              {{ label('还没有接入项', 'No targets yet') }}
-            </div>
-            <div v-for="t in sshTargets" :key="t.id" class="ssh-row" :class="{ active: sshEditingId === t.id }">
-              <div class="ssh-row__main">
-                <div class="ssh-row__name">{{ t.name }}</div>
-                <div class="ssh-row__detail monospace">
-                  {{ (t.target as any).user }}@{{ (t.target as any).host }}:{{ (t.target as any).port ?? 22 }}
-                </div>
-                <div class="ssh-row__auth">
-                  {{ (t.target as any).auth === 'key' ? `key: ${(t.target as any).keyName}` : 'password' }}
-                </div>
-                <div v-if="sshTestResult?.id === t.id" class="ssh-row__test" :class="sshTestResult.ok ? 'ok' : 'bad'">
-                  {{ sshTestResult.message }}
-                </div>
-              </div>
-              <div class="ssh-row__actions">
-                <button class="btn-ghost" :disabled="sshTestingId === t.id" @click="testSshTarget(t.id)">
-                  {{ sshTestingId === t.id ? label('测试中…', 'Testing…') : label('测试', 'Test') }}
-                </button>
-                <button class="btn-ghost" @click="editSshTarget(t)">{{ label('编辑', 'Edit') }}</button>
-                <button class="btn-ghost danger" @click="removeSshTarget(t.id)">{{ label('删除', 'Delete') }}</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+      <SshAuthPanel
+        v-else-if="selectedLocal === 'ssh'"
+        ref="sshAuthPanel"
+        :label="label"
+        @count-change="sshTargetCount = $event"
+        @error="errorMessage = $event"
+        @success="showSuccess"
+      />
     </section>
 
     <Teleport to="body">
@@ -1648,144 +1469,6 @@ h2 {
   font-weight: 700;
   line-height: 1.45;
 }
-
-.ssh-grid {
-  display: grid;
-  grid-template-columns: minmax(280px, 1fr) minmax(0, 1.4fr);
-  gap: 24px;
-  align-items: start;
-}
-@media (max-width: 720px) {
-  .ssh-grid { grid-template-columns: 1fr; }
-}
-.ssh-form, .ssh-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.form-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-secondary);
-  margin: 0 0 4px;
-}
-.form-row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.form-row > span {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.form-row input, .form-row select {
-  padding: 8px 10px;
-  border: 1px solid var(--border-soft, #d4d4d8);
-  border-radius: 6px;
-  background: #fff;
-  font-family: inherit;
-  font-size: 13px;
-  color: var(--text-primary, #18181b);
-}
-.form-row--split {
-  display: grid;
-  grid-template-columns: 1fr 110px;
-  gap: 10px;
-}
-.form-row--split:has(.form-col:nth-child(3)) {
-  grid-template-columns: 1fr 1fr;
-}
-.form-col {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.form-col > span {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.form-col input, .form-col select {
-  padding: 8px 10px;
-  border: 1px solid var(--border-soft, #d4d4d8);
-  border-radius: 6px;
-  background: #fff;
-  font-family: inherit;
-  font-size: 13px;
-}
-.form-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 4px;
-}
-.btn-primary, .btn-secondary, .btn-ghost {
-  border-radius: 6px;
-  padding: 6px 14px;
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  border: 1px solid transparent;
-}
-.btn-primary {
-  background: #10b981;
-  color: #fff;
-}
-.btn-primary:hover:not(:disabled) { background: #059669; }
-.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-secondary {
-  background: transparent;
-  color: var(--text-secondary, #52525b);
-  border-color: var(--border-soft, #d4d4d8);
-}
-.btn-secondary:hover { background: #f4f4f5; }
-.btn-ghost {
-  background: transparent;
-  color: var(--text-secondary, #52525b);
-  border-color: transparent;
-  padding: 4px 8px;
-}
-.btn-ghost:hover { background: #f4f4f5; }
-.btn-ghost.danger { color: #b91c1c; }
-.btn-ghost.danger:hover { background: #fef2f2; }
-.form-error {
-  color: #b91c1c;
-  font-size: 12px;
-  margin: 4px 0 0;
-}
-.ssh-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--border-soft, #e4e4e7);
-  border-radius: 8px;
-  background: #fff;
-}
-.ssh-row.active {
-  border-color: #10b981;
-  background: #ecfdf5;
-}
-.ssh-row__main {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
-}
-.ssh-row__name { font-weight: 700; font-size: 13px; color: var(--text-primary, #18181b); }
-.ssh-row__detail { font-size: 12px; color: var(--text-tertiary, #71717a); }
-.ssh-row__auth { font-size: 11px; color: var(--text-tertiary, #71717a); }
-.ssh-row__test { font-size: 11px; margin-top: 2px; }
-.ssh-row__test.ok { color: #047857; }
-.ssh-row__test.bad { color: #b91c1c; }
-.ssh-row__actions { display: flex; gap: 4px; flex-shrink: 0; }
 
 .scope-tab.active,
 .provider-item.active {
