@@ -10,25 +10,21 @@ Usage:
 import json
 import os
 import base64
-import concurrent.futures
-import ipaddress
 import subprocess
 import sys
 import time
 
+from . import connection as adb_connection
 from . import controls as adb_controls
 from . import files as adb_files
 from .scrcpy import scrcpy_command_spec, scrcpy_version
 from .utils import (
-    _default_ipv4_subnet,
     _first_match,
-    _normalize_ports,
     _parse_battery,
     _parse_getprop,
     _parse_meminfo,
     _parse_storage,
     _prop_value,
-    _tcp_probe,
 )
 
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
@@ -160,148 +156,32 @@ def _ensure_adb_target_ready(params: dict) -> dict:
 
 # ─── action handlers ───────────────────────────────────────────────────────
 
+def _connection_deps() -> adb_connection.AdbDeps:
+    return {
+        "run_cmd": _run_cmd,
+        "default_device": DEFAULT_DEVICE,
+        "connected_cache": _connected_cache,
+    }
+
+
 def handle_list_devices(params: dict) -> dict:
-    out, stderr, code = _run_cmd(["devices", "-l"])
-    if code != 0:
-        return {"status": "error", "error": "EXEC_FAILED", "message": stderr or "failed to list devices"}
-
-    devices = []
-    for line in out.strip().split("\n"):
-        line = line.strip()
-        if line and not line.startswith("List"):
-            parts = line.split()
-            if len(parts) >= 2:
-                devices.append({
-                    "device_id": parts[0],
-                    "status": parts[1],
-                    "info": " ".join(parts[2:]) if len(parts) > 2 else "",
-                })
-
-    return {"status": "success", "data": {"devices": devices, "count": len(devices)}}
+    return adb_connection.handle_list_devices(params, _connection_deps())
 
 
 def handle_scan_network(params: dict) -> dict:
-    subnet_text = str(params.get("subnet") or params.get("cidr") or "").strip() or _default_ipv4_subnet()
-    ports = _normalize_ports(params.get("ports") or params.get("port"))
-    timeout_ms = max(80, min(int(params.get("timeout_ms") or params.get("timeout") or 350), 3000))
-    workers = max(8, min(int(params.get("workers") or 96), 256))
-    limit = max(1, min(int(params.get("limit") or 512), 4096))
-
-    try:
-        network = ipaddress.ip_network(subnet_text, strict=False)
-    except ValueError as exc:
-        return {"status": "error", "error": "INVALID_SUBNET", "message": str(exc)}
-
-    if network.version != 4:
-        return {"status": "error", "error": "INVALID_SUBNET", "message": "Only IPv4 subnet scan is supported"}
-
-    hosts = [str(host) for host in network.hosts()][:limit]
-    timeout = timeout_ms / 1000
-    candidates: list[dict] = []
-    connected = {item.get("device_id"): item for item in handle_list_devices({}).get("data", {}).get("devices", [])}
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = [
-            executor.submit(_tcp_probe, host, port, timeout)
-            for host in hosts
-            for port in ports
-        ]
-        for future in concurrent.futures.as_completed(futures):
-            candidate = future.result()
-            if not candidate:
-                continue
-            status = connected.get(candidate["address"], {}).get("status")
-            if status:
-                candidate["adb_status"] = status
-            candidates.append(candidate)
-
-    candidates.sort(key=lambda item: tuple(int(part) for part in item["ip"].split(".")) + (int(item["port"]),))
-    return {
-        "status": "success",
-        "data": {
-            "subnet": str(network),
-            "ports": ports,
-            "timeout_ms": timeout_ms,
-            "scanned": len(hosts) * len(ports),
-            "candidates": candidates,
-            "count": len(candidates),
-        },
-    }
+    return adb_connection.handle_scan_network(params, _connection_deps())
 
 
 def _get_device_status(address: str) -> str | None:
-    """Poll adb devices for the given address and return its status (device/offline/None)."""
-    out, _, _ = _run_cmd(["devices", "-l"], timeout=5)
-    for line in out.splitlines():
-        parts = line.strip().split()
-        if len(parts) >= 2 and parts[0] == address:
-            return parts[1]
-    return None
+    return adb_connection.get_device_status(address, _connection_deps())
 
 
 def handle_connect(params: dict) -> dict:
-    address = params.get("address") or params.get("device") or params.get("dev") or DEFAULT_DEVICE
-    if not address:
-        return {"status": "error", "error": "INVALID_PARAMS", "message": "Missing device address (use 'device' or 'address' param)"}
-
-    if ":" not in address:
-        return {"status": "error", "error": "INVALID_PARAMS", "message": f"Missing port in device address: '{address}'. Use format ip:port (e.g. 192.168.1.100:5555)"}
-
-    max_attempts = int(params.get("max_attempts", 5))
-    backoff_seconds = int(params.get("backoff_seconds", 2))
-    logs = []
-
-    for attempt in range(max_attempts):
-        out, err, code = _run_cmd(["connect", address], timeout=15)
-        combined = (out or err or "").strip()
-        logs.append({"attempt": attempt + 1, "message": combined, "code": code})
-
-        connect_ok = code == 0 and ("connected" in out.lower() or "already connected" in out.lower())
-        if connect_ok:
-            # Poll until device transitions offline -> device (up to 30s)
-            for poll in range(30):
-                st = _get_device_status(address)
-                if st == "device":
-                    _connected_cache.add(address)
-                    return {
-                        "status": "success",
-                        "data": {"message": combined, "address": address, "attempts": attempt + 1, "logs": logs},
-                    }
-                if st is None:
-                    break  # device vanished
-                time.sleep(1)
-            # After polling, if device is offline/unauthenticated, return error
-            st = _get_device_status(address)
-            if st != "device":
-                return {
-                    "status": "error", "error": "DEVICE_OFFLINE",
-                    "message": f"Device {address} is {st or 'disconnected'} after connect",
-                    "data": {"address": address, "attempts": attempt + 1, "logs": logs},
-                }
-
-        if attempt < max_attempts - 1:
-            time.sleep(backoff_seconds * (2 ** attempt))
-
-    return {
-        "status": "error", "error": "CONNECT_FAILED",
-        "message": logs[-1]["message"] if logs else "failed to connect",
-        "data": {"address": address, "attempts": max_attempts, "logs": logs},
-    }
+    return adb_connection.handle_connect(params, _connection_deps())
 
 
 def handle_disconnect(params: dict) -> dict:
-    address = params.get("address") or params.get("device") or params.get("dev") or DEFAULT_DEVICE
-    if not address:
-        return {"status": "error", "error": "INVALID_PARAMS", "message": "Missing device address"}
-
-    if ":" not in address:
-        return {"status": "error", "error": "INVALID_PARAMS", "message": f"Missing port in device address: '{address}'. Use format ip:port (e.g. 192.168.1.100:5555)"}
-
-    out, _, code = _run_cmd(["disconnect", address])
-    _connected_cache.discard(address)
-    if code != 0:
-        return {"status": "error", "error": "EXEC_FAILED", "message": out.strip()}
-    return {"status": "success", "data": {"message": out.strip(), "address": address}}
+    return adb_connection.handle_disconnect(params, _connection_deps())
 
 
 def handle_overview(params: dict) -> dict:
