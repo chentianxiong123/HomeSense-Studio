@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { cliApi } from '@/api/cli'
-import type { RemoteWorkspaceFileEntry, RemoteWorkspaceFileList, RemoteWorkspaceFilePreview } from '@/api/remoteWorkspace'
 import AdbAppsPanel from '@/components/adb/AdbAppsPanel.vue'
 import AdbControlPanel from '@/components/adb/AdbControlPanel.vue'
 import AdbFilesPanel from '@/components/adb/AdbFilesPanel.vue'
@@ -9,6 +8,7 @@ import AdbInspectPanel from '@/components/adb/AdbInspectPanel.vue'
 import AdbScreenCapturePanel from '@/components/adb/AdbScreenCapturePanel.vue'
 import AdbScrcpyPanel from '@/components/adb/AdbScrcpyPanel.vue'
 import AdbShellPanel from '@/components/adb/AdbShellPanel.vue'
+import { useAdbFiles } from '@/composables/useAdbFiles'
 import { useAdbScrcpy } from '@/composables/useAdbScrcpy'
 
 const props = defineProps<{
@@ -54,25 +54,6 @@ const overview = ref<{
   network?: { ip?: string; mac?: string }
   current_app?: { current_app?: string; activity?: string; raw_line?: string } | null
 } | null>(null)
-const fileLoading = ref(false)
-const filePath = ref('/sdcard/')
-const fileInputPath = ref('/sdcard/')
-const fileParent = ref('/')
-type AdbFileEntry = {
-  name: string
-  path: string
-  directory: boolean
-  symlink?: boolean
-  link_target?: string
-  mode?: string
-  owner?: string
-  group?: string
-  size?: number
-  mtime?: string
-}
-
-const files = ref<AdbFileEntry[]>([])
-const filePreview = ref<RemoteWorkspaceFilePreview | null>(null)
 
 const {
   scrcpyLoading,
@@ -101,6 +82,24 @@ const {
   errorMessage,
 })
 
+const {
+  fileLoading,
+  filePath,
+  fileInputPath,
+  fileParent,
+  files,
+  filePreview,
+  adbFileList,
+  loadFiles,
+  openFile,
+} = useAdbFiles({
+  adbIp: () => props.adbIp,
+  deviceName: () => props.deviceName,
+  label: props.label,
+  statusMessage,
+  errorMessage,
+})
+
 const panels = computed<Array<{ key: PanelKey; title: string; ready: boolean }>>(() => [
   { key: 'control', title: props.label('控制', 'Control'), ready: true },
   { key: 'screen', title: props.label('屏幕', 'Screen'), ready: true },
@@ -122,23 +121,6 @@ const screenshotSrc = computed(() => {
   if (!screenshot.value?.base64) return ''
   return `data:${screenshot.value.mime || 'image/jpeg'};base64,${screenshot.value.base64}`
 })
-
-const adbFileList = computed<RemoteWorkspaceFileList | null>(() => ({
-  target_id: `adb:${props.adbIp}`,
-  label: props.deviceName,
-  kind: 'adb',
-  root: '/sdcard/',
-  path: filePath.value,
-  absolute_path: filePath.value,
-  entries: files.value.map((file) => ({
-    name: file.name,
-    path: file.path,
-    type: file.directory ? 'directory' : file.symlink ? 'symlink' : 'file',
-    size: file.size ?? null,
-    modified_at: file.mtime ?? null,
-  })),
-  truncated: false,
-}))
 
 function setBusy(key: string, value: boolean) {
   busy.value = value ? key : ''
@@ -307,68 +289,6 @@ async function refreshUiTree() {
 
 async function tapElement(index: number) {
   await runAdb(`tap-element-${index}`, 'tap_element', { index }, props.label('元素点击已发送', 'Element tap sent'))
-}
-
-async function loadFiles(path = fileInputPath.value) {
-  if (fileLoading.value) return
-  fileLoading.value = true
-  statusMessage.value = ''
-  errorMessage.value = ''
-  try {
-    const result = await cliApi.run<{ path: string; parent: string; files: typeof files.value; count: number }>('adb-cli', {
-      action: 'list_files',
-      params: params({ path }),
-      ttl_ms: 0,
-      bypass_cache: true,
-    })
-    if (result.status !== 'success' || !result.data) {
-      errorMessage.value = result.message || result.error || props.label('目录读取失败', 'Failed to read directory')
-      return
-    }
-    filePath.value = result.data.path
-    fileInputPath.value = result.data.path
-    fileParent.value = result.data.parent || '/'
-    files.value = result.data.files
-    filePreview.value = null
-    statusMessage.value = props.label('目录已读取', 'Directory loaded')
-  } catch (e) {
-    errorMessage.value = (e as Error).message || String(e)
-  } finally {
-    fileLoading.value = false
-  }
-}
-
-async function readFile(entry: RemoteWorkspaceFileEntry) {
-  if (fileLoading.value) return
-  fileLoading.value = true
-  statusMessage.value = ''
-  errorMessage.value = ''
-  try {
-    const result = await cliApi.run<RemoteWorkspaceFilePreview>('adb-cli', {
-      action: 'read_file',
-      params: params({ path: entry.path, max_bytes: 65536 }),
-      ttl_ms: 0,
-      bypass_cache: true,
-    })
-    if (result.status !== 'success' || !result.data) {
-      errorMessage.value = result.message || result.error || props.label('文件预览失败', 'Failed to preview file')
-      return
-    }
-    filePreview.value = result.data
-    statusMessage.value = props.label('文件已读取', 'File loaded')
-  } catch (e) {
-    errorMessage.value = (e as Error).message || String(e)
-  } finally {
-    fileLoading.value = false
-  }
-}
-
-function openFile(entry: RemoteWorkspaceFileEntry) {
-  if (entry.type === 'directory') {
-    void loadFiles(entry.path)
-    return
-  }
-  if (entry.type === 'file' || entry.type === 'symlink') void readFile(entry)
 }
 
 function selectPanel(panel: PanelKey) {
