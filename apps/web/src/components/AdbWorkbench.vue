@@ -5,6 +5,7 @@ import type { RemoteWorkspaceFileEntry, RemoteWorkspaceFileList, RemoteWorkspace
 import { streamingGatewayApi, type AdbScrcpySession } from '@/api/streamingGateway'
 import AdbAppsPanel from '@/components/adb/AdbAppsPanel.vue'
 import AdbFilesPanel from '@/components/adb/AdbFilesPanel.vue'
+import AdbInspectPanel from '@/components/adb/AdbInspectPanel.vue'
 import AdbScreenCapturePanel from '@/components/adb/AdbScreenCapturePanel.vue'
 import AdbScrcpyPanel from '@/components/adb/AdbScrcpyPanel.vue'
 import AdbShellPanel from '@/components/adb/AdbShellPanel.vue'
@@ -710,20 +711,14 @@ onBeforeUnmount(() => {
       @launch="launchApp"
     />
 
-    <div v-else-if="activePanel === 'inspect'" class="surface full-surface">
-      <div class="surface-head">
-        <h3>{{ label('界面检查', 'UI Inspector') }}</h3>
-        <button class="ghost-btn" :disabled="!!busy" @click="refreshUiTree">{{ label('读取元素', 'Read Tree') }}</button>
-      </div>
-      <div v-if="uiTree.length === 0" class="empty-line">{{ label('读取 UI 树后，可按元素索引点击。', 'Read the UI tree, then tap elements by index.') }}</div>
-      <div v-else class="ui-list">
-        <button v-for="node in uiTree.slice(0, 120)" :key="node.index" class="ui-node" :disabled="!!busy" @click="tapElement(node.index)">
-          <span>#{{ node.index }}</span>
-          <strong>{{ node.text || node.resource_id || node.class_name || label('无文本元素', 'Untitled element') }}</strong>
-          <code>{{ node.center ? node.center.join(',') : '' }}</code>
-        </button>
-      </div>
-    </div>
+    <AdbInspectPanel
+      v-else-if="activePanel === 'inspect'"
+      :nodes="uiTree"
+      :busy="!!busy"
+      :label="label"
+      @refresh="refreshUiTree"
+      @tap="tapElement"
+    />
 
     <AdbShellPanel
       v-else-if="activePanel === 'shell'"
@@ -979,44 +974,6 @@ button:disabled {
   font-weight: 700;
 }
 
-.ui-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-height: 420px;
-  overflow: auto;
-}
-
-.ui-node {
-  display: grid;
-  grid-template-columns: 56px minmax(0, 1fr) 90px;
-  gap: 10px;
-  align-items: center;
-  width: 100%;
-  min-height: 38px;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  background: #fff;
-  padding: 8px 10px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.ui-node span {
-  color: #2563eb;
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.ui-node strong {
-  min-width: 0;
-  overflow: hidden;
-  color: #0f172a;
-  font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .pending-surface p,
 .pending-surface li {
   color: #475569;
@@ -1034,7 +991,5 @@ button:disabled {
   .panel-grid { grid-template-columns: 1fr; }
   .screen-grid { grid-template-columns: 1fr; }
   .remote-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ui-node { grid-template-columns: 48px minmax(0, 1fr); }
-  .ui-node code { display: none; }
 }
 </style>
