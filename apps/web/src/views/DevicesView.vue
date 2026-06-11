@@ -370,15 +370,6 @@ function openDeviceDetail(device: UserDevice) {
   router.push(`/devices/${device.id}?from=/devices`)
 }
 
-onMounted(async () => {
-  detectOrientation()
-  await loadData()
-  startPing()
-  void ensureMiNamesLoaded()
-  updateViewportSize()
-  window.addEventListener('resize', onResize)
-})
-
 function handleRoomDblClick(room: Room) {
   if (isEditMode.value) return
   router.push({ name: 'room-detail', params: { id: String(room.id) } })
