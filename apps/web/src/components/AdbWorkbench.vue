@@ -3,8 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { cliApi } from '@/api/cli'
 import type { RemoteWorkspaceFileEntry, RemoteWorkspaceFileList, RemoteWorkspaceFilePreview } from '@/api/remoteWorkspace'
 import { streamingGatewayApi, type AdbScrcpySession } from '@/api/streamingGateway'
+import AdbFilesPanel from '@/components/adb/AdbFilesPanel.vue'
 import AdbScrcpyPanel from '@/components/adb/AdbScrcpyPanel.vue'
-import RemoteFileBrowserPanel from '@/components/RemoteFileBrowserPanel.vue'
 import TerminalPanel from '@/components/TerminalPanel.vue'
 
 const props = defineProps<{
@@ -746,28 +746,23 @@ onBeforeUnmount(() => {
       <div v-else class="empty-line">{{ label('该设备未配置终端目标。', 'No terminal target is configured for this device.') }}</div>
     </div>
 
-    <div v-else-if="activePanel === 'files'" class="files-panel-wrap">
-      <RemoteFileBrowserPanel
-        :title="label('ADB 文件系统', 'ADB Filesystem')"
-        :subtitle="adbIp"
-        :list="adbFileList"
-        :preview="filePreview"
-        :loading="fileLoading"
-        :error="errorMessage"
-        :path-input="fileInputPath"
-        root-fallback="/sdcard/"
-        :empty-text="label('目录为空或无权限读取。', 'Directory is empty or not readable.')"
-        :loading-text="label('正在读取设备目录...', 'Loading device directory...')"
-        :preview-hint="label('点开一个文件即可查看只读预览。', 'Click a file to open a read-only preview.')"
-        :label="label"
-        :format-file-size="(value) => formatBytes(value ?? undefined)"
-        @refresh="loadFiles(filePath)"
-        @parent="loadFiles(fileParent)"
-        @open-entry="openFile"
-        @open-path="loadFiles"
-        @update:path-input="fileInputPath = $event"
-      />
-    </div>
+    <AdbFilesPanel
+      v-else-if="activePanel === 'files'"
+      v-model:path-input="fileInputPath"
+      :adb-ip="adbIp"
+      :current-path="filePath"
+      :parent-path="fileParent"
+      :list="adbFileList"
+      :preview="filePreview"
+      :loading="fileLoading"
+      :error="errorMessage"
+      :label="label"
+      :format-bytes="formatBytes"
+      @refresh="loadFiles"
+      @parent="loadFiles"
+      @open-entry="openFile"
+      @open-path="loadFiles"
+    />
 
     <div v-else class="surface full-surface pending-surface">
       <h3>{{ panels.find((panel) => panel.key === activePanel)?.title }}</h3>
@@ -1051,8 +1046,6 @@ button:disabled {
   max-height: 420px;
   overflow: auto;
 }
-
-.files-panel-wrap { min-height: 430px; }
 
 .app-row {
   padding: 10px 12px;
