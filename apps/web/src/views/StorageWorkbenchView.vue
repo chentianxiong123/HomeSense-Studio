@@ -7,6 +7,7 @@ import { storageApi, type StorageMountRecord, type StorageTaskRecord } from '@/a
 import StorageFileWorkbenchPanel from '@/components/storage/StorageFileWorkbenchPanel.vue'
 import StorageMountDialog from '@/components/storage/StorageMountDialog.vue'
 import StorageMountList from '@/components/storage/StorageMountList.vue'
+import StorageWorkbenchHeader from '@/components/storage/StorageWorkbenchHeader.vue'
 import { useLocale } from '@/composables/useLocale'
 
 const router = useRouter()
@@ -400,17 +401,14 @@ function errorText(err: unknown): string {
 
 <template>
   <main class="storage-page">
-    <header class="page-head">
-      <div>
-        <span class="eyebrow">{{ label('中枢文件层', 'Hub Storage') }}</span>
-        <h1>{{ label('文件工作台', 'Storage Workbench') }}</h1>
-      </div>
-      <div class="head-actions">
-        <button class="plain-btn" :disabled="loading || acting" @click="refreshAll">{{ label('刷新', 'Refresh') }}</button>
-        <button class="plain-btn" @click="router.push('/authorizations')">{{ label('授权中心', 'Authorizations') }}</button>
-        <button class="primary-btn" :disabled="authorizations.length === 0" @click="openCreateMount()">{{ label('新增挂载', 'Add Mount') }}</button>
-      </div>
-    </header>
+    <StorageWorkbenchHeader
+      :disabled="loading || acting"
+      :can-create-mount="authorizations.length > 0"
+      :label="label"
+      @refresh="refreshAll"
+      @open-authorizations="router.push('/authorizations')"
+      @create-mount="openCreateMount()"
+    />
 
     <div v-if="error" class="notice error">{{ error }}</div>
     <div v-if="message" class="notice success">{{ message }}</div>
@@ -493,141 +491,11 @@ function errorText(err: unknown): string {
   gap: 14px;
 }
 
-.page-head,
 .notice {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   background: #fff;
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.04);
-}
-
-.page-head {
-  min-height: 96px;
-  padding: 22px 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.eyebrow {
-  display: inline-flex;
-  color: #0f766e;
-  font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0;
-}
-
-h1,
-h2 {
-  margin: 5px 0 0;
-  color: var(--text-primary);
-  font-weight: 900;
-  letter-spacing: 0;
-}
-
-h1 {
-  font-size: 30px;
-}
-
-h2 {
-  font-size: 24px;
-}
-
-.head-actions,
-.path-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.empty-line {
-  color: var(--text-tertiary);
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.45;
-}
-
-code {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--text-secondary);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.path-row input {
-  flex: 1;
-  min-width: 180px;
-  min-height: 36px;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  padding: 0 11px;
-  color: #0f172a;
-  font: inherit;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.file-table {
-  overflow: hidden;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #fff;
-}
-
-.file-row {
-  width: 100%;
-  min-height: 42px;
-  border: 0;
-  border-bottom: 1px solid #e2e8f0;
-  background: #fff;
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) 110px 220px;
-  align-items: center;
-  gap: 10px;
-  padding: 0 12px;
-  color: #334155;
-  text-align: left;
-}
-
-button.file-row {
-  cursor: pointer;
-}
-
-button.file-row:hover {
-  background: #f8fafc;
-}
-
-.file-row strong,
-.file-row span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.table-head {
-  background: #f8fafc;
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.empty-line {
-  padding: 18px;
-  text-align: center;
-}
-
-.empty-line.left {
-  text-align: left;
-}
-
-.notice {
   padding: 12px 14px;
   font-size: 14px;
   font-weight: 800;
@@ -645,74 +513,9 @@ button.file-row:hover {
   color: #047857;
 }
 
-.plain-btn,
-.primary-btn,
-.danger-btn {
-  min-height: 34px;
-  padding: 0 12px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 900;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.plain-btn {
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  color: var(--text-secondary);
-}
-
-.plain-btn:hover:not(:disabled) {
-  border-color: #14b8a6;
-  color: #0f766e;
-}
-
-.primary-btn {
-  border: 1px solid #0f766e;
-  background: #0f766e;
-  color: #fff;
-}
-
-.danger-btn {
-  border: 1px solid #fecaca;
-  background: #fef2f2;
-  color: #dc2626;
-}
-
-.compact {
-  min-height: 30px;
-  padding: 0 9px;
-}
-
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
 @media (max-width: 760px) {
   .storage-page {
     padding: 16px;
   }
-
-  .page-head,
-  .path-row {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .head-actions {
-    width: 100%;
-  }
-
-  .file-row {
-    grid-template-columns: 28px minmax(0, 1fr);
-  }
-
-  .file-row span:nth-child(3),
-  .file-row span:nth-child(4) {
-    display: none;
-  }
-
 }
 </style>
