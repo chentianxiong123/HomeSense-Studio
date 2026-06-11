@@ -5,6 +5,7 @@ import { api, type UserDevice, type Room, type MiDeviceCandidate } from '@/api'
 import { cliApi } from '@/api/cli'
 import DevicesCanvasHeader from '@/components/devices/DevicesCanvasHeader.vue'
 import DeviceCreatorDialog from '@/components/devices/DeviceCreatorDialog.vue'
+import RoomSettingsDialog from '@/components/devices/RoomSettingsDialog.vue'
 import { useLocale } from '@/composables/useLocale'
 import { useDeviceGroups } from '@/composables/useDeviceGroups'
 import { pixelToRatio, ratioToPixel, looksLikeRatio, clampRatio } from '@/utils/roomCoords'
@@ -1227,74 +1228,24 @@ function getRoomConnections(roomId: number) {
 
     <!-- (No device detail UI on the floor plan — see /devices/rooms/:id for per-room device controls.) -->
 
-    <Teleport to="body">
-      <div v-if="editingRoom" class="room-settings-overlay" @click="closeRoomSettings">
-        <form class="room-settings-panel glass-panel" @click.stop @submit.prevent="saveRoomSettings">
-          <header class="room-settings-head">
-            <div>
-              <span class="room-settings-kicker">{{ label('房间操作', 'Room Operations') }}</span>
-              <h3>{{ editingRoom.name }}</h3>
-            </div>
-            <button class="room-settings-close" type="button" @click="closeRoomSettings">×</button>
-          </header>
-
-          <label class="room-form-field">
-            <span>{{ label('房间名称', 'Room name') }}</span>
-            <input v-model="editingRoomName" type="text" :placeholder="label('例如：客厅', 'e.g. Living Room')" />
-          </label>
-
-          <section class="room-color-section">
-            <span>{{ label('背景颜色', 'Background color') }}</span>
-            <div class="room-color-grid">
-              <button
-                v-for="preset in roomColorPresets"
-                :key="preset.preview"
-                class="room-color-chip"
-                :class="{ active: editingRoomColor === preset.value }"
-                :style="{ background: preset.preview }"
-                type="button"
-                @click="editingRoomColor = preset.value"
-              >
-                <span>{{ isZh ? preset.zh : preset.en }}</span>
-              </button>
-            </div>
-          </section>
-
-          <section class="room-device-section">
-            <div class="room-device-head">
-              <span>{{ label('房间设备', 'Room devices') }}</span>
-              <small>{{ label('勾选后会把设备移动到这个房间', 'Checked devices move into this room') }}</small>
-            </div>
-            <button class="room-add-device-btn" type="button" :disabled="creatingDevice" @click="openDeviceCreator(editingRoom)">
-              {{ creatingDevice ? label('创建中...', 'Creating...') : label('新增设备到此房间', 'Add Device to Room') }}
-            </button>
-            <div class="room-device-list">
-              <label v-for="device in roomDeviceOptions" :key="device.id" class="room-device-row">
-                <input v-model="editingRoomDeviceIds" type="checkbox" :value="device.id" />
-                <span class="room-device-main">
-                  <strong>{{ device.name }}</strong>
-                  <small>{{ typeLabel(propString(device, 'device_type') || 'other') }} · {{ roomNameForDevice(device) }}</small>
-                </span>
-              </label>
-            </div>
-          </section>
-
-          <footer class="room-settings-actions">
-            <button class="room-delete-btn" type="button" :disabled="saving" @click="deleteEditingRoom">
-              {{ label('删除房间', 'Delete Room') }}
-            </button>
-            <div class="room-settings-save-group">
-              <button class="room-cancel-btn" type="button" :disabled="saving" @click="closeRoomSettings">
-                {{ label('取消', 'Cancel') }}
-              </button>
-              <button class="room-save-btn" type="submit" :disabled="saving">
-                {{ saving ? label('保存中...', 'Saving...') : label('保存', 'Save') }}
-              </button>
-            </div>
-          </footer>
-        </form>
-      </div>
-    </Teleport>
+    <RoomSettingsDialog
+      v-model:name="editingRoomName"
+      v-model:color="editingRoomColor"
+      v-model:device-ids="editingRoomDeviceIds"
+      :room="editingRoom"
+      :devices="roomDeviceOptions"
+      :color-presets="roomColorPresets"
+      :saving="saving"
+      :creating-device="creatingDevice"
+      :is-zh="isZh"
+      :label="label"
+      :type-label="typeLabel"
+      :device-room-name="roomNameForDevice"
+      @close="closeRoomSettings"
+      @submit="saveRoomSettings"
+      @delete="deleteEditingRoom"
+      @create-device="openDeviceCreator(editingRoom)"
+    />
 
     <DeviceCreatorDialog
       v-model:name="newDeviceName"
@@ -1730,271 +1681,6 @@ function getRoomConnections(roomId: number) {
   color: var(--text-secondary);
 }
 .bp-close-btn:hover { border-color: #10b981; color: #10b981; }
-
-.room-settings-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(15, 23, 42, 0.18);
-  backdrop-filter: blur(8px);
-  animation: overlayFade 0.25s ease;
-  box-sizing: border-box;
-}
-
-.room-settings-panel {
-  width: min(560px, 100%);
-  max-height: min(760px, calc(100vh - 48px));
-  padding: 28px;
-  gap: 22px;
-  overflow: auto;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(229, 231, 235, 0.7);
-  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.16);
-  box-sizing: border-box;
-}
-
-.room-settings-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.room-settings-kicker {
-  display: inline-flex;
-  margin-bottom: 6px;
-  font-size: 11px;
-  font-weight: 900;
-  color: #10b981;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.room-settings-head h3 {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 22px;
-  font-weight: 900;
-  letter-spacing: -0.04em;
-}
-
-.room-settings-close {
-  width: 36px;
-  height: 36px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 999px;
-  background: #fff;
-  color: #64748b;
-  cursor: pointer;
-  font-size: 22px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.room-form-field,
-.room-color-section,
-.room-device-section {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.room-form-field > span,
-.room-color-section > span,
-.room-device-head > span {
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 900;
-}
-
-.room-form-field input,
-.room-form-field select {
-  height: 44px;
-  padding: 0 14px;
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  border-radius: 14px;
-  background: #fff;
-  color: var(--text-primary);
-  font-size: 14px;
-  font-weight: 700;
-  outline: none;
-}
-
-.room-form-field input:focus,
-.room-form-field select:focus {
-  border-color: #10b981;
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.12);
-}
-
-.room-color-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
-  gap: 10px;
-}
-
-.room-color-chip {
-  min-height: 48px;
-  padding: 8px 10px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 14px;
-  color: #0f172a;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 900;
-  text-align: left;
-  box-shadow: inset 0 0 0 999px rgba(255, 255, 255, 0.22);
-}
-
-.room-color-chip.active {
-  border-color: #10b981;
-  box-shadow: inset 0 0 0 999px rgba(255, 255, 255, 0.12), 0 0 0 3px rgba(16, 185, 129, 0.14);
-}
-
-.room-device-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.room-device-head small {
-  color: var(--text-tertiary);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.room-add-device-btn {
-  height: 40px;
-  border: 1px solid rgba(37, 99, 235, 0.18);
-  border-radius: 14px;
-  background: #eff6ff;
-  color: #2563eb;
-  font-size: 13px;
-  font-weight: 900;
-  cursor: pointer;
-}
-
-.room-add-device-btn:hover:not(:disabled) {
-  background: #dbeafe;
-}
-
-.room-add-device-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.room-device-list {
-  display: flex;
-  flex-direction: column;
-  max-height: 240px;
-  overflow: auto;
-  border: 1px solid rgba(15, 23, 42, 0.06);
-  border-radius: 16px;
-  background: rgba(248, 250, 252, 0.74);
-}
-
-.room-device-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  cursor: pointer;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.05);
-}
-
-.room-device-row:last-child {
-  border-bottom: 0;
-}
-
-.room-device-row:hover {
-  background: rgba(16, 185, 129, 0.06);
-}
-
-.room-device-row input {
-  width: 16px;
-  height: 16px;
-  accent-color: #10b981;
-}
-
-.room-device-main {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  gap: 2px;
-}
-
-.room-device-main strong {
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 900;
-}
-
-.room-device-main small {
-  color: var(--text-tertiary);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.room-settings-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-top: 4px;
-}
-
-.room-settings-save-group {
-  display: flex;
-  gap: 10px;
-}
-
-.device-create-note {
-  color: var(--text-tertiary);
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.5;
-}
-
-.room-delete-btn,
-.room-cancel-btn,
-.room-save-btn {
-  min-height: 42px;
-  padding: 0 16px;
-  border-radius: 12px;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 900;
-}
-
-.room-delete-btn {
-  background: #fef2f2;
-  color: #dc2626;
-  border: 1px solid #fecaca;
-}
-
-.room-cancel-btn {
-  background: #fff;
-  color: var(--text-secondary);
-  border: 1px solid rgba(15, 23, 42, 0.08);
-}
-
-.room-save-btn {
-  background: #10b981;
-  color: #fff;
-  border: 0;
-  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.24);
-}
-
-.room-delete-btn:disabled,
-.room-cancel-btn:disabled,
-.room-save-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
 
 @keyframes overlayFade {
   from { opacity: 0; }
