@@ -5,7 +5,7 @@ import type { ResourceSearchHit } from '@/api/resources'
 import BilibiliSearchPanel from '@/components/media/BilibiliSearchPanel.vue'
 import MediaBookmarksPanel from '@/components/media/MediaBookmarksPanel.vue'
 import MediaOutputPanel from '@/components/media/MediaOutputPanel.vue'
-import MediaSourceSitesPanel from '@/components/media/MediaSourceSitesPanel.vue'
+import MediaUrlSniffPanel from '@/components/media/MediaUrlSniffPanel.vue'
 import ResourceSearchPanel from '@/components/resources/ResourceSearchPanel.vue'
 import { useLocale } from '@/composables/useLocale'
 import { useMediaPlayer } from '@/features/media/player'
@@ -549,94 +549,29 @@ function titleFromUrl(url: string): string {
           @bookmark="bookmarkResourceHit"
         />
 
-        <div class="source-divider">
-          <span>{{ label('直连 URL', 'Direct URL') }}</span>
-        </div>
-
-        <MediaSourceSitesPanel
-          :current-url="urlInput"
-          @select="selectSourceSiteUrl"
-          @sniff="applySourceSiteSniff"
+        <MediaUrlSniffPanel
+          v-model:url="urlInput"
+          v-model:title="titleInput"
+          v-model:artist="artistInput"
+          :sniff-loading="sniffLoading"
+          :candidates="sniffCandidates"
+          :preparing-candidate-id="preparingCandidateId"
+          :form-error="formError"
+          :sniff-error="sniffError"
+          :session-error="session.state === 'error' ? (session.error || '') : ''"
+          :label="label"
+          :stream-kind-label="streamKindLabel"
+          :candidate-subtitle="candidateSubtitle"
+          @submit="submitUrl"
+          @sniff="sniffMediaUrl"
+          @queue="queueUrl"
+          @bookmark="bookmarkUrl"
+          @select-source-url="selectSourceSiteUrl"
+          @source-sniff="applySourceSiteSniff"
+          @play-candidate="playCandidate"
+          @queue-candidate="queueCandidate"
+          @bookmark-candidate="bookmarkCandidate"
         />
-
-        <div class="source-divider">
-          <span>URL</span>
-        </div>
-
-        <form class="url-form" @submit.prevent="submitUrl">
-          <label class="form-field full">
-            <span>URL</span>
-            <input v-model="urlInput" type="url" placeholder="https://..." autocomplete="off" />
-          </label>
-          <label class="form-field">
-            <span>{{ label('标题', 'Title') }}</span>
-            <input v-model="titleInput" type="text" :placeholder="label('可选', 'Optional')" autocomplete="off" />
-          </label>
-          <label class="form-field">
-            <span>{{ label('作者', 'Artist') }}</span>
-            <input v-model="artistInput" type="text" :placeholder="label('可选', 'Optional')" autocomplete="off" />
-          </label>
-          <div class="form-actions full">
-            <button class="plain-btn" type="button" :disabled="sniffLoading" @click="sniffMediaUrl">
-              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-                <path d="M21 3v6h-6" />
-              </svg>
-              {{ sniffLoading ? label('嗅探中', 'Sniffing') : label('嗅探', 'Sniff') }}
-            </button>
-            <button class="plain-btn" type="button" @click="queueUrl">
-              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
-                <path d="M12 5v14" />
-                <path d="M5 12h14" />
-              </svg>
-              {{ label('加入队列', 'Add') }}
-            </button>
-            <button class="plain-btn" type="button" @click="bookmarkUrl">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="m12 17.3-6.2 3.4 1.2-7.1-5.1-5 7.1-1L12 1.2l3.1 6.4 7.1 1-5.1 5 1.2 7.1z" />
-              </svg>
-              {{ label('收藏', 'Save') }}
-            </button>
-            <button class="primary-btn" type="submit">
-              <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-              {{ label('播放', 'Play') }}
-            </button>
-          </div>
-        </form>
-
-        <div v-if="sniffCandidates.length > 0" class="candidate-list">
-          <div v-for="candidate in sniffCandidates" :key="candidate.id" class="candidate-row">
-            <span class="candidate-kind">{{ streamKindLabel(candidate.stream_kind || candidate.kind) }}</span>
-            <button class="candidate-main" type="button" @click="playCandidate(candidate)">
-              <strong>{{ candidate.title }}</strong>
-              <small>{{ candidateSubtitle(candidate) }}</small>
-            </button>
-            <div class="row-actions">
-              <button class="row-icon" type="button" :disabled="preparingCandidateId === candidate.id" :title="label('收藏', 'Bookmark')" @click="bookmarkCandidate(candidate)">
-                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="m12 17.3-6.2 3.4 1.2-7.1-5.1-5 7.1-1L12 1.2l3.1 6.4 7.1 1-5.1 5 1.2 7.1z" />
-                </svg>
-              </button>
-              <button class="row-icon" type="button" :disabled="preparingCandidateId === candidate.id" :title="label('加入队列', 'Add to queue')" @click="queueCandidate(candidate)">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
-                  <path d="M12 5v14" />
-                  <path d="M5 12h14" />
-                </svg>
-              </button>
-              <button class="row-icon" type="button" :disabled="preparingCandidateId === candidate.id" :title="label('播放', 'Play')" @click="playCandidate(candidate)">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <p v-if="formError" class="notice error">{{ formError }}</p>
-        <p v-if="sniffError" class="notice warn">{{ sniffError }}</p>
-        <p v-if="session.state === 'error'" class="notice error">{{ session.error }}</p>
       </section>
 
       <section class="panel session-panel">
