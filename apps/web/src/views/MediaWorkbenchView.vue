@@ -4,6 +4,7 @@ import { mediaApi } from '@/api/media'
 import type { ResourceSearchHit } from '@/api/resources'
 import BilibiliSearchPanel from '@/components/media/BilibiliSearchPanel.vue'
 import MediaBookmarksPanel from '@/components/media/MediaBookmarksPanel.vue'
+import MediaNowPlayingPanel from '@/components/media/MediaNowPlayingPanel.vue'
 import MediaOutputPanel from '@/components/media/MediaOutputPanel.vue'
 import MediaQueuePanel from '@/components/media/MediaQueuePanel.vue'
 import MediaUrlSniffPanel from '@/components/media/MediaUrlSniffPanel.vue'
@@ -574,92 +575,24 @@ function titleFromUrl(url: string): string {
         />
       </section>
 
-      <section class="panel session-panel">
-        <div class="panel-head">
-          <div>
-            <span class="eyebrow inline">{{ label('会话', 'Session') }}</span>
-            <h2>{{ label('当前播放', 'Now Playing') }}</h2>
-          </div>
-          <button class="plain-btn" type="button" :disabled="!player.canControl.value" @click="player.stop()">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
-              <path d="M7 7h10v10H7z" />
-            </svg>
-            {{ label('停止', 'Stop') }}
-          </button>
-        </div>
-
-        <div v-if="activeItem" class="now-row">
-          <span class="cover-fallback" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M9 18V5l12-2v13" />
-              <circle cx="6" cy="18" r="3" />
-              <circle cx="18" cy="16" r="3" />
-            </svg>
-          </span>
-          <div class="now-copy">
-            <strong>{{ activeItem.title }}</strong>
-            <span>{{ sourceLabel(activeItem.source) }} · {{ session.output.name }}</span>
-          </div>
-        </div>
-
-        <div v-else class="empty-line">{{ label('暂无播放项', 'No active item') }}</div>
-
-        <div class="session-meter">
-          <div class="meter-track">
-            <span :style="{ width: `${player.progress.value}%` }" />
-          </div>
-          <div class="meter-copy">
-            <span>{{ formatTime(session.position_sec) }}</span>
-            <span>{{ formatTime(session.duration_sec || activeItem?.duration_sec || 0) }}</span>
-          </div>
-        </div>
-
-        <div class="transport-row">
-          <button class="icon-btn" type="button" :title="playModeLabel" @click="togglePlayMode">
-            <svg v-if="player.state.playMode === 'random'" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M16 3h5v5" />
-              <path d="M4 20 21 3" />
-              <path d="M21 16v5h-5" />
-              <path d="M15 15 21 21" />
-              <path d="M4 4l5 5" />
-            </svg>
-            <svg v-else-if="player.state.playMode === 'single'" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="m17 2 4 4-4 4" />
-              <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
-              <path d="m7 22-4-4 4-4" />
-              <path d="M21 13v1a4 4 0 0 1-4 4H3" />
-              <path d="M11 10h1v4" />
-            </svg>
-            <svg v-else viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="m17 2 4 4-4 4" />
-              <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
-              <path d="m7 22-4-4 4-4" />
-              <path d="M21 13v1a4 4 0 0 1-4 4H3" />
-            </svg>
-          </button>
-          <button class="icon-btn" type="button" :disabled="!player.hasPrevious.value" @click="player.previous()">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
-              <path d="m19 20-9-8 9-8v16Z" />
-              <path d="M5 19V5" />
-            </svg>
-          </button>
-          <button class="play-btn" type="button" :disabled="!player.canControl.value" @click="player.toggle()">
-            <svg v-if="session.state === 'playing' || session.state === 'loading'" viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
-              <path d="M7 5h3v14H7zM14 5h3v14h-3z" />
-            </svg>
-            <svg v-else viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
-              <path d="M8 5v14l11-7z" />
-            </svg>
-          </button>
-          <button class="icon-btn" type="button" :disabled="!player.hasNext.value" @click="player.next()">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
-              <path d="m5 4 9 8-9 8V4Z" />
-              <path d="M19 5v14" />
-            </svg>
-          </button>
-        </div>
-        <div class="mode-line">{{ playModeLabel }}</div>
-      </section>
+      <MediaNowPlayingPanel
+        :active-item="activeItem"
+        :session="session"
+        :progress="player.progress.value"
+        :play-mode="player.state.playMode"
+        :play-mode-label="playModeLabel"
+        :can-control="player.canControl.value"
+        :has-previous="player.hasPrevious.value"
+        :has-next="player.hasNext.value"
+        :label="label"
+        :source-label="sourceLabel"
+        :format-time="formatTime"
+        @stop="player.stop"
+        @previous="player.previous"
+        @toggle="player.toggle"
+        @next="player.next"
+        @toggle-play-mode="togglePlayMode"
+      />
 
       <section class="panel bookmarks-shell">
         <MediaBookmarksPanel
@@ -1084,146 +1017,6 @@ button:disabled {
   color: var(--text-tertiary);
   font-size: 12px;
   font-weight: 900;
-}
-
-.now-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #f8fafc;
-}
-
-.cover-fallback {
-  width: 52px;
-  height: 52px;
-  border-radius: 8px;
-  background: #e6fffb;
-  color: #0f766e;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-}
-
-.now-copy {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.now-copy strong,
-.now-copy span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.now-copy strong {
-  color: var(--text-primary);
-  font-size: 16px;
-  font-weight: 900;
-}
-
-.now-copy span {
-  color: var(--text-tertiary);
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.session-meter {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.meter-track {
-  height: 8px;
-  overflow: hidden;
-  border-radius: 8px;
-  background: #e2e8f0;
-}
-
-.meter-track span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: #0f766e;
-}
-
-.meter-copy {
-  display: flex;
-  justify-content: space-between;
-  color: var(--text-tertiary);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.transport-row {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
-.mode-line {
-  color: var(--text-tertiary);
-  font-size: 12px;
-  font-weight: 900;
-  text-align: center;
-}
-
-.icon-btn,
-.play-btn,
-.row-icon {
-  border: 1px solid #dbe3ec;
-  background: #fff;
-  color: #334155;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.icon-btn {
-  width: 40px;
-  height: 40px;
-}
-
-.play-btn {
-  width: 48px;
-  height: 48px;
-  border-color: #0f766e;
-  background: #0f766e;
-  color: #fff;
-}
-
-.empty-line {
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #fff;
-}
-
-.row-icon {
-  width: 32px;
-  height: 32px;
-}
-
-.row-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.empty-line {
-  padding: 26px 18px;
-  color: var(--text-tertiary);
-  font-size: 13px;
-  font-weight: 800;
-  text-align: center;
 }
 
 @media (max-width: 1080px) {
