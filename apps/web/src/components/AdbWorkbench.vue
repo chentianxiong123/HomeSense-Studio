@@ -7,7 +7,7 @@ import AdbAppsPanel from '@/components/adb/AdbAppsPanel.vue'
 import AdbFilesPanel from '@/components/adb/AdbFilesPanel.vue'
 import AdbScreenCapturePanel from '@/components/adb/AdbScreenCapturePanel.vue'
 import AdbScrcpyPanel from '@/components/adb/AdbScrcpyPanel.vue'
-import TerminalPanel from '@/components/TerminalPanel.vue'
+import AdbShellPanel from '@/components/adb/AdbShellPanel.vue'
 
 const props = defineProps<{
   deviceId: number
@@ -725,14 +725,13 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div v-else-if="activePanel === 'shell'" class="surface terminal-surface">
-      <div class="surface-head">
-        <h3>{{ label('ADB 终端', 'ADB Shell') }}</h3>
-        <button class="ghost-btn" @click="emit('openConsole')">{{ label('全屏', 'Fullscreen') }}</button>
-      </div>
-      <TerminalPanel v-if="canOpenConsole" :target-device-id="deviceId" height="360px" :font-size="12" />
-      <div v-else class="empty-line">{{ label('该设备未配置终端目标。', 'No terminal target is configured for this device.') }}</div>
-    </div>
+    <AdbShellPanel
+      v-else-if="activePanel === 'shell'"
+      :device-id="deviceId"
+      :can-open-console="canOpenConsole"
+      :label="label"
+      @open-console="emit('openConsole')"
+    />
 
     <AdbFilesPanel
       v-else-if="activePanel === 'files'"
@@ -959,8 +958,7 @@ button:disabled {
   font-size: 14px;
 }
 
-.full-surface,
-.terminal-surface { min-height: 320px; }
+.full-surface { min-height: 320px; }
 
 .screen-grid {
   display: grid;
