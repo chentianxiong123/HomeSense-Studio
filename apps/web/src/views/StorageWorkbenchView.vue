@@ -9,6 +9,15 @@ import StorageMountDialog from '@/components/storage/StorageMountDialog.vue'
 import StorageMountList from '@/components/storage/StorageMountList.vue'
 import StorageWorkbenchHeader from '@/components/storage/StorageWorkbenchHeader.vue'
 import { useLocale } from '@/composables/useLocale'
+import {
+  authSummary,
+  defaultMountPath,
+  errorText,
+  formatSize,
+  joinVirtualPath,
+  normalizeVirtualPath,
+  propsSafeMessage,
+} from '@/utils/storageWorkbench'
 
 const router = useRouter()
 const { locale } = useLocale()
@@ -351,51 +360,9 @@ function setActingMessage(value: string) {
   message.value = value
 }
 
-function defaultMountPath(auth: AlistAuthorizationRecord): string {
-  const base = auth.name.trim().replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '-')
-  return `/${base || auth.driver || 'storage'}`
-}
-
-function normalizeVirtualPath(value: string): string {
-  const normalized = value.trim().replace(/\\/g, '/').replace(/\/+/g, '/')
-  if (!normalized) return ''
-  const withSlash = normalized.startsWith('/') ? normalized : `/${normalized}`
-  return withSlash.replace(/\/+$/, '') || '/'
-}
-
-function joinVirtualPath(dir: string, name: string): string {
-  return `${dir.replace(/\/+$/, '') || '/'}/${name}`.replace(/\/+/g, '/')
-}
-
 function authorizationName(id: number): string {
   const auth = authorizations.value.find((item) => item.id === id)
   return auth ? auth.name : `#${id}`
-}
-
-function authSummary(auth: AlistAuthorizationRecord): string {
-  const rootPath = typeof auth.props?.root_path === 'string' ? auth.props.root_path : ''
-  if (auth.driver === 'local') return rootPath || auth.endpoint
-  return [auth.endpoint, rootPath].filter(Boolean).join(' · ')
-}
-
-function formatSize(value: number) {
-  if (!Number.isFinite(value) || value <= 0) return '-'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let size = value
-  let unit = 0
-  while (size >= 1024 && unit < units.length - 1) {
-    size /= 1024
-    unit += 1
-  }
-  return `${size.toFixed(size >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`
-}
-
-function propsSafeMessage(prefix: string, value: string): string {
-  return `${prefix}: ${value}`
-}
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
 }
 </script>
 
