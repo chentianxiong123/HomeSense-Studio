@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { cliApi } from '@/api/cli'
 import type { RemoteWorkspaceFileEntry, RemoteWorkspaceFileList, RemoteWorkspaceFilePreview } from '@/api/remoteWorkspace'
-import { streamingGatewayApi, type AdbScrcpySession } from '@/api/streamingGateway'
 import AdbAppsPanel from '@/components/adb/AdbAppsPanel.vue'
 import AdbControlPanel from '@/components/adb/AdbControlPanel.vue'
 import AdbFilesPanel from '@/components/adb/AdbFilesPanel.vue'
@@ -10,6 +9,7 @@ import AdbInspectPanel from '@/components/adb/AdbInspectPanel.vue'
 import AdbScreenCapturePanel from '@/components/adb/AdbScreenCapturePanel.vue'
 import AdbScrcpyPanel from '@/components/adb/AdbScrcpyPanel.vue'
 import AdbShellPanel from '@/components/adb/AdbShellPanel.vue'
+import { useAdbScrcpy } from '@/composables/useAdbScrcpy'
 
 const props = defineProps<{
   deviceId: number
@@ -35,17 +35,6 @@ const textInput = ref('')
 const tapInput = ref('')
 const screenshotLoading = ref(false)
 const screenshot = ref<{ base64?: string; mime?: string; width?: number; height?: number; size_bytes?: number } | null>(null)
-const scrcpyLoading = ref(false)
-const scrcpySessions = ref<AdbScrcpySession[]>([])
-const scrcpyMaxSize = ref('1280')
-const scrcpyBitRate = ref('4M')
-const scrcpyMaxFps = ref('30')
-const scrcpyRecordPath = ref('')
-const scrcpyV4l2Sink = ref('')
-const rawStreamSessionId = ref('')
-const rawStreamStatus = ref('')
-const rawStreamBytes = ref(0)
-let rawStreamSocket: WebSocket | null = null
 const uiTree = ref<Array<{ index: number; text: string; bounds?: number[]; center?: number[]; clickable?: boolean; resource_id?: string; class_name?: string }>>([])
 const currentApp = ref<{ current_app?: string; activity?: string; raw_line?: string } | null>(null)
 const overviewLoading = ref(false)
@@ -84,6 +73,33 @@ type AdbFileEntry = {
 
 const files = ref<AdbFileEntry[]>([])
 const filePreview = ref<RemoteWorkspaceFilePreview | null>(null)
+
+const {
+  scrcpyLoading,
+  scrcpySessions,
+  scrcpyMaxSize,
+  scrcpyBitRate,
+  scrcpyMaxFps,
+  scrcpyRecordPath,
+  scrcpyV4l2Sink,
+  rawStreamSessionId,
+  rawStreamStatus,
+  rawStreamBytes,
+  loadScrcpySessions,
+  createScrcpyBridgeSession,
+  createScrcpyDesktopSession,
+  createScrcpyRecordSession,
+  stopScrcpySession,
+  removeScrcpySession,
+  connectRawStream,
+  disconnectRawStream,
+} = useAdbScrcpy({
+  adbIp: () => props.adbIp,
+  deviceName: () => props.deviceName,
+  label: props.label,
+  statusMessage,
+  errorMessage,
+})
 
 const panels = computed<Array<{ key: PanelKey; title: string; ready: boolean }>>(() => [
   { key: 'control', title: props.label('控制', 'Control'), ready: true },
@@ -245,181 +261,6 @@ async function tapScreenshot(event: MouseEvent) {
   await runAdb('tap-screenshot', 'tap', { x, y }, props.label('截图点击已发送', 'Screenshot tap sent'))
 }
 
-async function loadScrcpySessions() {
-  if (scrcpyLoading.value) return
-  scrcpyLoading.value = true
-  try {
-    const result = await streamingGatewayApi.adbScrcpySessions()
-    if (result.status === 'success') scrcpySessions.value = result.data
-  } catch (e) {
-    errorMessage.value = (e as Error).message || String(e)
-  } finally {
-    scrcpyLoading.value = false
-  }
-}
-
-function scrcpyBasePayload(profile: string) {
-  return {
-    device: props.adbIp,
-    profile,
-    max_size: scrcpyMaxSize.value.trim() || undefined,
-    bit_rate: scrcpyBitRate.value.trim() || undefined,
-    max_fps: scrcpyMaxFps.value.trim() || undefined,
-    label: `${props.deviceName} scrcpy`,
-  }
-}
-
-async function createScrcpyBridgeSession() {
-  if (scrcpyLoading.value) return
-  scrcpyLoading.value = true
-  statusMessage.value = ''
-  errorMessage.value = ''
-  try {
-    const result = await streamingGatewayApi.createAdbScrcpySession({
-      ...scrcpyBasePayload('browser_bridge'),
-      audio: false,
-      window: false,
-      playback: false,
-      v4l2_sink: scrcpyV4l2Sink.value.trim() || undefined,
-    })
-    if (result.status !== 'success') {
-      errorMessage.value = props.label('scrcpy 会话创建失败', 'Failed to create scrcpy session')
-      return
-    }
-    await loadScrcpySessions()
-    statusMessage.value = result.data.state === 'prepared'
-      ? props.label('scrcpy 桥接规格已准备', 'scrcpy bridge spec prepared')
-      : props.label('scrcpy 会话已启动', 'scrcpy session started')
-  } catch (e) {
-    errorMessage.value = (e as Error).message || String(e)
-  } finally {
-    scrcpyLoading.value = false
-  }
-}
-
-async function createScrcpyDesktopSession() {
-  if (scrcpyLoading.value) return
-  scrcpyLoading.value = true
-  statusMessage.value = ''
-  errorMessage.value = ''
-  try {
-    const result = await streamingGatewayApi.createAdbScrcpySession({
-      ...scrcpyBasePayload('desktop'),
-      audio: true,
-      window: true,
-      playback: true,
-    })
-    if (result.status !== 'success') {
-      errorMessage.value = props.label('scrcpy 启动失败', 'Failed to start scrcpy')
-      return
-    }
-    await loadScrcpySessions()
-    statusMessage.value = props.label('scrcpy 桌面会话已启动', 'scrcpy desktop session started')
-  } catch (e) {
-    errorMessage.value = (e as Error).message || String(e)
-  } finally {
-    scrcpyLoading.value = false
-  }
-}
-
-async function createScrcpyRecordSession() {
-  const record = scrcpyRecordPath.value.trim()
-  if (!record) {
-    errorMessage.value = props.label('请输入录制文件路径', 'Enter a recording path')
-    return
-  }
-  if (scrcpyLoading.value) return
-  scrcpyLoading.value = true
-  statusMessage.value = ''
-  errorMessage.value = ''
-  try {
-    const result = await streamingGatewayApi.createAdbScrcpySession({
-      ...scrcpyBasePayload('record'),
-      audio: false,
-      window: false,
-      playback: false,
-      record,
-    })
-    if (result.status !== 'success') {
-      errorMessage.value = props.label('scrcpy 录制启动失败', 'Failed to start scrcpy recording')
-      return
-    }
-    await loadScrcpySessions()
-    statusMessage.value = props.label('scrcpy 录制会话已启动', 'scrcpy recording session started')
-  } catch (e) {
-    errorMessage.value = (e as Error).message || String(e)
-  } finally {
-    scrcpyLoading.value = false
-  }
-}
-
-async function stopScrcpySession(id: string) {
-  if (scrcpyLoading.value) return
-  scrcpyLoading.value = true
-  try {
-    await streamingGatewayApi.stopAdbScrcpySession(id)
-    await loadScrcpySessions()
-    statusMessage.value = props.label('scrcpy 会话已停止', 'scrcpy session stopped')
-  } catch (e) {
-    errorMessage.value = (e as Error).message || String(e)
-  } finally {
-    scrcpyLoading.value = false
-  }
-}
-
-async function removeScrcpySession(id: string) {
-  if (scrcpyLoading.value) return
-  scrcpyLoading.value = true
-  try {
-    await streamingGatewayApi.removeAdbScrcpySession(id)
-    await loadScrcpySessions()
-  } catch (e) {
-    errorMessage.value = (e as Error).message || String(e)
-  } finally {
-    scrcpyLoading.value = false
-  }
-}
-
-function buildWsUrl(path: string): string {
-  const base = import.meta.env.VITE_API_BASE || window.location.origin
-  const url = new URL(path, base || window.location.origin)
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  return url.toString()
-}
-
-function disconnectRawStream() {
-  rawStreamSocket?.close()
-  rawStreamSocket = null
-  rawStreamSessionId.value = ''
-  rawStreamStatus.value = ''
-}
-
-function connectRawStream(session: AdbScrcpySession) {
-  if (!session.stream?.ws_path) return
-  disconnectRawStream()
-  rawStreamSessionId.value = session.id
-  rawStreamBytes.value = 0
-  rawStreamStatus.value = props.label('连接中', 'Connecting')
-  const socket = new WebSocket(buildWsUrl(session.stream.ws_path))
-  socket.binaryType = 'arraybuffer'
-  rawStreamSocket = socket
-  socket.onopen = () => {
-    rawStreamStatus.value = props.label('已连接，等待 H264 数据', 'Connected, waiting for H264 data')
-  }
-  socket.onmessage = (event) => {
-    const data = event.data
-    if (data instanceof ArrayBuffer) rawStreamBytes.value += data.byteLength
-    else if (data instanceof Blob) rawStreamBytes.value += data.size
-  }
-  socket.onerror = () => {
-    rawStreamStatus.value = props.label('流连接错误', 'Stream connection error')
-  }
-  socket.onclose = (event) => {
-    rawStreamStatus.value = event.reason || props.label('流已断开', 'Stream disconnected')
-    if (rawStreamSocket === socket) rawStreamSocket = null
-  }
-}
-
 async function loadApps(refresh = false) {
   if (busy.value) return
   setBusy('apps', true)
@@ -559,10 +400,6 @@ function usageText(value?: { total?: number; used?: number }): string {
 
 onMounted(() => {
   void loadOverview(false)
-})
-
-onBeforeUnmount(() => {
-  disconnectRawStream()
 })
 </script>
 
