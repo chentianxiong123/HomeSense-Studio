@@ -2,9 +2,9 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, type AuthStatus, type MiDeviceCandidate, type UserDevice } from '@/api'
-import { mediaApi } from '@/api/media'
 import { streamingGatewayApi, type MoonlightWebRuntimeStatus, type StreamingHost, type StreamingHostProbe } from '@/api/streamingGateway'
 import AdbAuthPanel from '@/components/auth/AdbAuthPanel.vue'
+import DlnaAuthPanel from '@/components/auth/DlnaAuthPanel.vue'
 import SshAuthPanel from '@/components/auth/SshAuthPanel.vue'
 import StreamingGatewayPanel from '@/components/remote-workspace/StreamingGatewayPanel.vue'
 import StorageCredentialsPanel from '@/components/storage/StorageCredentialsPanel.vue'
@@ -28,13 +28,6 @@ const auth = ref<AuthStatus | null>(null)
 const devices = ref<UserDevice[]>([])
 const candidates = ref<MiDeviceCandidate[]>([])
 const candidatesLoaded = ref(false)
-const dlnaFormOpen = ref(false)
-const editingDlnaDevice = ref<UserDevice | null>(null)
-const formDlnaName = ref('')
-const formDlnaLocation = ref('')
-const dlnaScanLoaded = ref(false)
-const dlnaScanResults = ref<DlnaCandidate[]>([])
-const dlnaTestResults = ref<Record<string, { ok: boolean; message: string }>>({})
 const streamingHosts = ref<StreamingHost[]>([])
 const streamingHostProbes = ref<Record<string, StreamingHostProbe>>({})
 const streamingRuntimeStatus = ref<MoonlightWebRuntimeStatus | null>(null)
@@ -51,6 +44,8 @@ const storageCredentialCount = ref(0)
 const storageCredentialsPanel = ref<InstanceType<typeof StorageCredentialsPanel> | null>(null)
 const adbAuthPanel = ref<InstanceType<typeof AdbAuthPanel> | null>(null)
 const adbBoundCount = ref(0)
+const dlnaAuthPanel = ref<InstanceType<typeof DlnaAuthPanel> | null>(null)
+const dlnaBoundCount = ref(0)
 const sshAuthPanel = ref<InstanceType<typeof SshAuthPanel> | null>(null)
 const sshTargetCount = ref(0)
 
@@ -101,15 +96,7 @@ const qrLink = computed(() =>
   getString(authDataRecord.value?.status_url),
 )
 const miBoundCount = computed(() => devices.value.filter((device) => typeof device.props?.mi_did === 'string' && device.props.mi_did).length)
-const dlnaBoundCount = computed(() => devices.value.filter((device) => typeof device.props?.dlna_location === 'string' && (device.props.dlna_location as string).trim()).length)
 const streamingHostCount = computed(() => streamingHosts.value.length)
-
-type DlnaCandidate = {
-  id: string
-  name: string
-  endpoint?: string
-  meta?: Record<string, unknown>
-}
 
 type StreamingGatewaySpec = {
   key: string
@@ -119,13 +106,6 @@ type StreamingGatewaySpec = {
   detail: string
   capabilities: string[]
 }
-
-const dlnaRows = computed(() => {
-  return [...devices.value]
-    .filter((device) => typeof device.props?.dlna_location === 'string' && (device.props.dlna_location as string).trim())
-    .sort((left, right) => left.name.localeCompare(right.name, isZh.value ? 'zh-Hans-CN' : 'en'))
-    .map((device) => ({ device }))
-})
 
 const externalProviders = computed(() => [
   {
@@ -219,6 +199,7 @@ async function loadAll() {
     loadAuthStatus(),
     loadDevices(),
     adbAuthPanel.value?.refresh(),
+    dlnaAuthPanel.value?.refresh(),
     loadSshTargetCount(),
     sshAuthPanel.value?.refresh(),
     loadStreamingHosts(),
@@ -399,141 +380,6 @@ function openStreamingRuntime() {
   window.open(endpoint, '_blank', 'noopener,noreferrer')
 }
 
-function openCreateDlnaDevice() {
-  editingDlnaDevice.value = null
-  formDlnaName.value = ''
-  formDlnaLocation.value = ''
-  dlnaFormOpen.value = true
-}
-
-function openEditDlnaDevice(device: UserDevice) {
-  editingDlnaDevice.value = device
-  formDlnaName.value = device.name
-  formDlnaLocation.value = (device.props?.dlna_location as string) ?? ''
-  dlnaFormOpen.value = true
-}
-
-function closeDlnaForm() {
-  dlnaFormOpen.value = false
-  editingDlnaDevice.value = null
-}
-
-async function submitDlnaDevice() {
-  const name = formDlnaName.value.trim()
-  const location = formDlnaLocation.value.trim()
-  if (!name || !location) return
-  const payload = {
-    name,
-    props: {
-      ...(editingDlnaDevice.value?.props ?? {}),
-      device_type: 'dlna_renderer',
-      dlna_location: location,
-    },
-  }
-  const key = editingDlnaDevice.value ? `dlna-edit-${editingDlnaDevice.value.id}` : 'dlna-create'
-  setBusy(key, true)
-  errorMessage.value = ''
-  try {
-    if (editingDlnaDevice.value) {
-      await api.userDevices.update(editingDlnaDevice.value.id, payload)
-      showSuccess(label('DLNA 目标已更新', 'DLNA target updated'))
-    } else {
-      await api.userDevices.create(payload)
-      showSuccess(label('DLNA 目标已添加', 'DLNA target added'))
-    }
-    closeDlnaForm()
-    await loadDevices()
-  } catch (error) {
-    errorMessage.value = (error as Error).message || String(error)
-  } finally {
-    setBusy(key, false)
-  }
-}
-
-async function deleteDlnaDevice(device: UserDevice) {
-  if (!window.confirm(label(`删除 DLNA 目标「${device.name}」？`, `Delete DLNA target "${device.name}"?`))) return
-  setBusy(`dlna-delete-${device.id}`, true)
-  errorMessage.value = ''
-  try {
-    await api.userDevices.delete(device.id)
-    await loadDevices()
-    showSuccess(label('DLNA 目标已删除', 'DLNA target deleted'))
-  } catch (error) {
-    errorMessage.value = (error as Error).message || String(error)
-  } finally {
-    setBusy(`dlna-delete-${device.id}`, false)
-  }
-}
-
-async function scanDlnaTargets() {
-  setBusy('dlna-scan', true)
-  errorMessage.value = ''
-  dlnaScanLoaded.value = false
-  try {
-    dlnaScanResults.value = await mediaApi.listDlnaOutputs()
-    dlnaScanLoaded.value = true
-  } catch (error) {
-    errorMessage.value = (error as Error).message || String(error)
-  } finally {
-    setBusy('dlna-scan', false)
-  }
-}
-
-async function saveDlnaCandidate(candidate: DlnaCandidate) {
-  const location = candidate.endpoint?.trim()
-  if (!location) return
-  if (isDlnaLocationSaved(location)) {
-    showSuccess(label('DLNA 目标已存在', 'DLNA target already exists'))
-    return
-  }
-  const meta = candidate.meta ?? {}
-  const ipAddress = getString(meta.ip)
-  const port = typeof meta.port === 'number' ? meta.port : undefined
-  setBusy(`dlna-save-candidate-${candidate.id}`, true)
-  errorMessage.value = ''
-  try {
-    await api.userDevices.create({
-      name: candidate.name || `DLNA ${ipAddress || location}`,
-      props: {
-        device_type: 'dlna_renderer',
-        dlna_location: location,
-        dlna_udn: getString(meta.udn),
-        dlna_kind: meta.virtual ? 'virtual' : 'real',
-        dlna_device_type: getString(meta.device_type),
-        manufacturer: getString(meta.manufacturer),
-        model: getString(meta.model),
-        ...(ipAddress ? { ip_address: ipAddress } : {}),
-        ...(port != null ? { port } : {}),
-      },
-    })
-    await loadDevices()
-    showSuccess(label('DLNA 候选已保存', 'DLNA candidate saved'))
-  } catch (error) {
-    errorMessage.value = (error as Error).message || String(error)
-  } finally {
-    setBusy(`dlna-save-candidate-${candidate.id}`, false)
-  }
-}
-
-async function testDlnaLocation(location: string) {
-  const normalized = location.trim()
-  if (!normalized) return
-  setBusy(`dlna-test-${normalized}`, true)
-  dlnaTestResults.value = { ...dlnaTestResults.value, [normalized]: { ok: false, message: label('测试中', 'Testing') } }
-  try {
-    const result = await mediaApi.getDlnaStatus(normalized)
-    const state = result.data?.state || result.data?.transport_status || result.message || result.error || result.status
-    dlnaTestResults.value = {
-      ...dlnaTestResults.value,
-      [normalized]: { ok: result.status === 'success', message: String(state) },
-    }
-  } catch (error) {
-    dlnaTestResults.value = { ...dlnaTestResults.value, [normalized]: { ok: false, message: (error as Error).message || String(error) } }
-  } finally {
-    setBusy(`dlna-test-${normalized}`, false)
-  }
-}
-
 async function startMiQrLogin() {
   stopQrPolling()
   setBusy('mi-login', true)
@@ -643,24 +489,6 @@ async function loadMiCandidates() {
 
 function getString(value: unknown): string {
   return typeof value === 'string' ? value : ''
-}
-
-function endpointHost(value: string): string {
-  return value.split(':')[0]?.trim() ?? ''
-}
-
-function isDlnaLocationSaved(location: string): boolean {
-  const normalized = location.trim()
-  return devices.value.some((device) => getString(device.props?.dlna_location).trim() === normalized)
-}
-
-function dlnaKind(device: UserDevice): string {
-  const kind = getString(device.props?.dlna_kind)
-  return kind === 'virtual' ? label('虚拟', 'Virtual') : label('真实', 'Real')
-}
-
-function dlnaEndpoint(candidate: DlnaCandidate): string {
-  return candidate.endpoint || ''
 }
 
 </script>
@@ -817,110 +645,14 @@ function dlnaEndpoint(candidate: DlnaCandidate): string {
         @success="showSuccess"
       />
 
-      <section v-else-if="selectedLocal === 'dlna'" class="detail-surface">
-        <div class="detail-head">
-          <div>
-            <span class="eyebrow">{{ label('局域网账号', 'Local Network') }}</span>
-            <h2>DLNA</h2>
-          </div>
-          <span :class="['pill', dlnaBoundCount > 0 ? 'ok' : 'muted']">
-            {{ dlnaBoundCount }} {{ label('个目标', 'targets') }}
-          </span>
-        </div>
-
-        <div class="list-toolbar">
-          <div>
-            <strong>{{ label('媒体渲染目标', 'Media Render Targets') }}</strong>
-            <small>{{ label('真实 DLNA 与 HomeSense 虚拟 DLNA 都在这里统一保存。', 'Real DLNA and HomeSense virtual DLNA targets are saved here.') }}</small>
-          </div>
-          <div class="toolbar-actions">
-            <button class="plain-btn" :disabled="isBusy('dlna-scan')" @click="scanDlnaTargets">
-              {{ isBusy('dlna-scan') ? label('扫描中', 'Scanning') : label('扫描', 'Scan') }}
-            </button>
-            <button class="primary-btn" :disabled="isBusy('dlna-create')" @click="openCreateDlnaDevice">{{ label('新增目标', 'Add Target') }}</button>
-            <button class="plain-btn" :disabled="isBusy('devices')" @click="loadDevices">{{ label('刷新', 'Refresh') }}</button>
-          </div>
-        </div>
-
-        <section class="subsection">
-          <div class="subsection-head">
-            <div>
-              <strong>{{ label('扫描候选', 'Scan Candidates') }}</strong>
-              <small>{{ dlnaScanLoaded ? `${dlnaScanResults.length}` : label('按需扫描', 'Scan on demand') }}</small>
-            </div>
-          </div>
-          <div v-if="!dlnaScanLoaded" class="empty-line left">
-            {{ label('DLNA 通过 SSDP 在局域网发现渲染器。', 'DLNA discovers renderers through SSDP on the LAN.') }}
-          </div>
-          <div v-else-if="dlnaScanResults.length === 0" class="empty-line">
-            {{ label('没有发现 DLNA 渲染器。', 'No DLNA renderers found.') }}
-          </div>
-          <div v-else class="target-table">
-            <div class="target-row header">
-              <span>{{ label('名称', 'Name') }}</span>
-              <span>{{ label('地址', 'Endpoint') }}</span>
-              <span>{{ label('操作', 'Actions') }}</span>
-            </div>
-            <div v-for="candidate in dlnaScanResults" :key="candidate.id" class="target-row">
-              <div class="device-cell">
-                <strong>{{ candidate.name }}</strong>
-                <small>{{ candidate.meta?.virtual ? label('HomeSense 虚拟 DLNA', 'HomeSense virtual DLNA') : (candidate.meta?.manufacturer || 'DLNA') }}</small>
-              </div>
-              <div class="endpoint-cell">
-                <code>{{ dlnaEndpoint(candidate) }}</code>
-                <small v-if="dlnaTestResults[dlnaEndpoint(candidate)]" :class="['probe-result', dlnaTestResults[dlnaEndpoint(candidate)].ok ? 'ok-text' : 'bad-text']">
-                  {{ dlnaTestResults[dlnaEndpoint(candidate)].message }}
-                </small>
-              </div>
-              <div class="row-actions">
-                <button class="plain-btn compact" :disabled="!dlnaEndpoint(candidate) || isBusy(`dlna-test-${dlnaEndpoint(candidate)}`)" @click="testDlnaLocation(dlnaEndpoint(candidate))">
-                  {{ label('测试', 'Test') }}
-                </button>
-                <button class="primary-btn compact" :disabled="!dlnaEndpoint(candidate) || isDlnaLocationSaved(dlnaEndpoint(candidate)) || isBusy(`dlna-save-candidate-${candidate.id}`)" @click="saveDlnaCandidate(candidate)">
-                  {{ isDlnaLocationSaved(dlnaEndpoint(candidate)) ? label('已保存', 'Saved') : label('保存', 'Save') }}
-                </button>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <div v-if="dlnaRows.length === 0" class="empty-line">
-          {{ label('还没有 DLNA 目标。', 'No DLNA targets yet.') }}
-        </div>
-
-        <div v-else class="target-table">
-          <div class="target-row header">
-            <span>{{ label('名称', 'Name') }}</span>
-            <span>{{ label('地址', 'Endpoint') }}</span>
-            <span>{{ label('操作', 'Actions') }}</span>
-          </div>
-          <div v-for="row in dlnaRows" :key="row.device.id" class="target-row">
-            <div class="device-cell">
-              <strong>{{ row.device.name }}</strong>
-              <small>{{ dlnaKind(row.device) }} · {{ row.device.props?.manufacturer || row.device.props?.model || 'DLNA' }}</small>
-            </div>
-
-            <div class="endpoint-cell">
-              <code>{{ row.device.props?.dlna_location }}</code>
-              <small v-if="dlnaTestResults[getString(row.device.props?.dlna_location)]" :class="['probe-result', dlnaTestResults[getString(row.device.props?.dlna_location)].ok ? 'ok-text' : 'bad-text']">
-                {{ dlnaTestResults[getString(row.device.props?.dlna_location)].message }}
-              </small>
-            </div>
-
-            <div class="row-actions">
-              <button class="plain-btn compact" :disabled="isBusy(`dlna-test-${row.device.props?.dlna_location}`)" @click="testDlnaLocation(getString(row.device.props?.dlna_location))">
-                {{ label('测试', 'Test') }}
-              </button>
-              <button class="plain-btn compact" :disabled="isBusy(`dlna-edit-${row.device.id}`)" @click="openEditDlnaDevice(row.device)">
-                {{ label('编辑', 'Edit') }}
-              </button>
-              <button class="danger-btn compact" :disabled="isBusy(`dlna-delete-${row.device.id}`)" @click="deleteDlnaDevice(row.device)">
-                {{ label('删除', 'Delete') }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
+      <DlnaAuthPanel
+        v-else-if="selectedLocal === 'dlna'"
+        ref="dlnaAuthPanel"
+        :label="label"
+        @count-change="dlnaBoundCount = $event"
+        @error="errorMessage = $event"
+        @success="showSuccess"
+      />
 
       <section v-else-if="selectedLocal === 'streaming'" class="detail-surface">
         <div class="detail-head">
@@ -992,43 +724,6 @@ function dlnaEndpoint(candidate: DlnaCandidate): string {
       />
     </section>
 
-    <Teleport to="body">
-      <div v-if="dlnaFormOpen" class="dialog-overlay" @click.self="closeDlnaForm">
-        <form class="dialog-panel" @submit.prevent="submitDlnaDevice">
-          <div class="dialog-head">
-            <div>
-              <span class="eyebrow">{{ label('DLNA 目标', 'DLNA Target') }}</span>
-              <h2>{{ editingDlnaDevice ? label('编辑目标', 'Edit Target') : label('新增目标', 'Add Target') }}</h2>
-            </div>
-            <button type="button" class="plain-btn compact" @click="closeDlnaForm">{{ label('关闭', 'Close') }}</button>
-          </div>
-
-          <div class="form-grid">
-            <label class="form-field">
-              <span>{{ label('名称', 'Name') }}</span>
-              <input v-model="formDlnaName" class="form-input" :placeholder="label('客厅音箱 DLNA', 'Living Room Speaker DLNA')" />
-            </label>
-
-            <label class="form-field full">
-              <span>Location URL</span>
-              <input v-model="formDlnaLocation" class="form-input" placeholder="http://192.168.31.20:8200/description.xml" />
-            </label>
-          </div>
-
-          <div class="dialog-actions">
-            <button type="button" class="plain-btn" @click="closeDlnaForm">{{ label('取消', 'Cancel') }}</button>
-            <button
-              type="submit"
-              class="primary-btn"
-              :disabled="!formDlnaName.trim() || !formDlnaLocation.trim() || isBusy('dlna-create') || (editingDlnaDevice ? isBusy(`dlna-edit-${editingDlnaDevice.id}`) : false)"
-            >
-              {{ editingDlnaDevice ? label('保存', 'Save') : label('创建', 'Create') }}
-            </button>
-          </div>
-        </form>
-      </div>
-
-    </Teleport>
   </div>
 </template>
 
@@ -1089,7 +784,6 @@ h2 {
 
 .head-actions,
 .account-actions,
-.toolbar-actions,
 .row-actions,
 .subsection-head {
   display: flex;
@@ -1118,9 +812,7 @@ h2 {
 .scope-tab strong,
 .provider-item strong,
 .account-main strong,
-.subsection-head strong,
-.list-toolbar strong,
-.device-cell strong {
+.subsection-head strong {
   color: var(--text-primary);
   font-size: 15px;
   font-weight: 900;
@@ -1134,10 +826,7 @@ h2 {
 .token-line,
 .qr-copy span,
 .subsection-head small,
-.empty-line,
-.list-toolbar small,
-.device-cell small,
-.endpoint-cell small {
+.empty-line {
   color: var(--text-tertiary);
   font-size: 13px;
   font-weight: 700;
@@ -1216,8 +905,7 @@ h2 {
 
 .detail-head,
 .mi-account,
-.qr-row,
-.list-toolbar {
+.qr-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1226,27 +914,21 @@ h2 {
 
 .mi-account,
 .qr-row,
-.list-toolbar,
 .empty-line,
-.candidate-row,
-.target-row {
+.candidate-row {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   background: #ffffff;
 }
 
 .mi-account,
-.qr-row,
-.list-toolbar {
+.qr-row {
   padding: 16px;
 }
 
 .account-main,
 .qr-copy,
-.list-toolbar > div,
-.subsection-head > div,
-.device-cell,
-.endpoint-cell {
+.subsection-head > div {
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -1297,8 +979,7 @@ h2 {
 }
 
 .subsection,
-.candidate-table,
-.target-table {
+.candidate-table {
   display: grid;
   gap: 8px;
 }
@@ -1325,8 +1006,7 @@ h2 {
   align-items: center;
 }
 
-.candidate-row.header,
-.target-row.header {
+.candidate-row.header {
   min-height: 30px;
   border: 0;
   background: transparent;
@@ -1350,128 +1030,8 @@ code {
   font-weight: 800;
 }
 
-.target-row {
-  min-height: 52px;
-  padding: 11px;
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.35fr) minmax(190px, auto);
-  gap: 10px;
-  align-items: center;
-}
-
 .row-actions {
   justify-content: flex-end;
-}
-
-.toolbar-input {
-  width: 160px;
-  min-height: 34px;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  background: #fff;
-  color: var(--text-primary);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
-  font-weight: 800;
-  outline: none;
-  padding: 0 10px;
-}
-
-.toolbar-input:focus {
-  border-color: #14b8a6;
-  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.1);
-}
-
-.probe-result {
-  overflow-wrap: anywhere;
-}
-
-.ok-text {
-  color: #047857;
-}
-
-.bad-text {
-  color: #b91c1c;
-}
-
-.dialog-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  background: rgba(15, 23, 42, 0.32);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-}
-
-.dialog-panel {
-  width: min(480px, 100%);
-  max-height: 88vh;
-  overflow-y: auto;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.2);
-  padding: 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.dialog-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.form-field {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.form-field.full {
-  grid-column: 1 / -1;
-}
-
-.form-field span {
-  color: var(--text-tertiary);
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.form-input {
-  width: 100%;
-  min-height: 38px;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  background: #fff;
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 800;
-  outline: none;
-  padding: 0 10px;
-}
-
-.form-input:focus {
-  border-color: #14b8a6;
-  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.1);
-}
-
-.dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-wrap: wrap;
 }
 
 .plain-btn,
@@ -1579,14 +1139,6 @@ button:disabled {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .target-row,
-  .target-row.header {
-    grid-template-columns: 1fr;
-  }
-
-  .target-row.header {
-    display: none;
-  }
 }
 
 @media (max-width: 760px) {
@@ -1597,21 +1149,15 @@ button:disabled {
   .page-head,
   .detail-head,
   .mi-account,
-  .qr-row,
-  .list-toolbar {
+  .qr-row {
     align-items: flex-start;
     flex-direction: column;
   }
 
   .scope-tabs,
   .provider-rail,
-  .form-grid,
   .candidate-row {
     grid-template-columns: 1fr;
-  }
-
-  .form-field.full {
-    grid-column: auto;
   }
 
   .qr-frame {
