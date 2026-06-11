@@ -9,6 +9,7 @@ import { skillApi } from '@/api/skills'
 import type { SkillRecord } from '@/api/skills'
 import AssetDomainBrief from '@/components/assets/AssetDomainBrief.vue'
 import AssetDomainGrid from '@/components/assets/AssetDomainGrid.vue'
+import MemorySubtypeGrid from '@/components/assets/MemorySubtypeGrid.vue'
 import { useLocale } from '@/composables/useLocale'
 
 type AssetDomainKey = 'runtime_capability' | 'device_skill' | 'memory' | 'skill' | 'mcp_skill' | 'gateway'
@@ -500,25 +501,7 @@ function formatChinaTime(date: Date) {
             :label="label"
           />
 
-          <div class="memory-subtypes">
-            <article
-              v-for="item in memorySubtypes"
-              :key="item.key"
-              class="memory-subtype-card"
-            >
-              <div class="memory-subtype-head">
-                <span>{{ item.status }}</span>
-                <strong>{{ item.count === null ? label('待接入', 'Pending') : item.count }}</strong>
-              </div>
-              <h3>{{ item.title }}</h3>
-              <small>{{ item.source }}</small>
-              <p>{{ item.description }}</p>
-              <div class="retrieval-line">
-                <span>{{ label('召回方式', 'Retrieval') }}</span>
-                <p>{{ item.retrieval }}</p>
-              </div>
-            </article>
-          </div>
+          <MemorySubtypeGrid :items="memorySubtypes" :label="label" />
 
           <div class="memory-list-panel">
             <div class="memory-list-head">
@@ -801,8 +784,7 @@ h1 {
   grid-template-columns: 1fr;
 }
 
-.domain-detail article,
-.memory-subtype-card {
+.domain-detail article {
   min-height: 150px;
   padding: 18px;
   border: 1px solid rgba(226, 232, 240, 0.9);
@@ -810,8 +792,7 @@ h1 {
   background: #f8fafc;
 }
 
-.domain-detail article span,
-.retrieval-line span {
+.domain-detail article span {
   display: block;
   margin-bottom: 12px;
   color: var(--text-tertiary);
@@ -819,77 +800,11 @@ h1 {
   font-weight: 900;
 }
 
-.domain-detail article p,
-.memory-subtype-card p {
+.domain-detail article p {
   color: var(--text-secondary);
   font-size: 14px;
   font-weight: 700;
   line-height: 1.7;
-}
-
-.memory-subtypes {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.memory-subtype-card {
-  min-height: 260px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  background: #ffffff;
-}
-
-.memory-subtype-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.memory-subtype-head span {
-  width: fit-content;
-  padding: 3px 8px;
-  border-radius: 6px;
-  background: rgba(37, 99, 235, 0.1);
-  color: #1d4ed8;
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.memory-subtype-head strong {
-  color: #2563eb;
-  font-size: 18px;
-  font-weight: 950;
-}
-
-.memory-subtype-card h3 {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 17px;
-  font-weight: 900;
-  line-height: 1.3;
-}
-
-.memory-subtype-card small {
-  color: var(--text-tertiary);
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.retrieval-line {
-  margin-top: auto;
-  padding-top: 12px;
-  border-top: 1px solid rgba(226, 232, 240, 0.9);
-}
-
-.retrieval-line span {
-  margin-bottom: 6px;
-}
-
-.retrieval-line p {
-  font-size: 13px;
 }
 
 .memory-list-panel {
@@ -1217,10 +1132,6 @@ h1 {
 }
 
 @media (max-width: 1280px) {
-  .memory-subtypes {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .memory-item-list {
     grid-template-columns: 1fr;
   }
@@ -1241,7 +1152,6 @@ h1 {
   }
 
   .domain-detail main,
-  .memory-subtypes,
   .asset-index-grid {
     grid-template-columns: 1fr;
   }
