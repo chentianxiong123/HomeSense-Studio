@@ -119,10 +119,6 @@ function getRoomBackground(room: Room, fallback = 'rgba(255, 255, 255, 0.45)'): 
     : fallback
 }
 
-const selectedDevice = computed(() =>
-  devices.value.find((d) => d.id === selectedDeviceId.value) || null
-)
-
 const activeRooms = computed(() => {
   return rooms.value.filter((room) => {
     const layout = getRoomLayoutSource(room)
@@ -1037,35 +1033,7 @@ function typeLabel(t: string) {
   return opt ? (isZh.value ? opt.zh : opt.en) : t
 }
 
-// Simple dynamic grouping
-const groupingWithId = ref<number | null>(null)
 const groups = useDeviceGroups(devices)
-
-const groupCandidates = computed(() => {
-  if (!selectedDevice.value) return []
-  return groups.partnerCandidates.value(selectedDevice.value)
-})
-
-const currentGroupPartners = computed(() => {
-  return groups.partnersOf.value(selectedDevice.value)
-})
-
-async function bindGroupPartner() {
-  if (!selectedDevice.value || !groupingWithId.value) return
-  const partner = devices.value.find((d) => d.id === groupingWithId.value)
-  if (!partner) return
-  await groups.bindGroup({ primary: selectedDevice.value, partner })
-  groupingWithId.value = null
-  showSuccess(label('编组成功', 'Group bound'))
-}
-
-async function disbandGroup() {
-  if (!selectedDevice.value) return
-  const gid = selectedDevice.value.props?.group_id
-  if (typeof gid !== 'number') return
-  await groups.disbandGroup(gid)
-  showSuccess(label('编组已拆除', 'Group disbanded'))
-}
 
 // Generate connection lines inside room SVG
 function getRoomConnections(roomId: number) {
