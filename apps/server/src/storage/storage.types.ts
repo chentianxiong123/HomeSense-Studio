@@ -48,6 +48,7 @@ export interface StorageProtocolSpec {
     get: boolean
     remove: boolean
     copy: boolean
+    mkdir: boolean
     upload: boolean
     cross_mount_copy: boolean
   }

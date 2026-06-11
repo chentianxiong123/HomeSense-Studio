@@ -178,7 +178,7 @@ function requiredNames(value: unknown): string[] {
   if (!Array.isArray(value) || value.length === 0) throw new BadRequestException('names is required')
   return value.map((item) => {
     const name = String(item || '').trim()
-    if (!name || name.includes('/') || name.includes('\\')) throw new BadRequestException(`invalid name: ${name}`)
+    if (!name || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) throw new BadRequestException(`invalid name: ${name}`)
     return name
   })
 }

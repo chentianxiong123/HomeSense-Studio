@@ -31,6 +31,7 @@ Implemented:
 - SMB/NFS entries are supported as OS-mounted server paths. HomeSense stores the original share/export endpoint as metadata and uses `props.root_path` as the mounted local path.
 - Browser upload/download streams for local/WebDAV/SFTP/ADB/SMB/NFS through `/api/storage/fs/upload` and `/api/storage/fs/download`. ADB uses `adb-cli pull_file/push_file` plus server-side temp files to preserve the unified HTTP surface.
 - Cross-protocol file copy through the shared transfer layer. Same-mount native copy is still preferred when the protocol provides it; cross-mount copy streams source download into destination upload.
+- Cross-protocol directory copy through persisted background tasks. The task runner recursively lists source directories, creates destination directories with the unified `mkdir` capability, and streams files through the same download/upload bridge.
 - The storage workbench reuses `RemoteFileBrowserPanel` so ADB, remote-workspace, and system storage share the same browser surface.
 
 Not implemented:
@@ -42,7 +43,7 @@ Not implemented:
 - File preview/transcode.
 - Dynamic mount discovery.
 - Byte-level async copy progress. Current copy tasks are persisted in SQLite and report file-level progress, but not byte-level progress.
-- Cross-mount directory copy across protocols.
+- Resumable directory copy after restart. Interrupted tasks are marked as error and can be re-run manually.
 - Native SMB/NFS client drivers. Current support expects the server OS to mount those shares first.
 
 ## System Storage Mounts
@@ -93,6 +94,7 @@ POST /api/storage/fs/get
 POST /api/storage/fs/remove
 POST /api/storage/fs/copy
 POST /api/storage/fs/copy-task
+POST /api/storage/fs/mkdir
 GET  /api/storage/fs/download?path=...
 PUT  /api/storage/fs/upload?path=...
 GET  /api/storage/tasks
@@ -126,7 +128,7 @@ Different mount:
 StorageTransfer.download(srcPath) -> stream -> StorageTransfer.upload(dstPath)
 ```
 
-The current slice supports cross-mount file copy across local/WebDAV/SFTP/ADB/SMB/NFS. Copy tasks are stored in SQLite and update file-level progress; tasks that were queued or running during a server restart are marked as interrupted on the next boot. Cross-mount directory copy returns a clear unsupported error.
+The current slice supports cross-mount file and directory copy across local/WebDAV/SFTP/ADB/SMB/NFS. Synchronous `copy` is still best treated as a file/native-driver operation; `copy-task` is the unified recursive path and is the preferred entry for directories. Copy tasks are stored in SQLite and update file-level progress; tasks that were queued or running during a server restart are marked as interrupted on the next boot.
 
 ## Verification
 
@@ -149,5 +151,6 @@ cd apps/web
 
 - Add byte-level task progress once transfer streams expose counters.
 - Add resumable or restartable copy tasks if large file operations become common.
+- Add overwrite/conflict policies for directory copy instead of the current simple overwrite behavior.
 - Add a real AList/OpenList adapter fork only when a specific driver is needed.
 - Keep `RemoteFileBrowserPanel` as the shared HomeSense browser surface and add protocol-specific actions around it only when the workflow requires them.

@@ -858,6 +858,21 @@ def handle_push_file(params: dict) -> dict:
     return {"status": "success", "data": {"path": remote_path, "local_path": local_path}}
 
 
+def handle_mkdir_path(params: dict) -> dict:
+    ensure = handle_ensure_connected(params)
+    if ensure.get("status") != "success":
+        return ensure
+
+    remote_path = str(params.get("path") or params.get("dir") or "").strip()
+    if not remote_path or not remote_path.startswith("/"):
+        return {"status": "error", "error": "INVALID_PARAMS", "message": "path must be absolute"}
+
+    _, stderr, code = _run_device_cmd(params, ["shell", f"mkdir -p -- {shlex.quote(remote_path)}"], timeout=20)
+    if code != 0:
+        return {"status": "error", "error": "EXEC_FAILED", "message": stderr or "failed to create directory"}
+    return {"status": "success", "data": {"path": remote_path}}
+
+
 def handle_screenshot(params: dict) -> dict:
     try:
         from PIL import Image
