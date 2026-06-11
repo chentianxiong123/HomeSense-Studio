@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, type UserDevice, type Room, type MiDeviceCandidate } from '@/api'
 import { cliApi } from '@/api/cli'
+import DevicesCanvasHeader from '@/components/devices/DevicesCanvasHeader.vue'
 import DeviceCreatorDialog from '@/components/devices/DeviceCreatorDialog.vue'
 import { useLocale } from '@/composables/useLocale'
 import { useDeviceGroups } from '@/composables/useDeviceGroups'
@@ -1109,26 +1110,18 @@ function getRoomConnections(roomId: number) {
   <div class="devices-page-2d">
     <!-- Left interactive floor plan canvas (Takes Full Width) -->
     <main class="canvas-area glass-panel">
-      <header class="canvas-head">
-        <h2>{{ label('数字孪生 · 2D 房型布局', 'Digital Twin Canvas') }}</h2>
-        <div class="canvas-head-actions">
-          <span class="hint-pill">
-            {{ isEditMode ? label('编辑模式：拖拽房间或设备调整位置，右下角拉伸', 'Edit mode: drag rooms or devices to reposition; resize from bottom-right') : label('使用鼠标滚轮或双指进行「无级缩放 / 画布拖拽」', 'Scroll wheel or pinch zoom to zoom & pan canvas') }}
-          </span>
-          <button v-if="isEditMode" class="add-room-btn" type="button" :disabled="creating" @click="createRoomInView">
-            {{ creating ? label('创建中...', 'Creating...') : label('新增房间', 'Add Room') }}
-          </button>
-          <button v-if="isEditMode" class="add-device-btn" type="button" :disabled="creatingDevice || rooms.length === 0" @click="openDeviceCreator()">
-            {{ creatingDevice ? label('创建中...', 'Creating...') : label('新增设备', 'Add Device') }}
-          </button>
-          <button class="edit-mode-btn" :class="{ active: isEditMode }" type="button" @click="toggleEditMode">
-            {{ isEditMode ? label('退出编辑', 'Exit Edit') : label('编辑房间', 'Edit Rooms') }}
-          </button>
-          <button class="reset-zoom-btn" v-if="scale !== 1 || panX !== 0 || panY !== 0" @click="resetZoom">
-            {{ label('重置缩放', 'Reset View') }}
-          </button>
-        </div>
-      </header>
+      <DevicesCanvasHeader
+        :edit-mode="isEditMode"
+        :creating-room="creating"
+        :creating-device="creatingDevice"
+        :can-create-device="rooms.length > 0"
+        :has-viewport-offset="scale !== 1 || panX !== 0 || panY !== 0"
+        :label="label"
+        @create-room="createRoomInView"
+        @create-device="openDeviceCreator()"
+        @toggle-edit="toggleEditMode"
+        @reset-view="resetZoom"
+      />
 
       <!-- Viewport capturing mouse pan/zoom/touch -->
       <div
@@ -1354,122 +1347,6 @@ function getRoomConnections(roomId: number) {
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   display: flex;
   flex-direction: column;
-}
-
-.canvas-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  gap: 16px;
-}
-
-.canvas-head h2 {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 900;
-  color: var(--text-primary);
-  letter-spacing: -0.04em;
-}
-
-.canvas-head-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.hint-pill {
-  display: inline-block;
-  font-size: 13px;
-  font-weight: 700;
-  color: #10b981;
-  background: rgba(16, 185, 129, 0.1);
-  padding: 4px 12px;
-  border-radius: 8px;
-}
-
-.focus-back-btn, .reset-zoom-btn {
-  padding: 8px 18px;
-  border-radius: 10px;
-  font-weight: 800;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.focus-back-btn {
-  background: #10b981;
-  color: #fff;
-  border: 0;
-  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.25);
-}
-.focus-back-btn:hover { background: #059669; transform: translateY(-1px); }
-
-.reset-zoom-btn {
-  background: #fff;
-  color: var(--text-secondary);
-  border: 1px solid rgba(0,0,0,0.08);
-}
-.reset-zoom-btn:hover { border-color: #10b981; color: #10b981; }
-
-.add-room-btn,
-.add-device-btn {
-  padding: 8px 18px;
-  border-radius: 10px;
-  font-weight: 900;
-  cursor: pointer;
-  transition: all 0.2s;
-  background: #fff;
-  color: #059669;
-  border: 1px solid rgba(16, 185, 129, 0.24);
-  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.12);
-}
-
-.add-device-btn {
-  color: #2563eb;
-  border-color: rgba(37, 99, 235, 0.22);
-  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.1);
-}
-
-.add-room-btn:hover:not(:disabled),
-.add-device-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  background: #ecfdf5;
-}
-
-.add-device-btn:hover:not(:disabled) {
-  background: #eff6ff;
-}
-
-.add-room-btn:disabled,
-.add-device-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.edit-mode-btn {
-  padding: 8px 18px;
-  border-radius: 10px;
-  font-weight: 900;
-  cursor: pointer;
-  transition: all 0.2s;
-  background: #111827;
-  color: #fff;
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  box-shadow: 0 4px 14px rgba(17, 24, 39, 0.16);
-}
-
-.edit-mode-btn.active {
-  background: #10b981;
-  border-color: #10b981;
-  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.25);
-}
-
-.edit-mode-btn:hover {
-  transform: translateY(-1px);
 }
 
 /* 2D Viewport constraints - Dynamic size adaptation */
