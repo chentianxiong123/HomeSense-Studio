@@ -1,5 +1,3 @@
-import json
-import os
 import time
 
 import httpx
@@ -8,9 +6,16 @@ from mi_cli.api.auth import (
     _load_auth_data,
     _check_available,
     _request_api,
-    AUTH_DIR,
     API_BASE_URL,
 )
+from mi_cli.api.device_cache import (
+    _find_device_in_cache,
+    _get_cached_devices,
+    _load_device_cache,
+    _save_device_cache,
+)
+from mi_cli.api.device_errors import _map_error_code
+from mi_cli.api.device_model import _parse_device
 from mi_cli.api.spec import handle_spec_parse as _spec_parse_internal
 from mi_cli.capability.engine import (
     extract_device_type,
@@ -21,45 +26,6 @@ from mi_cli.capability.engine import (
     lookup_capability_for_property,
     build_discover_summary,
 )
-
-DEVICE_CACHE_FILE = os.path.join(AUTH_DIR, "devices.json")
-DEVICE_CACHE_TTL = 86400  # 24h
-
-
-def _find_device_in_cache(did: str) -> dict | None:
-    """Linear scan across cached devices by DID."""
-    cache = _load_device_cache()
-    for dev in cache.get("devices", []):
-        if dev.get("did") == did:
-            return dev
-    return None
-
-
-def _load_device_cache() -> dict:
-    if os.path.exists(DEVICE_CACHE_FILE):
-        try:
-            with open(DEVICE_CACHE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
-
-
-def _save_device_cache(data: dict):
-    os.makedirs(AUTH_DIR, exist_ok=True)
-    with open(DEVICE_CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
-
-def _get_cached_devices(renew: bool = False) -> tuple:
-    """对照 hass-xiaomi-miot async_get_devices: 读缓存→过期判断→API→存缓存"""
-    dat = _load_device_cache()
-    now = time.time()
-    cached = dat.get("devices") or []
-    homes = dat.get("homes") or []
-    if not renew and dat.get("update_time", 0) > (now - DEVICE_CACHE_TTL) and cached:
-        return cached, homes
-    return None, None
 
 
 def _get_home_owner(auth_data: dict, home_id: int) -> int:
@@ -200,24 +166,6 @@ def handle_discover_ir(command: dict) -> dict:
         return {"status": "error", "error": "NETWORK_TIMEOUT", "message": f"获取红外设备失败: {e}"}
 
     return {"status": "success", "data": {"controllers": controllers}}
-
-
-ERROR_CODE_MAP = {
-    "-10000": "UNKNOWN_ERROR",
-    "-10007": "DEVICE_OFFLINE",
-    "-10030": "TOKEN_EXPIRED",
-    "-10020": "DEVICE_NOT_FOUND",
-    "-10010": "INVALID_PARAMS",
-    "-10008": "RATE_LIMIT",
-    "-10006": "NETWORK_TIMEOUT",
-    "-10001": "AUTH_FAILED",
-    "-10014": "SPEC_NOT_FOUND",
-    "-10015": "ACTION_NOT_FOUND",
-}
-
-
-def _map_error_code(code) -> str:
-    return ERROR_CODE_MAP.get(str(code), "CLI_ERROR")
 
 
 def handle_get_prop(command: dict) -> dict:
@@ -656,42 +604,6 @@ def _get_devices_list(auth_data: dict, home_id: int) -> list:
         start_did = device_list[-1].get("did", "")
 
     return all_devices
-
-
-def _parse_device(dev: dict, home: dict) -> dict:
-    model = dev.get("model", "")
-    spec_type = dev.get("spec_type", dev.get("urn", ""))
-
-    connection_type = "wifi"
-    if dev.get("pid") == "8":
-        connection_type = "gateway"
-    elif "bluetooth" in model.lower() or dev.get("pid") == "6":
-        connection_type = "bt"
-    elif dev.get("ir_device_type"):
-        connection_type = "ir"
-
-    device_info = {
-        "did": dev.get("did", ""),
-        "model": model,
-        "name": dev.get("name", ""),
-        "manufacturer": dev.get("brand", dev.get("manufacturer", "")),
-        "connection_type": connection_type,
-        "parent_id": dev.get("parent_id", dev.get("parent_device_id", None)),
-        "spec_type": spec_type,
-        "home_id": home.get("id"),
-        "home_name": home.get("name", ""),
-        "room_name": dev.get("room_name", ""),
-        "features": [],
-        "entities": [],
-        "capability_profile": {
-            "device_type": "",
-            "domains": [],
-            "controls": {},
-            "supported_operations": [],
-        },
-    }
-
-    return device_info
 
 
 def _get_ir_controller_list(auth_data: dict, parent_did: str) -> list:

@@ -3,7 +3,6 @@ import hashlib
 import json
 import locale
 import os
-import pathlib
 import random
 import string
 import time
@@ -13,10 +12,17 @@ from urllib import parse
 import requests
 from mi_cli.crypto import decrypt, generate_enc_params, gen_nonce, get_signed_nonce, encrypt_rc4
 from mi_cli.api.auth_qr import generate_qr_code, check_login_status, reset_qr_state as qr_reset
-
-AUTH_DIR = os.environ.get("MI_CLI_CONFIG_DIR", os.path.expanduser("~/.cache/mi-cli"))
-AUTH_FILE = os.path.join(AUTH_DIR, "auth.json")
-QR_STATE_FILE = os.path.join(AUTH_DIR, "qr_state.json")
+from mi_cli.api.auth_store import (
+    AUTH_DIR,
+    AUTH_FILE,
+    QR_STATE_FILE,
+    _clear_qr_state,
+    _ensure_dir,
+    _load_auth_data,
+    _load_qr_state,
+    _save_auth_data,
+    _save_qr_state,
+)
 
 ACCOUNT_BASE = "https://account.xiaomi.com"
 SERVICE_LOGIN_URL = f"{ACCOUNT_BASE}/pass/serviceLogin"
@@ -27,48 +33,10 @@ MI_SID = "xiaomiio"
 UA = "Android-7.1.1-1.0.0-ONEPLUS A3010-136-%s APP/xiaomi.smarthome APPV/62830"
 
 
-def _ensure_dir():
-    pathlib.Path(AUTH_DIR).mkdir(parents=True, exist_ok=True)
-
-
 def _new_session() -> requests.Session:
     session = requests.Session()
     session.trust_env = False
     return session
-
-
-def _load_auth_data() -> dict:
-    _ensure_dir()
-    if os.path.exists(AUTH_FILE):
-        with open(AUTH_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-
-def _save_auth_data(data: dict):
-    _ensure_dir()
-    data["saveTime"] = int(time.time() * 1000)
-    with open(AUTH_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
-
-def _load_qr_state() -> dict:
-    _ensure_dir()
-    if os.path.exists(QR_STATE_FILE):
-        with open(QR_STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-
-def _save_qr_state(data: dict):
-    _ensure_dir()
-    with open(QR_STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
-
-def _clear_qr_state():
-    if os.path.exists(QR_STATE_FILE):
-        os.remove(QR_STATE_FILE)
 
 
 def _auth_fields_present(auth_data: dict) -> dict:
