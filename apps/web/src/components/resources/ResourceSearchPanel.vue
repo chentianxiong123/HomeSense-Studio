@@ -6,6 +6,9 @@ import { useLocale } from '@/composables/useLocale'
 const emit = defineEmits<{
   (event: 'select', url: string): void
   (event: 'sniff', hit: ResourceSearchHit): void
+  (event: 'play', hit: ResourceSearchHit): void
+  (event: 'queue', hit: ResourceSearchHit): void
+  (event: 'bookmark', hit: ResourceSearchHit): void
 }>()
 
 const { locale } = useLocale()
@@ -156,6 +159,10 @@ function primaryUrl(hit: ResourceSearchHit): string {
   const direct = hit.media_candidates?.find((candidate) => candidate.kind !== 'embed')
   return direct?.url || hit.url
 }
+
+function canDirectPlay(hit: ResourceSearchHit): boolean {
+  return Boolean(hit.media_candidates?.some((candidate) => candidate.kind !== 'embed'))
+}
 </script>
 
 <template>
@@ -230,6 +237,22 @@ function primaryUrl(hit: ResourceSearchHit): string {
           </span>
         </button>
         <div class="row-actions">
+          <button class="plain-icon accent" type="button" :disabled="!canDirectPlay(hit)" :title="label('播放', 'Play')" @click="emit('play', hit)">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          </button>
+          <button class="plain-icon" type="button" :disabled="!canDirectPlay(hit)" :title="label('加入队列', 'Add to queue')" @click="emit('queue', hit)">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
+              <path d="M12 5v14" />
+              <path d="M5 12h14" />
+            </svg>
+          </button>
+          <button class="plain-icon" type="button" :disabled="!canDirectPlay(hit)" :title="label('收藏', 'Bookmark')" @click="emit('bookmark', hit)">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m12 17.3-6.2 3.4 1.2-7.1-5.1-5 7.1-1L12 1.2l3.1 6.4 7.1 1-5.1 5 1.2 7.1z" />
+            </svg>
+          </button>
           <button class="plain-icon" type="button" :title="label('使用 URL', 'Use URL')" @click="emit('select', primaryUrl(hit))">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M10 13a5 5 0 0 0 7.07 0l2.12-2.12a5 5 0 0 0-7.07-7.07L11 4.93" />
@@ -348,6 +371,11 @@ h2 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.plain-icon.accent {
+  border-color: #0f766e;
+  color: #0f766e;
 }
 
 button:disabled {
