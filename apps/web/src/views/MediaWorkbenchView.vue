@@ -129,6 +129,33 @@ async function sniffResourceHit(hit: ResourceSearchHit) {
   await sniffMediaUrl()
 }
 
+async function playResourceHit(hit: ResourceSearchHit) {
+  const candidate = createResourceCandidate(hit)
+  if (!candidate) {
+    await sniffResourceHit(hit)
+    return
+  }
+  await playCandidate(candidate)
+}
+
+async function queueResourceHit(hit: ResourceSearchHit) {
+  const candidate = createResourceCandidate(hit)
+  if (!candidate) {
+    await sniffResourceHit(hit)
+    return
+  }
+  await queueCandidate(candidate)
+}
+
+async function bookmarkResourceHit(hit: ResourceSearchHit) {
+  const candidate = createResourceCandidate(hit)
+  if (!candidate) {
+    await sniffResourceHit(hit)
+    return
+  }
+  await bookmarkCandidate(candidate)
+}
+
 function applySourceSiteSniff(payload: { site: MediaSourceSite; candidates: MediaCandidate[] }) {
   urlInput.value = payload.site.url
   titleInput.value = payload.site.title
@@ -185,6 +212,31 @@ async function createCandidateItem(candidate: MediaCandidate): Promise<MediaItem
   } finally {
     preparingCandidateId.value = ''
   }
+}
+
+function createResourceCandidate(hit: ResourceSearchHit): MediaCandidate | null {
+  const media = hit.media_candidates?.find((candidate) => candidate.kind !== 'embed')
+  if (!media) return null
+  return {
+    id: `resource:${hit.id}:${media.url}`,
+    source: 'url',
+    kind: 'stream',
+    stream_kind: resourceStreamKind(media.kind),
+    title: hit.title || titleFromUrl(media.url),
+    url: media.url,
+    page_url: hit.url,
+    mime_type: media.mime_type,
+    thumbnail: hit.cover,
+    confidence: hit.confidence,
+    provider: hit.site_name || hit.source_name || 'Resource',
+  }
+}
+
+function resourceStreamKind(kind: string): MediaCandidate['stream_kind'] {
+  if (kind === 'audio') return 'audio'
+  if (kind === 'hls') return 'hls'
+  if (kind === 'dash') return 'dash'
+  return 'video'
 }
 
 function createUrlItem(): MediaItem | null {
@@ -533,6 +585,9 @@ function titleFromUrl(url: string): string {
         <ResourceSearchPanel
           @select="selectResourceUrl"
           @sniff="sniffResourceHit"
+          @play="playResourceHit"
+          @queue="queueResourceHit"
+          @bookmark="bookmarkResourceHit"
         />
 
         <div class="source-divider">
