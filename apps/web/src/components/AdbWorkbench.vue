@@ -4,6 +4,7 @@ import { cliApi } from '@/api/cli'
 import type { RemoteWorkspaceFileEntry, RemoteWorkspaceFileList, RemoteWorkspaceFilePreview } from '@/api/remoteWorkspace'
 import { streamingGatewayApi, type AdbScrcpySession } from '@/api/streamingGateway'
 import AdbAppsPanel from '@/components/adb/AdbAppsPanel.vue'
+import AdbControlPanel from '@/components/adb/AdbControlPanel.vue'
 import AdbFilesPanel from '@/components/adb/AdbFilesPanel.vue'
 import AdbInspectPanel from '@/components/adb/AdbInspectPanel.vue'
 import AdbScreenCapturePanel from '@/components/adb/AdbScreenCapturePanel.vue'
@@ -595,75 +596,23 @@ onBeforeUnmount(() => {
       <span v-if="errorMessage" class="feedback error">{{ errorMessage }}</span>
     </div>
 
-    <div v-if="activePanel === 'control'" class="panel-grid">
-      <div class="surface primary-control">
-        <div class="surface-head">
-          <h3>{{ label('遥控与输入', 'Remote And Input') }}</h3>
-          <button class="ghost-btn" :disabled="!!busy" @click="ensureConnected">{{ label('检查连接', 'Check') }}</button>
-        </div>
-        <div class="remote-grid">
-          <button :disabled="!!busy" @click="quickKey('home', label('已返回主页', 'Home sent'))">Home</button>
-          <button :disabled="!!busy" @click="quickKey('back', label('已返回', 'Back sent'))">Back</button>
-          <button :disabled="!!busy" @click="quickKey('enter', label('已确认', 'Enter sent'))">Enter</button>
-          <button :disabled="!!busy" @click="quickKey('volume_up', label('音量已增加', 'Volume up sent'))">Vol +</button>
-          <button :disabled="!!busy" @click="quickKey('volume_down', label('音量已降低', 'Volume down sent'))">Vol -</button>
-          <button :disabled="!!busy" @click="quickKey('power', label('电源键已发送', 'Power sent'))">Power</button>
-        </div>
-        <div class="inline-form">
-          <input v-model="textInput" :placeholder="label('输入文本', 'Input text')" @keydown.enter="sendText" />
-          <button :disabled="!!busy || !textInput.trim()" @click="sendText">{{ label('发送', 'Send') }}</button>
-        </div>
-        <div class="inline-form">
-          <input v-model="tapInput" placeholder="540,960" @keydown.enter="tapPoint" />
-          <button :disabled="!!busy || !tapInput.trim()" @click="tapPoint">{{ label('点击坐标', 'Tap') }}</button>
-        </div>
-      </div>
-
-      <div class="surface stack-surface">
-        <div class="surface-head">
-          <h3>{{ label('设备概览', 'Device Overview') }}</h3>
-          <button class="ghost-btn" :disabled="overviewLoading" @click="loadOverview(true)">{{ overviewLoading ? label('读取中', 'Loading') : label('刷新', 'Refresh') }}</button>
-        </div>
-        <div class="state-list">
-          <div>
-            <span>{{ label('设备', 'Device') }}</span>
-            <strong>{{ overview?.name || adbIp }}</strong>
-          </div>
-          <div>
-            <span>Android</span>
-            <strong>{{ overview?.android_version ? `Android ${overview.android_version} (API ${overview.sdk_version || '-'})` : '-' }}</strong>
-          </div>
-          <div>
-            <span>{{ label('型号', 'Model') }}</span>
-            <strong>{{ overview?.manufacturer || overview?.brand || '-' }} {{ overview?.model || '' }}</strong>
-          </div>
-          <div>
-            <span>{{ label('屏幕', 'Screen') }}</span>
-            <strong>{{ overview?.screen?.resolution || '-' }} <small v-if="overview?.screen?.density">{{ overview.screen.density }} dpi</small></strong>
-          </div>
-          <div>
-            <span>{{ label('内存', 'Memory') }}</span>
-            <strong>{{ usageText(overview?.memory) }}</strong>
-          </div>
-          <div>
-            <span>{{ label('存储', 'Storage') }}</span>
-            <strong>{{ usageText(overview?.storage) }}</strong>
-          </div>
-          <div>
-            <span>{{ label('电池', 'Battery') }}</span>
-            <strong>{{ overview?.battery?.level ? `${overview.battery.level}%` : '-' }} <small v-if="overview?.battery?.temperature_c">{{ overview.battery.temperature_c }} C</small></strong>
-          </div>
-          <div>
-            <span>{{ label('网络', 'Network') }}</span>
-            <code>{{ overview?.network?.ip || '-' }} {{ overview?.network?.mac || '' }}</code>
-          </div>
-          <div>
-            <span>{{ label('当前应用', 'Current App') }}</span>
-            <code>{{ currentApp?.current_app || label('未读取', 'Not loaded') }}</code>
-          </div>
-        </div>
-      </div>
-    </div>
+    <AdbControlPanel
+      v-if="activePanel === 'control'"
+      v-model:text-input="textInput"
+      v-model:tap-input="tapInput"
+      :adb-ip="adbIp"
+      :busy="!!busy"
+      :overview-loading="overviewLoading"
+      :overview="overview"
+      :current-app="currentApp"
+      :label="label"
+      :usage-text="usageText"
+      @check="ensureConnected"
+      @quick-key="quickKey"
+      @send-text="sendText"
+      @tap-point="tapPoint"
+      @refresh-overview="loadOverview(true)"
+    />
 
     <div v-else-if="activePanel === 'screen'" class="screen-grid">
       <AdbScreenCapturePanel
@@ -767,7 +716,6 @@ onBeforeUnmount(() => {
 }
 
 .workbench-head,
-.surface-head,
 .feedback-row {
   display: flex;
   align-items: center;
@@ -820,9 +768,7 @@ code {
 }
 
 .panel-tab,
-.ghost-btn,
-.inline-form button,
-.remote-grid button {
+.surface button {
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   background: #fff;
@@ -871,12 +817,6 @@ code {
 .feedback.ok { background: #ecfdf5; color: #047857; }
 .feedback.error { background: #fef2f2; color: #dc2626; }
 
-.panel-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
-  gap: 14px;
-}
-
 .surface {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
@@ -884,73 +824,9 @@ code {
   padding: 16px;
 }
 
-.surface-head { margin-bottom: 14px; }
-.ghost-btn { padding: 7px 11px; }
-.ghost-btn:hover:not(:disabled),
-.inline-form button:hover:not(:disabled),
-.remote-grid button:hover:not(:disabled) {
-  border-color: #2563eb;
-  color: #1d4ed8;
-  background: #eff6ff;
-}
-
 button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
-}
-
-.remote-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.remote-grid button {
-  min-height: 40px;
-}
-
-.inline-form {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.inline-form input {
-  flex: 1;
-  min-width: 0;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  background: #fff;
-  padding: 9px 11px;
-  color: #0f172a;
-  font: inherit;
-  font-size: 14px;
-}
-
-.inline-form button { padding: 8px 12px; }
-
-.state-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.state-list div {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.state-list span {
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.state-list strong {
-  color: #0f172a;
-  font-size: 14px;
 }
 
 .full-surface { min-height: 320px; }
@@ -982,14 +858,11 @@ button:disabled {
 }
 
 @media (max-width: 900px) {
-  .workbench-head,
-  .surface-head {
+  .workbench-head {
     align-items: stretch;
     flex-direction: column;
   }
   .endpoint-box { align-items: flex-start; }
-  .panel-grid { grid-template-columns: 1fr; }
   .screen-grid { grid-template-columns: 1fr; }
-  .remote-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 </style>
