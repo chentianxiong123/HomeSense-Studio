@@ -6,6 +6,7 @@ import { cliApi } from '@/api/cli'
 import DeviceNodeIcon from '@/components/devices/DeviceNodeIcon.vue'
 import DevicesCanvasHeader from '@/components/devices/DevicesCanvasHeader.vue'
 import DeviceCreatorDialog from '@/components/devices/DeviceCreatorDialog.vue'
+import RoomConnectionLines, { type RoomConnectionLine } from '@/components/devices/RoomConnectionLines.vue'
 import RoomSettingsDialog from '@/components/devices/RoomSettingsDialog.vue'
 import { useLocale } from '@/composables/useLocale'
 import { useDeviceGroups } from '@/composables/useDeviceGroups'
@@ -1072,7 +1073,7 @@ function getRoomConnections(roomId: number) {
   if (!room) return []
   const roomLayout = getRoomLayout(room)
   const roomDevices = devices.value.filter((d) => propNumber(d, 'room_id') === roomId)
-  const lines: Array<{ x1: number; y1: number; x2: number; y2: number; id: string }> = []
+  const lines: RoomConnectionLine[] = []
   const processed = new Set<string>()
   const nodeOffset = { x: 24, y: 24 }
 
@@ -1162,17 +1163,7 @@ function getRoomConnections(roomId: number) {
             @dblclick="handleRoomDblClick(room)"
           >
             <!-- SVG Connector Lines for Groups inside Room -->
-            <svg class="room-connections-svg">
-              <line
-                v-for="line in getRoomConnections(room.id)"
-                :key="line.id"
-                :x1="line.x1"
-                :y1="line.y1"
-                :x2="line.x2"
-                :y2="line.y2"
-                class="connection-line"
-              />
-            </svg>
+            <RoomConnectionLines :lines="getRoomConnections(room.id)" />
 
             <div class="room-title">
               <span class="room-dot"></span>
@@ -1401,27 +1392,6 @@ function getRoomConnections(roomId: number) {
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
 }
 
-/* Room connection SVG */
-.room-connections-svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
-.connection-line {
-  stroke: rgba(99, 102, 241, 0.35);
-  stroke-width: 2.5;
-  stroke-dasharray: 6, 4;
-  animation: group-flow 2s linear infinite;
-}
-
-@keyframes group-flow {
-  from { stroke-dashoffset: 20; }
-  to { stroke-dashoffset: 0; }
-}
-
 .room-title {
   display: flex;
   align-items: center;
@@ -1517,159 +1487,6 @@ function getRoomConnections(roomId: number) {
   justify-content: center;
   pointer-events: none;
 }
-
-/* Floating Bottom Drawer Modal for Device Details (legacy, no longer used) */
-.bottom-card-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.15);
-  backdrop-filter: blur(4px);
-  z-index: 1000;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  animation: overlayFade 0.25s ease;
-}
-
-.bottom-panel {
-  width: min(440px, 100%);
-  border-radius: 32px 32px 0 0 !important;
-  background: #fff;
-  border: 1px solid rgba(229, 231, 235, 0.5);
-  box-shadow: 0 -10px 48px rgba(15, 23, 42, 0.12);
-  padding: 32px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  animation: panelSlideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-sizing: border-box;
-}
-
-.bp-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
-  padding-bottom: 12px;
-}
-
-.bp-badge {
-  font-size: 11px;
-  font-weight: 900;
-  color: #10b981;
-  background: rgba(16, 185, 129, 0.08);
-  padding: 4px 10px;
-  border-radius: 6px;
-  text-transform: uppercase;
-}
-
-.bp-head h3 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 900;
-  color: var(--text-primary);
-}
-
-.bp-indicator {
-  font-size: 12px;
-  font-weight: 800;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.bp-indicator::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-.bp-indicator.online { color: #10b981; }
-.bp-indicator.online::before { background: #10b981; }
-.bp-indicator.offline { color: #ef4444; }
-.bp-indicator.offline::before { background: #ef4444; }
-
-.bp-body {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.bp-props {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-secondary);
-}
-
-.bp-group-mgmt {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.bp-select {
-  flex: 1;
-  padding: 8px 12px;
-  border: 1px solid #cbd5e1;
-  border-radius: 10px;
-  font-size: 13px;
-  background: #fff;
-}
-
-.bp-bind-btn {
-  padding: 0 16px;
-  background: #6366f1;
-  color: #fff;
-  border: 0;
-  border-radius: 10px;
-  cursor: pointer;
-  font-weight: 900;
-}
-
-.bp-bind-btn:disabled { opacity: 0.4; }
-
-.bp-disband-btn {
-  background: #fef2f2;
-  color: #dc2626;
-  border: 1px solid #fecaca;
-  padding: 10px;
-  border-radius: 10px;
-  font-size: 13px;
-  font-weight: 800;
-  cursor: pointer;
-  margin-top: 8px;
-}
-
-.bp-actions {
-  display: flex;
-  gap: 10px;
-}
-
-.bp-main-btn, .bp-close-btn {
-  flex: 1;
-  height: 44px;
-  border-radius: 12px;
-  font-size: 14px;
-  font-weight: 800;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.bp-main-btn {
-  background: #10b981;
-  color: #fff;
-  border: 0;
-}
-.bp-main-btn:hover { background: #059669; }
-
-.bp-close-btn {
-  background: #fff;
-  border: 1px solid rgba(0,0,0,0.08);
-  color: var(--text-secondary);
-}
-.bp-close-btn:hover { border-color: #10b981; color: #10b981; }
 
 @keyframes overlayFade {
   from { opacity: 0; }
