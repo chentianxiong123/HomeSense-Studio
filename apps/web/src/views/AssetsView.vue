@@ -7,6 +7,7 @@ import { mcpApi, type McpServerRecord } from '@/api/mcp'
 import { runtimeCapabilityApi, type RuntimeCapabilityMap, type RuntimeCapabilitySurface } from '@/api/runtimeCapabilities'
 import { skillApi } from '@/api/skills'
 import type { SkillRecord } from '@/api/skills'
+import AssetDomainGrid from '@/components/assets/AssetDomainGrid.vue'
 import { useLocale } from '@/composables/useLocale'
 
 type AssetDomainKey = 'runtime_capability' | 'device_skill' | 'memory' | 'skill' | 'mcp_skill' | 'gateway'
@@ -418,21 +419,12 @@ function formatChinaTime(date: Date) {
 
     <div v-if="errorMessage" class="error-line">{{ errorMessage }}</div>
 
-    <section class="domain-grid">
-      <button
-        v-for="domain in domains"
-        :key="domain.key"
-        type="button"
-        :class="['domain-card', { active: selectedDomainKey === domain.key, planned: domain.count === null }]"
-        :style="{ '--accent': domain.accent }"
-        @click="selectDomain(domain.key)"
-      >
-        <span class="domain-status">{{ domain.status }}</span>
-        <strong>{{ domain.title }}</strong>
-        <small>{{ domain.subtitle }}</small>
-        <span class="domain-count">{{ domain.count === null ? label('待接入', 'Pending') : domain.count }}</span>
-      </button>
-    </section>
+    <AssetDomainGrid
+      :domains="domains"
+      :selected-key="selectedDomainKey"
+      :label="label"
+      @select="selectDomain"
+    />
 
     <section class="domain-detail">
       <aside>
@@ -807,69 +799,6 @@ h1 {
   color: #b91c1c;
   font-size: 13px;
   font-weight: 800;
-}
-
-.domain-grid {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 14px;
-  margin-top: 20px;
-}
-
-.domain-card {
-  min-height: 176px;
-  padding: 18px;
-  border: 1px solid rgba(203, 213, 225, 0.75);
-  border-radius: 8px;
-  background: #ffffff;
-  text-align: left;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
-}
-
-.domain-card:hover,
-.domain-card.active {
-  transform: translateY(-3px);
-  border-color: var(--accent);
-  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.08);
-}
-
-.domain-card.planned {
-  background: rgba(255, 255, 255, 0.62);
-}
-
-.domain-status {
-  width: fit-content;
-  padding: 3px 8px;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.domain-card strong {
-  color: var(--text-primary);
-  font-size: 18px;
-  font-weight: 900;
-  line-height: 1.25;
-}
-
-.domain-card small {
-  flex: 1;
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 750;
-  line-height: 1.5;
-}
-
-.domain-count {
-  color: var(--accent);
-  font-size: 22px;
-  font-weight: 950;
 }
 
 .domain-detail {
@@ -1331,10 +1260,6 @@ h1 {
 }
 
 @media (max-width: 1280px) {
-  .domain-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
   .memory-subtypes {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1358,7 +1283,6 @@ h1 {
     padding: 16px;
   }
 
-  .domain-grid,
   .domain-detail main,
   .memory-brief,
   .memory-subtypes,
