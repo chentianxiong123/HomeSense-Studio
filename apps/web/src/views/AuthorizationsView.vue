@@ -5,6 +5,7 @@ import { api } from '@/api'
 import { streamingGatewayApi, type MoonlightWebRuntimeStatus, type StreamingHost, type StreamingHostProbe } from '@/api/streamingGateway'
 import AdbAuthPanel from '@/components/auth/AdbAuthPanel.vue'
 import AuthPageHeader from '@/components/auth/AuthPageHeader.vue'
+import AuthProviderRail, { type AuthProviderItem } from '@/components/auth/AuthProviderRail.vue'
 import AuthScopeTabs from '@/components/auth/AuthScopeTabs.vue'
 import DlnaAuthPanel from '@/components/auth/DlnaAuthPanel.vue'
 import MiAuthPanel from '@/components/auth/MiAuthPanel.vue'
@@ -17,7 +18,6 @@ type AuthTab = 'external' | 'local'
 type ExternalProviderId = 'mi' | 'bilibili'
 type LocalProviderId = 'adb' | 'dlna' | 'streaming' | 'alist' | 'ssh' | 'frp' | 'smb'
 
-type ProviderTone = 'ok' | 'warn' | 'bad' | 'muted'
 type MiStatusSummary = { loggedIn: boolean; boundCount: number }
 
 const router = useRouter()
@@ -97,7 +97,7 @@ type StreamingGatewaySpec = {
   capabilities: string[]
 }
 
-const externalProviders = computed(() => [
+const externalProviders = computed<AuthProviderItem<ExternalProviderId>[]>(() => [
   {
     id: 'mi' as const,
     name: 'Mi',
@@ -116,7 +116,7 @@ const externalProviders = computed(() => [
   },
 ])
 
-const localProviders = computed(() => [
+const localProviders = computed<AuthProviderItem<LocalProviderId>[]>(() => [
   {
     id: 'adb' as const,
     name: 'ADB',
@@ -349,19 +349,7 @@ function openStreamingRuntime() {
     <AuthScopeTabs v-model:active-tab="activeTab" :label="label" />
 
     <section v-if="activeTab === 'external'" class="workspace">
-      <aside class="provider-rail">
-        <button
-          v-for="provider in externalProviders"
-          :key="provider.id"
-          :class="['provider-item', { active: selectedExternal === provider.id }]"
-          @click="selectedExternal = provider.id"
-        >
-          <span :class="['dot', provider.tone]" />
-          <strong>{{ provider.name }}</strong>
-          <small>{{ provider.subtitle }}</small>
-          <em>{{ provider.status }} · {{ provider.meta }}</em>
-        </button>
-      </aside>
+      <AuthProviderRail :providers="externalProviders" :selected="selectedExternal" @select="selectedExternal = $event" />
 
       <MiAuthPanel
         v-if="selectedExternal === 'mi'"
@@ -385,19 +373,7 @@ function openStreamingRuntime() {
     </section>
 
     <section v-else class="workspace">
-      <aside class="provider-rail">
-        <button
-          v-for="provider in localProviders"
-          :key="provider.id"
-          :class="['provider-item', { active: selectedLocal === provider.id }]"
-          @click="selectedLocal = provider.id"
-        >
-          <span :class="['dot', provider.tone]" />
-          <strong>{{ provider.name }}</strong>
-          <small>{{ provider.subtitle }}</small>
-          <em>{{ provider.status }} · {{ provider.meta }}</em>
-        </button>
-      </aside>
+      <AuthProviderRail :providers="localProviders" :selected="selectedLocal" @select="selectedLocal = $event" />
 
       <AdbAuthPanel
         v-if="selectedLocal === 'adb'"
@@ -502,7 +478,6 @@ function openStreamingRuntime() {
 }
 
 .detail-surface,
-.provider-item,
 .notice {
   border: 1px solid #e2e8f0;
   background: #fff;
@@ -535,25 +510,11 @@ h2 {
   flex-wrap: wrap;
 }
 
-.provider-item strong {
-  color: var(--text-primary);
-  font-size: 15px;
-  font-weight: 900;
-  letter-spacing: 0;
-}
-
-.provider-item small,
-.provider-item em,
 .empty-line {
   color: var(--text-tertiary);
   font-size: 13px;
   font-weight: 700;
   line-height: 1.45;
-}
-
-.provider-item.active {
-  border-color: #14b8a6;
-  background: #f0fdfa;
 }
 
 .workspace {
@@ -563,52 +524,9 @@ h2 {
   align-items: start;
 }
 
-.provider-rail {
-  display: grid;
-  gap: 8px;
-}
-
-.provider-item {
-  min-height: 86px;
-  border-radius: 8px;
-  padding: 13px 14px;
-  cursor: pointer;
-  text-align: left;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  column-gap: 9px;
-  row-gap: 4px;
-}
-
-.provider-item strong,
-.provider-item small,
-.provider-item em {
-  grid-column: 2;
-}
-
-.provider-item em {
-  font-style: normal;
-}
-
-.dot {
-  width: 9px;
-  height: 9px;
-  margin-top: 5px;
-  border-radius: 999px;
-  background: #94a3b8;
-}
-
 .ok,
-.dot.ok {
+.pill.ok {
   background: #10b981;
-}
-
-.dot.warn {
-  background: #f59e0b;
-}
-
-.dot.bad {
-  background: #ef4444;
 }
 
 .detail-surface {
@@ -746,11 +664,6 @@ button:disabled {
   .workspace {
     grid-template-columns: 1fr;
   }
-
-  .provider-rail {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
 }
 
 @media (max-width: 760px) {
@@ -763,8 +676,5 @@ button:disabled {
     flex-direction: column;
   }
 
-  .provider-rail {
-    grid-template-columns: 1fr;
-  }
 }
 </style>
