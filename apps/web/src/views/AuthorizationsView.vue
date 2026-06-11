@@ -5,6 +5,7 @@ import { api } from '@/api'
 import { streamingGatewayApi, type MoonlightWebRuntimeStatus, type StreamingHost, type StreamingHostProbe } from '@/api/streamingGateway'
 import AdbAuthPanel from '@/components/auth/AdbAuthPanel.vue'
 import AuthPageHeader from '@/components/auth/AuthPageHeader.vue'
+import AuthPendingPanel from '@/components/auth/AuthPendingPanel.vue'
 import AuthProviderRail, { type AuthProviderItem } from '@/components/auth/AuthProviderRail.vue'
 import AuthScopeTabs from '@/components/auth/AuthScopeTabs.vue'
 import DlnaAuthPanel from '@/components/auth/DlnaAuthPanel.vue'
@@ -360,16 +361,13 @@ function openStreamingRuntime() {
         @success="showSuccess"
       />
 
-      <section v-else class="detail-surface">
-        <div class="detail-head">
-          <div>
-            <span class="eyebrow">{{ label('外部账号', 'External') }}</span>
-            <h2>Bilibili</h2>
-          </div>
-          <span class="pill muted">{{ label('待接入', 'Pending') }}</span>
-        </div>
-        <div class="empty-line left">{{ label('Bilibili cookie、token 和媒体解析授权归这里。', 'Bilibili cookies, tokens, and media auth belong here.') }}</div>
-      </section>
+      <AuthPendingPanel
+        v-else
+        :scope="label('外部账号', 'External')"
+        title="Bilibili"
+        :description="label('Bilibili cookie、token 和媒体解析授权归这里。', 'Bilibili cookies, tokens, and media auth belong here.')"
+        :label="label"
+      />
     </section>
 
     <section v-else class="workspace">
@@ -460,6 +458,22 @@ function openStreamingRuntime() {
         @count-change="sshTargetCount = $event"
         @error="errorMessage = $event"
         @success="showSuccess"
+      />
+
+      <AuthPendingPanel
+        v-else-if="selectedLocal === 'frp'"
+        :scope="label('局域网账号', 'Local Network')"
+        title="FRP"
+        :description="label('FRP 内网穿透凭据和节点授权归这里。', 'FRP tunnel credentials and node authorization belong here.')"
+        :label="label"
+      />
+
+      <AuthPendingPanel
+        v-else-if="selectedLocal === 'smb'"
+        :scope="label('局域网账号', 'Local Network')"
+        title="SMB"
+        :description="label('SMB 共享目录账号和访问凭据归这里。', 'SMB share accounts and access credentials belong here.')"
+        :label="label"
       />
     </section>
 
