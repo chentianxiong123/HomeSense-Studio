@@ -5,6 +5,7 @@ import type { ResourceSearchHit } from '@/api/resources'
 import BilibiliSearchPanel from '@/components/media/BilibiliSearchPanel.vue'
 import MediaBookmarksPanel from '@/components/media/MediaBookmarksPanel.vue'
 import MediaOutputPanel from '@/components/media/MediaOutputPanel.vue'
+import MediaQueuePanel from '@/components/media/MediaQueuePanel.vue'
 import MediaUrlSniffPanel from '@/components/media/MediaUrlSniffPanel.vue'
 import ResourceSearchPanel from '@/components/resources/ResourceSearchPanel.vue'
 import { useLocale } from '@/composables/useLocale'
@@ -33,7 +34,6 @@ const bookmarksPanel = ref<InstanceType<typeof MediaBookmarksPanel> | null>(null
 const activeItem = player.currentItem
 const queue = player.queue
 const session = computed(() => player.state.session)
-const hasQueue = computed(() => queue.value.length > 0)
 const sessionDetail = computed(() => {
   const item = session.value.item
   if (!item) return label('无会话', 'No session')
@@ -669,47 +669,17 @@ function titleFromUrl(url: string): string {
         />
       </section>
 
-      <section class="panel queue-panel">
-        <div class="panel-head">
-          <div>
-            <span class="eyebrow inline">{{ label('队列', 'Queue') }}</span>
-            <h2>{{ label('播放列表', 'Playlist') }}</h2>
-          </div>
-          <button class="plain-btn" type="button" :disabled="!hasQueue || playlistLoading" @click="clearQueue()">
-            {{ playlistLoading ? label('加载中', 'Loading') : label('清空', 'Clear') }}
-          </button>
-        </div>
-
-        <div v-if="hasQueue" class="queue-list">
-          <div v-for="(queued, index) in queue" :key="queued.id" class="queue-row" :class="{ active: index === player.state.currentIndex }">
-            <button class="queue-main" type="button" @click="player.playAtIndex(index)">
-              <span>{{ index + 1 }}</span>
-              <strong>{{ queued.title }}</strong>
-              <small>{{ sourceLabel(queued.source) }}</small>
-            </button>
-            <div class="row-actions">
-              <button class="row-icon" type="button" :disabled="index === 0" :title="label('上移', 'Move up')" @click="moveQueued(index, -1)">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="m6 15 6-6 6 6" />
-                </svg>
-              </button>
-              <button class="row-icon" type="button" :disabled="index === queue.length - 1" :title="label('下移', 'Move down')" @click="moveQueued(index, 1)">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="m6 9 6 6 6-6" />
-                </svg>
-              </button>
-              <button class="row-icon" type="button" :title="label('移除', 'Remove')" @click="removeQueued(index)">
-                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
-                  <path d="M18 6 6 18" />
-                  <path d="m6 6 12 12" />
-                </svg>
-              </button>
-            </div>
-          </div>
-        </div>
-        <div v-else class="empty-line">{{ label('队列为空', 'Queue is empty') }}</div>
-      </section>
-
+      <MediaQueuePanel
+        :queue="queue"
+        :current-index="player.state.currentIndex"
+        :loading="playlistLoading"
+        :label="label"
+        :source-label="sourceLabel"
+        @clear="clearQueue"
+        @play="player.playAtIndex"
+        @move="moveQueued"
+        @remove="removeQueued"
+      />
       <MediaOutputPanel :active-item="activeItem" :session-output-id="session.output.id" />
     </main>
   </div>
@@ -820,10 +790,6 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 16px;
-}
-
-.queue-panel {
-  min-height: 260px;
 }
 
 .bookmarks-shell {
@@ -1235,68 +1201,10 @@ button:disabled {
   color: #fff;
 }
 
-.queue-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.queue-row,
 .empty-line {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   background: #fff;
-}
-
-.queue-row {
-  min-height: 48px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
-  align-items: center;
-  gap: 8px;
-  padding: 6px;
-}
-
-.queue-row.active {
-  border-color: #99f6e4;
-  background: #f0fdfa;
-}
-
-.queue-main {
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.queue-main span {
-  color: var(--text-tertiary);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
-  font-weight: 900;
-  text-align: center;
-}
-
-.queue-main strong {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: 14px;
-  font-weight: 850;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.queue-main small {
-  color: var(--text-tertiary);
-  font-size: 12px;
-  font-weight: 900;
 }
 
 .row-icon {
@@ -1351,10 +1259,6 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
-  .queue-row {
-    grid-template-columns: 1fr;
-  }
-
   .candidate-row {
     grid-template-columns: 1fr;
   }
@@ -1363,20 +1267,5 @@ button:disabled {
     justify-content: flex-end;
   }
 
-  .queue-main {
-    grid-template-columns: 34px minmax(0, 1fr);
-  }
-
-  .queue-main small {
-    grid-column: 2;
-  }
-
-  .queue-row .row-actions {
-    justify-content: flex-end;
-  }
-
-  .queue-main small {
-    justify-self: start;
-  }
 }
 </style>
