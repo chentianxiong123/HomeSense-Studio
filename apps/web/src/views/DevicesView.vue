@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, type UserDevice, type Room, type MiDeviceCandidate } from '@/api'
 import { cliApi } from '@/api/cli'
+import DeviceNodeIcon from '@/components/devices/DeviceNodeIcon.vue'
 import DevicesCanvasHeader from '@/components/devices/DevicesCanvasHeader.vue'
 import DeviceCreatorDialog from '@/components/devices/DeviceCreatorDialog.vue'
 import RoomSettingsDialog from '@/components/devices/RoomSettingsDialog.vue'
@@ -1211,12 +1212,7 @@ function getRoomConnections(roomId: number) {
               @click.stop="isEditMode ? null : selectDevice(dev)"
               @dblclick.stop="isEditMode ? null : router.push(`/devices/${dev.id}?from=/devices`)"
             >
-              <div class="node-icon" :class="`icon-${deviceIcon(propString(dev, 'device_type'))}`">
-                <svg v-if="deviceIcon(propString(dev, 'device_type')) === 'tv'" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-                <svg v-else-if="deviceIcon(propString(dev, 'device_type')) === 'speaker'" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="4" y="2" width="16" height="20" rx="3"></rect><circle cx="12" cy="14" r="3"></circle><line x1="12" y1="7" x2="12" y2="9"></line></svg>
-                <svg v-else-if="deviceIcon(propString(dev, 'device_type')) === 'phone'" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="5" y="2" width="14" height="20" rx="3"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>
-                <svg v-else viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-              </div>
+              <DeviceNodeIcon :icon="deviceIcon(propString(dev, 'device_type'))" />
 
               <span class="node-name">{{ dev.name }}</span>
               <span v-if="dev.props?.group_id" class="node-group-badge">⛓</span>
@@ -1466,13 +1462,6 @@ function getRoomConnections(roomId: number) {
 
 .device-node:active {
   cursor: grabbing;
-}
-
-.node-icon {
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .device-node.active {
