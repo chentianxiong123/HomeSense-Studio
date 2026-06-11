@@ -6,6 +6,7 @@ import type { RemoteWorkspaceFileEntry, RemoteWorkspaceFileList } from '@/api/re
 import { storageApi, type StorageMountRecord, type StorageTaskRecord } from '@/api/storage'
 import RemoteFileBrowserPanel from '@/components/RemoteFileBrowserPanel.vue'
 import StorageMountDialog from '@/components/storage/StorageMountDialog.vue'
+import StorageMountList from '@/components/storage/StorageMountList.vue'
 import StorageTaskStrip from '@/components/storage/StorageTaskStrip.vue'
 import { useLocale } from '@/composables/useLocale'
 
@@ -420,42 +421,21 @@ function errorText(err: unknown): string {
     <div v-if="error" class="notice error">{{ error }}</div>
     <div v-if="message" class="notice success">{{ message }}</div>
 
-    <section class="mount-band">
-      <div class="mount-head">
-        <div>
-          <strong>{{ label('系统挂载', 'System Mounts') }}</strong>
-          <small>{{ health ? `${health.status} · ${health.drivers.join(', ')}` : label('等待探测', 'Pending probe') }}</small>
-        </div>
-        <button class="plain-btn compact" :disabled="authorizations.length === 0" @click="openCreateMount()">{{ label('创建挂载', 'Create Mount') }}</button>
-      </div>
-
-      <div v-if="authorizations.length === 0" class="empty-line left">
-        {{ label('还没有可用授权。先在授权中心保存 WebDAV 或本地目录凭据。', 'No authorization is available. Save a WebDAV or local folder credential first.') }}
-      </div>
-
-      <div v-else-if="mounts.length === 0" class="empty-line left">
-        {{ label('已有授权，但还没有系统挂载。创建挂载后，这里会成为 HomeSense 的统一文件入口。', 'Authorizations exist, but no system mount is configured yet. Create a mount to make it available in HomeSense storage.') }}
-      </div>
-
-      <div v-else class="mount-grid">
-        <article
-          v-for="mount in mounts"
-          :key="mount.id"
-          class="mount-item"
-          :class="{ active: list?.mount_path === mount.virtual_path || pathInput === mount.virtual_path }"
-        >
-          <button class="mount-main" :disabled="loading || acting" @click="openPath(mount.virtual_path)">
-            <strong>{{ mount.name }}</strong>
-            <code>{{ mount.virtual_path }}</code>
-            <small>{{ mount.driver }} · {{ authorizationName(mount.authorization_id) }}{{ mount.readonly ? ` · ${label('只读', 'Readonly')}` : '' }}</small>
-          </button>
-          <div class="mount-actions">
-            <button class="plain-btn compact" @click="openEditMount(mount)">{{ label('编辑', 'Edit') }}</button>
-            <button class="danger-btn compact" :disabled="isBusy(`mount-delete-${mount.id}`)" @click="deleteMount(mount)">{{ label('删除', 'Delete') }}</button>
-          </div>
-        </article>
-      </div>
-    </section>
+    <StorageMountList
+      :authorizations="authorizations"
+      :mounts="mounts"
+      :health="health"
+      :active-mount-path="list?.mount_path"
+      :path-input="pathInput"
+      :disabled="loading || acting"
+      :label="label"
+      :authorization-name="authorizationName"
+      :is-busy="isBusy"
+      @create="openCreateMount()"
+      @open="openPath"
+      @edit="openEditMount"
+      @delete="deleteMount"
+    />
 
     <section class="file-workbench">
       <div class="copy-row">
@@ -543,7 +523,6 @@ function errorText(err: unknown): string {
 }
 
 .page-head,
-.mount-band,
 .file-workbench,
 .notice {
   border: 1px solid #e2e8f0;
@@ -586,7 +565,6 @@ h2 {
 }
 
 .head-actions,
-.mount-actions,
 .path-row,
 .copy-row {
   display: flex;
@@ -595,7 +573,6 @@ h2 {
   flex-wrap: wrap;
 }
 
-.mount-band,
 .file-workbench {
   padding: 18px;
   display: flex;
@@ -603,68 +580,11 @@ h2 {
   gap: 12px;
 }
 
-.mount-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.mount-head > div {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.mount-head strong,
-.mount-main strong {
-  color: var(--text-primary);
-  font-size: 15px;
-  font-weight: 900;
-}
-
-.mount-head small,
-.mount-main small,
 .empty-line {
   color: var(--text-tertiary);
   font-size: 13px;
   font-weight: 700;
   line-height: 1.45;
-}
-
-.mount-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 10px;
-}
-
-.mount-item {
-  min-width: 0;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #fff;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  padding: 12px;
-}
-
-.mount-item.active {
-  border-color: #14b8a6;
-  background: #f0fdfa;
-}
-
-.mount-main {
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
 
 code {
@@ -819,7 +739,6 @@ button:disabled {
   }
 
   .page-head,
-  .mount-head,
   .path-row,
   .copy-row {
     align-items: stretch;
@@ -828,14 +747,6 @@ button:disabled {
 
   .head-actions {
     width: 100%;
-  }
-
-  .mount-item {
-    grid-template-columns: 1fr;
-  }
-
-  .mount-actions {
-    justify-content: flex-start;
   }
 
   .file-row {
