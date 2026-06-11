@@ -10,13 +10,14 @@ import { type RoomConnectionLine } from '@/components/devices/RoomConnectionLine
 import RoomSettingsDialog from '@/components/devices/RoomSettingsDialog.vue'
 import { useLocale } from '@/composables/useLocale'
 import { useDeviceGroups } from '@/composables/useDeviceGroups'
+import { useDevicesCanvasInteraction } from '@/composables/useDevicesCanvasInteraction'
 import {
   useDevicesLayout,
   type DevicePropsDraft,
   type DeviceRatio,
   type RoomPropsDraft,
 } from '@/composables/useDevicesLayout'
-import { pixelToRatio, ratioToPixel, looksLikeRatio, clampRatio } from '@/utils/roomCoords'
+import { pixelToRatio, looksLikeRatio, clampRatio } from '@/utils/roomCoords'
 
 const { locale } = useLocale()
 const isZh = computed(() => locale.value === 'zh')
@@ -37,10 +38,7 @@ function showSuccess(msg: string) {
 const devices = ref<UserDevice[]>([])
 const rooms = ref<Room[]>([])
 const miCandidates = ref<MiDeviceCandidate[]>([])
-const miCandidatesLoaded = ref(false)
 const miCandidatesLoading = ref(false)
-const roomsLoaded = ref(false)
-const roomsLoading = ref(false)
 const creating = ref(false)
 const creatingDevice = ref(false)
 const saving = ref(false)
@@ -48,9 +46,6 @@ const onlineStatus = ref<Record<number, boolean>>({})
 let pingTimer: ReturnType<typeof setInterval> | null = null
 
 // 2D Layout & Zoom State
-const selectedDeviceId = ref<number | null>(null)
-const viewportWidth = ref(1000)
-const viewportHeight = ref(700)
 const isEditMode = ref(false)
 
 const editingRoomId = ref<number | null>(null)
@@ -67,14 +62,6 @@ const editingRoom = computed(() =>
 const roomDeviceOptions = computed(() =>
   [...devices.value].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
 )
-
-// Interactive Scale & Pan
-const scale = ref(1)
-const panX = ref(0)
-const panY = ref(0)
-const isPanning = ref(false)
-const panStartRawX = ref(0)
-const panStartRawY = ref(0)
 
 const isMobilePortrait = ref(false)
 
@@ -98,7 +85,6 @@ const {
   activeRooms,
   currentLayoutKey,
   roomPropsRecord,
-  getRoomLayoutSource,
   getRoomLayout,
   ensureRoomLayout,
   getRoomCardStyle,
@@ -113,27 +99,48 @@ const {
   propNumber,
 })
 
-const canvasRef = ref<InstanceType<typeof DevicesFloorCanvas> | null>(null)
-const roomElementRefs = new Map<number, HTMLElement>()
-const deviceElementRefs = new Map<number, HTMLElement>()
-
-function getViewportEl() {
-  return canvasRef.value?.viewportEl ?? null
-}
-
-function getTransformWrapperEl() {
-  return canvasRef.value?.transformWrapperEl ?? null
-}
-
-function setRoomElementRef(id: number, el: unknown) {
-  if (el instanceof HTMLElement) roomElementRefs.set(id, el)
-  else roomElementRefs.delete(id)
-}
-
-function setDeviceElementRef(id: number, el: unknown) {
-  if (el instanceof HTMLElement) deviceElementRefs.set(id, el)
-  else deviceElementRefs.delete(id)
-}
+const {
+  canvasRef,
+  selectedDeviceId,
+  viewportWidth,
+  viewportHeight,
+  scale,
+  panX,
+  panY,
+  resizingRoomId,
+  getViewportEl,
+  getTransformWrapperEl,
+  setRoomElementRef,
+  setDeviceElementRef,
+  updateViewportSize,
+  getCanvasDomScale,
+  handleWheel,
+  startPan,
+  onPan,
+  stopPan,
+  handleTouchStart,
+  handleTouchMove,
+  handleTouchEnd,
+  resetZoom,
+  startDragRoom,
+  startResizeRoom,
+  startDragDevice,
+} = useDevicesCanvasInteraction({
+  rooms,
+  devices,
+  isEditMode,
+  getRoomLayout,
+  ensureRoomLayout,
+  getDeviceLayout,
+  ensureDeviceLayout,
+  findParentRoom,
+  saveRoomLayout: async (room) => {
+    await api.rooms.update(room.id, { props: room.props })
+  },
+  saveDeviceLayout: async (device) => {
+    await api.userDevices.update(device.id, { props: device.props })
+  },
+})
 
 onMounted(async () => {
   detectOrientation()
@@ -147,12 +154,6 @@ onMounted(async () => {
 onUnmounted(() => {
   if (pingTimer) clearInterval(pingTimer)
   window.removeEventListener('resize', onResize)
-  document.removeEventListener('pointermove', onDragRoom)
-  document.removeEventListener('pointerup', stopDragRoom)
-  document.removeEventListener('pointermove', onResizeRoom)
-  document.removeEventListener('pointerup', stopResizeRoom)
-  document.removeEventListener('pointermove', onDragDevice)
-  document.removeEventListener('pointerup', stopDragDevice)
 })
 
 function onResize() {
@@ -162,45 +163,6 @@ function onResize() {
 
 function detectOrientation() {
   isMobilePortrait.value = window.innerWidth <= 760 && window.innerHeight > window.innerWidth
-}
-
-function updateViewportSize() {
-  const el = getViewportEl()
-  if (el) {
-    viewportWidth.value = el.clientWidth
-    viewportHeight.value = el.clientHeight
-  }
-}
-
-function getCanvasDomScale() {
-  const el = getTransformWrapperEl()
-  if (!el || el.offsetWidth === 0) return scale.value
-  return el.getBoundingClientRect().width / el.offsetWidth
-}
-
-function clampVisualDelta(delta: number, currentStart: number, currentEnd: number, boundaryStart: number, boundaryEnd: number) {
-  if (delta < 0) return Math.max(delta, boundaryStart - currentStart)
-  if (delta > 0) return Math.min(delta, boundaryEnd - currentEnd)
-  return 0
-}
-
-function clampResizeVisualDelta(delta: number, currentSize: number, minSize: number, availableGrowth: number) {
-  if (delta < 0) return Math.max(delta, minSize - currentSize)
-  if (delta > 0) return Math.min(delta, availableGrowth)
-  return 0
-}
-
-function getRoomVisualLayout(room: Room): { x: number; y: number; w: number; h: number } {
-  return getRoomLayout(room)
-}
-
-function getRoomDomScale(room: Room, roomEl: HTMLElement) {
-  const layout = getRoomVisualLayout(room)
-  const rect = roomEl.getBoundingClientRect()
-  return {
-    x: layout.w > 0 ? rect.width / layout.w : getCanvasDomScale(),
-    y: layout.h > 0 ? rect.height / layout.h : getCanvasDomScale(),
-  }
 }
 
 async function loadData() {
@@ -449,295 +411,6 @@ function roomNameForDevice(device: UserDevice): string {
   const roomId = propNumber(device, 'room_id')
   if (!roomId) return label('未绑定房间', 'Unassigned')
   return rooms.value.find((room) => room.id === roomId)?.name ?? label('未知房间', 'Unknown room')
-}
-
-// Zoom & Pan Wheel handlers
-function handleWheel(event: WheelEvent) {
-  event.preventDefault()
-  const zoomFactor = 0.08
-  const nextScale = event.deltaY < 0 ? scale.value + zoomFactor : scale.value - zoomFactor
-  scale.value = Math.max(0.4, Math.min(3, nextScale))
-}
-
-// Pan Canvas
-function startPan(event: PointerEvent) {
-  if (event.target !== event.currentTarget) return
-  isPanning.value = true
-  panStartRawX.value = event.clientX - panX.value
-  panStartRawY.value = event.clientY - panY.value
-  getViewportEl()?.setPointerCapture(event.pointerId)
-}
-
-function onPan(event: PointerEvent) {
-  if (!isPanning.value) return
-  panX.value = event.clientX - panStartRawX.value
-  panY.value = event.clientY - panStartRawY.value
-}
-
-function stopPan(event: PointerEvent) {
-  if (!isPanning.value) return
-  isPanning.value = false
-  getViewportEl()?.releasePointerCapture(event.pointerId)
-}
-
-// Pinch zoom
-const initialTouchDistance = ref<number | null>(null)
-const initialScale = ref(1)
-
-function handleTouchStart(event: TouchEvent) {
-  if (event.touches.length === 2) {
-    const t1 = event.touches[0]!
-    const t2 = event.touches[1]!
-    initialTouchDistance.value = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY)
-    initialScale.value = scale.value
-  }
-}
-
-function handleTouchMove(event: TouchEvent) {
-  if (event.touches.length === 2 && initialTouchDistance.value !== null) {
-    event.preventDefault()
-    const t1 = event.touches[0]!
-    const t2 = event.touches[1]!
-    const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY)
-    const factor = dist / initialTouchDistance.value
-    scale.value = Math.max(0.4, Math.min(3, initialScale.value * factor))
-  }
-}
-
-function handleTouchEnd() {
-  initialTouchDistance.value = null
-}
-
-function resetZoom() {
-  scale.value = 1
-  panX.value = 0
-  panY.value = 0
-}
-
-// Draggable room card implementation
-const draggingRoomId = ref<number | null>(null)
-const resizingRoomId = ref<number | null>(null)
-const MIN_ROOM_WIDTH = 180
-const MIN_ROOM_HEIGHT = 140
-
-type ElementMoveState = {
-  layoutX: number
-  layoutY: number
-  clientX: number
-  clientY: number
-  elementRect: DOMRect
-  boundaryRect: DOMRect
-  scaleX: number
-  scaleY: number
-  // Only set when the dragged element is a device (in room-relative ratios).
-  roomW?: number
-  roomH?: number
-}
-
-type ElementResizeState = {
-  layoutW: number
-  layoutH: number
-  clientX: number
-  clientY: number
-  elementRect: DOMRect
-  boundaryRect: DOMRect
-  scaleX: number
-  scaleY: number
-}
-
-let roomDragState: ElementMoveState | null = null
-let roomResizeState: ElementResizeState | null = null
-let deviceDragState: ElementMoveState | null = null
-
-function startDragRoom(event: PointerEvent, room: Room) {
-  if (!isEditMode.value) return
-  // If the pointerdown came from a child device, let the device handler own it.
-  // Devices have their own drag (reposition within the room); the room only
-  // moves when the user grabs the room's own background.
-  const target = event.target as HTMLElement | null
-  if (target?.closest?.('.device-node')) return
-  const roomEl = roomElementRefs.get(room.id)
-  const viewportEl = getViewportEl()
-  if (!roomEl || !viewportEl) return
-  event.preventDefault()
-  event.stopPropagation()
-
-  const layout = getRoomLayout(room)
-  const domScale = getCanvasDomScale()
-  draggingRoomId.value = room.id
-  roomDragState = {
-    layoutX: layout.x,
-    layoutY: layout.y,
-    clientX: event.clientX,
-    clientY: event.clientY,
-    elementRect: roomEl.getBoundingClientRect(),
-    boundaryRect: viewportEl.getBoundingClientRect(),
-    scaleX: domScale || 1,
-    scaleY: domScale || 1,
-  }
-  document.addEventListener('pointermove', onDragRoom)
-  document.addEventListener('pointerup', stopDragRoom)
-}
-
-function onDragRoom(event: PointerEvent) {
-  if (draggingRoomId.value === null || !roomDragState) return
-  const room = rooms.value.find((r) => r.id === draggingRoomId.value)
-  if (!room) return
-
-  const state = roomDragState
-  const roomLayout = ensureRoomLayout(room)
-  const rawDx = event.clientX - state.clientX
-  const rawDy = event.clientY - state.clientY
-  const dx = clampVisualDelta(rawDx, state.elementRect.left, state.elementRect.right, state.boundaryRect.left, state.boundaryRect.right)
-  const dy = clampVisualDelta(rawDy, state.elementRect.top, state.elementRect.bottom, state.boundaryRect.top, state.boundaryRect.bottom)
-
-  roomLayout.x = state.layoutX + dx / state.scaleX
-  roomLayout.y = state.layoutY + dy / state.scaleY
-}
-
-async function stopDragRoom() {
-  if (draggingRoomId.value === null) return
-  const room = rooms.value.find((r) => r.id === draggingRoomId.value)
-  draggingRoomId.value = null
-  roomDragState = null
-  document.removeEventListener('pointermove', onDragRoom)
-  document.removeEventListener('pointerup', stopDragRoom)
-  if (room) {
-    await api.rooms.update(room.id, { props: room.props })
-  }
-}
-
-function startResizeRoom(event: PointerEvent, room: Room) {
-  if (!isEditMode.value) return
-  const roomEl = roomElementRefs.get(room.id)
-  const viewportEl = getViewportEl()
-  if (!roomEl || !viewportEl) return
-  event.preventDefault()
-  event.stopPropagation()
-
-  const layout = getRoomLayout(room)
-  const domScale = getRoomDomScale(room, roomEl)
-  resizingRoomId.value = room.id
-  roomResizeState = {
-    layoutW: layout.w,
-    layoutH: layout.h,
-    clientX: event.clientX,
-    clientY: event.clientY,
-    elementRect: roomEl.getBoundingClientRect(),
-    boundaryRect: viewportEl.getBoundingClientRect(),
-    scaleX: domScale.x || 1,
-    scaleY: domScale.y || 1,
-  }
-  document.addEventListener('pointermove', onResizeRoom)
-  document.addEventListener('pointerup', stopResizeRoom)
-}
-
-function onResizeRoom(event: PointerEvent) {
-  if (resizingRoomId.value === null || !roomResizeState) return
-  const room = rooms.value.find((r) => r.id === resizingRoomId.value)
-  if (!room) return
-
-  const state = roomResizeState
-  const roomLayout = ensureRoomLayout(room)
-  const rawDx = event.clientX - state.clientX
-  const rawDy = event.clientY - state.clientY
-  const dx = clampResizeVisualDelta(rawDx, state.elementRect.width, MIN_ROOM_WIDTH * state.scaleX, state.boundaryRect.right - state.elementRect.right)
-  const dy = clampResizeVisualDelta(rawDy, state.elementRect.height, MIN_ROOM_HEIGHT * state.scaleY, state.boundaryRect.bottom - state.elementRect.bottom)
-
-  roomLayout.w = Math.max(MIN_ROOM_WIDTH, state.layoutW + dx / state.scaleX)
-  roomLayout.h = Math.max(MIN_ROOM_HEIGHT, state.layoutH + dy / state.scaleY)
-}
-
-async function stopResizeRoom() {
-  if (resizingRoomId.value === null) return
-  const room = rooms.value.find((r) => r.id === resizingRoomId.value)
-  resizingRoomId.value = null
-  roomResizeState = null
-  document.removeEventListener('pointermove', onResizeRoom)
-  document.removeEventListener('pointerup', stopResizeRoom)
-  if (room) {
-    await api.rooms.update(room.id, { props: room.props })
-  }
-}
-
-// Draggable Device Node implementation
-const draggingDeviceId = ref<number | null>(null)
-
-function startDragDevice(event: PointerEvent, device: UserDevice) {
-  if (!isEditMode.value) return
-  const deviceEl = deviceElementRefs.get(device.id)
-  if (!deviceEl) return
-  // Don't stop propagation: the room's pointerdown will still bubble up to
-  // the room card, but `startDragRoom` checks `event.target.closest('.device-node')`
-  // and ignores device-originated pointerdowns, so the room won't try to drag.
-  event.preventDefault()
-
-  const room = findParentRoom(device)
-  if (!room) return
-  const roomEl = roomElementRefs.get(room.id) ?? null
-  const boundaryEl = roomEl ?? getViewportEl()
-  if (!boundaryEl) return
-
-  const layout = getDeviceLayout(device)
-  const roomLayout = getRoomLayout(room)
-  const domScale = roomEl
-    ? getRoomDomScale(room, roomEl)
-    : { x: getCanvasDomScale(), y: getCanvasDomScale() }
-  draggingDeviceId.value = device.id
-  deviceDragState = {
-    layoutX: layout.x,
-    layoutY: layout.y,
-    roomW: roomLayout.w,
-    roomH: roomLayout.h,
-    clientX: event.clientX,
-    clientY: event.clientY,
-    elementRect: deviceEl.getBoundingClientRect(),
-    boundaryRect: boundaryEl.getBoundingClientRect(),
-    scaleX: domScale.x || 1,
-    scaleY: domScale.y || 1,
-  }
-  document.addEventListener('pointermove', onDragDevice)
-  document.addEventListener('pointerup', stopDragDevice)
-}
-
-function onDragDevice(event: PointerEvent) {
-  if (draggingDeviceId.value === null || !deviceDragState) return
-  const device = devices.value.find((d) => d.id === draggingDeviceId.value)
-  if (!device) return
-
-  const state = deviceDragState
-  const rawDx = event.clientX - state.clientX
-  const rawDy = event.clientY - state.clientY
-  const dx = clampVisualDelta(rawDx, state.elementRect.left, state.elementRect.right, state.boundaryRect.left, state.boundaryRect.right)
-  const dy = clampVisualDelta(rawDy, state.elementRect.top, state.elementRect.bottom, state.boundaryRect.top, state.boundaryRect.bottom)
-
-  // Convert canvas-pixel delta to ratio delta. Divide by room width/height,
-  // not by canvas scale — the room's pixel size is the meaningful unit.
-  const deviceLayout = ensureDeviceLayout(device)
-  if (state.roomW && state.roomH) {
-    const next = clampRatio(
-      state.layoutX + (dx / state.scaleX) / state.roomW,
-      state.layoutY + (dy / state.scaleY) / state.roomH
-    )
-    deviceLayout.x = next.x
-    deviceLayout.y = next.y
-  } else {
-    // Fallback: write as ratio centered in the room.
-    deviceLayout.x = 0.5
-    deviceLayout.y = 0.5
-  }
-}
-
-async function stopDragDevice() {
-  if (draggingDeviceId.value === null) return
-  const device = devices.value.find((d) => d.id === draggingDeviceId.value)
-  draggingDeviceId.value = null
-  deviceDragState = null
-  document.removeEventListener('pointermove', onDragDevice)
-  document.removeEventListener('pointerup', stopDragDevice)
-  if (device) {
-    await api.userDevices.update(device.id, { props: device.props })
-  }
 }
 
 function deviceIcon(t: string): string {
