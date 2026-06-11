@@ -4,6 +4,8 @@ import { useRouter } from 'vue-router'
 import { api } from '@/api'
 import { streamingGatewayApi, type MoonlightWebRuntimeStatus, type StreamingHost, type StreamingHostProbe } from '@/api/streamingGateway'
 import AdbAuthPanel from '@/components/auth/AdbAuthPanel.vue'
+import AuthPageHeader from '@/components/auth/AuthPageHeader.vue'
+import AuthScopeTabs from '@/components/auth/AuthScopeTabs.vue'
 import DlnaAuthPanel from '@/components/auth/DlnaAuthPanel.vue'
 import MiAuthPanel from '@/components/auth/MiAuthPanel.vue'
 import SshAuthPanel from '@/components/auth/SshAuthPanel.vue'
@@ -339,29 +341,12 @@ function openStreamingRuntime() {
 
 <template>
   <div class="auth-page">
-    <header class="page-head">
-      <div>
-        <span class="eyebrow">{{ label('统一认证与授权', 'Unified Auth') }}</span>
-        <h1>{{ label('授权中心', 'Authorization Center') }}</h1>
-      </div>
-      <div class="head-actions">
-        <button class="plain-btn" :disabled="anyBusy" @click="loadAll">{{ label('刷新', 'Refresh') }}</button>
-      </div>
-    </header>
+    <AuthPageHeader :busy="anyBusy" :label="label" @refresh="loadAll" />
 
     <div v-if="errorMessage" class="notice error">{{ errorMessage }}</div>
     <div v-if="successMessage" class="notice success">{{ successMessage }}</div>
 
-    <nav class="scope-tabs" :aria-label="label('授权分类', 'Authorization scope')">
-      <button :class="['scope-tab', { active: activeTab === 'external' }]" @click="activeTab = 'external'">
-        <strong>{{ label('外部账号', 'External Accounts') }}</strong>
-        <span>Mi / Bilibili</span>
-      </button>
-      <button :class="['scope-tab', { active: activeTab === 'local' }]" @click="activeTab = 'local'">
-        <strong>{{ label('局域网账号', 'Local Network') }}</strong>
-        <span>ADB / DLNA / {{ label('串流', 'Streaming') }} / AList / SSH / FRP / SMB</span>
-      </button>
-    </nav>
+    <AuthScopeTabs v-model:active-tab="activeTab" :label="label" />
 
     <section v-if="activeTab === 'external'" class="workspace">
       <aside class="provider-rail">
@@ -516,24 +501,12 @@ function openStreamingRuntime() {
   gap: 16px;
 }
 
-.page-head,
 .detail-surface,
-.scope-tab,
 .provider-item,
 .notice {
   border: 1px solid #e2e8f0;
   background: #fff;
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.04);
-}
-
-.page-head {
-  min-height: 96px;
-  border-radius: 8px;
-  padding: 22px 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
 }
 
 .eyebrow {
@@ -544,7 +517,6 @@ function openStreamingRuntime() {
   letter-spacing: 0;
 }
 
-h1,
 h2 {
   margin: 5px 0 0;
   color: var(--text-primary);
@@ -552,15 +524,10 @@ h2 {
   letter-spacing: 0;
 }
 
-h1 {
-  font-size: 30px;
-}
-
 h2 {
   font-size: 24px;
 }
 
-.head-actions,
 .row-actions {
   display: flex;
   align-items: center;
@@ -568,24 +535,6 @@ h2 {
   flex-wrap: wrap;
 }
 
-.scope-tabs {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.scope-tab {
-  min-height: 72px;
-  border-radius: 8px;
-  padding: 14px 16px;
-  cursor: pointer;
-  text-align: left;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.scope-tab strong,
 .provider-item strong {
   color: var(--text-primary);
   font-size: 15px;
@@ -593,7 +542,6 @@ h2 {
   letter-spacing: 0;
 }
 
-.scope-tab span,
 .provider-item small,
 .provider-item em,
 .empty-line {
@@ -603,7 +551,6 @@ h2 {
   line-height: 1.45;
 }
 
-.scope-tab.active,
 .provider-item.active {
   border-color: #14b8a6;
   background: #f0fdfa;
@@ -811,13 +758,11 @@ button:disabled {
     padding: 16px;
   }
 
-  .page-head,
   .detail-head {
     align-items: flex-start;
     flex-direction: column;
   }
 
-  .scope-tabs,
   .provider-rail {
     grid-template-columns: 1fr;
   }
