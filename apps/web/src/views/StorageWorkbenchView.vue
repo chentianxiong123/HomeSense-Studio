@@ -4,11 +4,9 @@ import { useRouter } from 'vue-router'
 import { alistApi, type AlistAuthorizationRecord, type AlistDriverEntry, type AlistDriverHealthResult, type AlistDriverListResult } from '@/api/alist'
 import type { RemoteWorkspaceFileEntry, RemoteWorkspaceFileList } from '@/api/remoteWorkspace'
 import { storageApi, type StorageMountRecord, type StorageTaskRecord } from '@/api/storage'
-import RemoteFileBrowserPanel from '@/components/RemoteFileBrowserPanel.vue'
-import StorageFileActionBar from '@/components/storage/StorageFileActionBar.vue'
+import StorageFileWorkbenchPanel from '@/components/storage/StorageFileWorkbenchPanel.vue'
 import StorageMountDialog from '@/components/storage/StorageMountDialog.vue'
 import StorageMountList from '@/components/storage/StorageMountList.vue'
-import StorageTaskStrip from '@/components/storage/StorageTaskStrip.vue'
 import { useLocale } from '@/composables/useLocale'
 
 const router = useRouter()
@@ -433,48 +431,34 @@ function errorText(err: unknown): string {
       @delete="deleteMount"
     />
 
-    <section class="file-workbench">
-      <StorageFileActionBar
-        v-model:copy-target="copyTarget"
-        v-model:new-folder-name="newFolderName"
-        :selected-count="selectedNames.length"
-        :acting="acting"
-        :has-list="Boolean(list)"
-        :label="label"
-        @copy="copySelected"
-        @copy-task="copySelectedTask"
-        @download="downloadSelected"
-        @upload="uploadSelectedFile"
-        @create-folder="createFolder"
-        @remove="removeSelected"
-      />
-
-      <StorageTaskStrip :tasks="tasks" :disabled="acting" :label="label" @refresh="loadTasks" />
-
-      <RemoteFileBrowserPanel
-        :title="label('统一文件浏览器', 'Unified File Browser')"
-        :subtitle="list ? `${list.provider} · ${list.mount_path || '/'}` : label('选择或创建一个系统挂载开始浏览。', 'Choose or create a system mount to browse.')"
-        :list="storageFileList"
-        :preview="null"
-        :loading="loading || acting"
-        :error="error"
-        :path-input="pathInput"
-        :selectable="true"
-        :selected="selected"
-        root-fallback="/"
-        :empty-text="label('空目录', 'Empty directory')"
-        :loading-text="label('正在读取目录...', 'Loading directory...')"
-        :preview-hint="label('点开文件会读取详情；支持直链的来源会返回直链。', 'Click a file to load details; sources with direct links will return a URL.')"
-        :label="label"
-        :format-file-size="(value) => formatSize(value ?? 0)"
-        @refresh="openPath(currentDir)"
-        @parent="goParent"
-        @open-entry="openEntry"
-        @open-path="openPath"
-        @update:path-input="pathInput = $event"
-        @update:selected="selected = $event"
-      />
-    </section>
+    <StorageFileWorkbenchPanel
+      v-model:copy-target="copyTarget"
+      v-model:new-folder-name="newFolderName"
+      v-model:path-input="pathInput"
+      v-model:selected="selected"
+      :selected-count="selectedNames.length"
+      :acting="acting"
+      :loading="loading"
+      :has-list="Boolean(list)"
+      :tasks="tasks"
+      :file-list="storageFileList"
+      :provider-label="list ? `${list.provider} · ${list.mount_path || '/'}` : label('选择或创建一个系统挂载开始浏览。', 'Choose or create a system mount to browse.')"
+      :current-dir="currentDir"
+      :error="error"
+      :label="label"
+      :format-file-size="(value) => formatSize(value ?? 0)"
+      @copy="copySelected"
+      @copy-task="copySelectedTask"
+      @download="downloadSelected"
+      @upload="uploadSelectedFile"
+      @create-folder="createFolder"
+      @remove="removeSelected"
+      @refresh-tasks="loadTasks"
+      @refresh-path="openPath"
+      @parent="goParent"
+      @open-entry="openEntry"
+      @open-path="openPath"
+    />
 
     <StorageMountDialog
       :open="mountFormOpen"
@@ -510,7 +494,6 @@ function errorText(err: unknown): string {
 }
 
 .page-head,
-.file-workbench,
 .notice {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
@@ -557,13 +540,6 @@ h2 {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-.file-workbench {
-  padding: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
 }
 
 .empty-line {
