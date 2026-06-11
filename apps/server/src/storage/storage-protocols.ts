@@ -8,7 +8,7 @@ export const STORAGE_PROTOCOLS: StorageProtocolSpec[] = [
     summary: 'HTTP file protocol for AList, OpenList, NAS and cloud drive gateways.',
     default_root_path: '/',
     readonly_default: false,
-    supports: { list: true, get: true, remove: true, copy: true, upload: true, cross_mount_copy: true },
+    supports: { list: true, get: true, remove: true, copy: true, mkdir: true, upload: true, cross_mount_copy: true },
     fields: [
       { key: 'endpoint', label: 'Endpoint', required: true, placeholder: 'https://example.test/dav' },
       { key: 'username', label: 'Username', required: false },
@@ -23,7 +23,7 @@ export const STORAGE_PROTOCOLS: StorageProtocolSpec[] = [
     summary: 'Server-side filesystem roots exposed as HomeSense storage mounts.',
     default_root_path: '/',
     readonly_default: false,
-    supports: { list: true, get: true, remove: true, copy: true, upload: true, cross_mount_copy: true },
+    supports: { list: true, get: true, remove: true, copy: true, mkdir: true, upload: true, cross_mount_copy: true },
     fields: [
       { key: 'root_path', label: 'Local Root Path', required: true, placeholder: 'D:/files' },
     ],
@@ -35,7 +35,7 @@ export const STORAGE_PROTOCOLS: StorageProtocolSpec[] = [
     summary: 'SSH file transfer for Linux, NAS and server filesystems.',
     default_root_path: '/',
     readonly_default: false,
-    supports: { list: true, get: true, remove: true, copy: true, upload: true, cross_mount_copy: true },
+    supports: { list: true, get: true, remove: true, copy: true, mkdir: true, upload: true, cross_mount_copy: true },
     fields: [
       { key: 'endpoint', label: 'Endpoint', required: true, placeholder: 'sftp://192.168.1.10:22' },
       { key: 'username', label: 'Username', required: true },
@@ -51,7 +51,7 @@ export const STORAGE_PROTOCOLS: StorageProtocolSpec[] = [
     summary: 'Android device filesystem browsing through adb-cli.',
     default_root_path: '/sdcard/',
     readonly_default: true,
-    supports: { list: true, get: true, remove: true, copy: true, upload: true, cross_mount_copy: true },
+    supports: { list: true, get: true, remove: true, copy: true, mkdir: true, upload: true, cross_mount_copy: true },
     fields: [
       { key: 'endpoint', label: 'Device', required: true, placeholder: '192.168.1.91:5555' },
       { key: 'root_path', label: 'ADB Root Path', required: false, placeholder: '/sdcard/' },
@@ -64,7 +64,7 @@ export const STORAGE_PROTOCOLS: StorageProtocolSpec[] = [
     summary: 'Windows and NAS shares through an OS-mounted server path.',
     default_root_path: '/',
     readonly_default: false,
-    supports: { list: true, get: true, remove: true, copy: true, upload: true, cross_mount_copy: true },
+    supports: { list: true, get: true, remove: true, copy: true, mkdir: true, upload: true, cross_mount_copy: true },
     fields: [
       { key: 'endpoint', label: 'Share', required: true, placeholder: '//nas/share' },
       { key: 'username', label: 'Username', required: false },
@@ -79,7 +79,7 @@ export const STORAGE_PROTOCOLS: StorageProtocolSpec[] = [
     summary: 'Unix NAS exports through an OS-mounted server path.',
     default_root_path: '/',
     readonly_default: false,
-    supports: { list: true, get: true, remove: true, copy: true, upload: true, cross_mount_copy: true },
+    supports: { list: true, get: true, remove: true, copy: true, mkdir: true, upload: true, cross_mount_copy: true },
     fields: [
       { key: 'endpoint', label: 'Export', required: true, placeholder: 'nas:/volume1/media' },
       { key: 'root_path', label: 'Mounted Root Path', required: true, placeholder: '/mnt/nfs/media' },

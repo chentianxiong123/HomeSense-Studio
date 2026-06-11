@@ -237,7 +237,7 @@ func parseNames(raw string) ([]string, error) {
 	filtered := make([]string, 0, len(names))
 	for _, name := range names {
 		name = strings.TrimSpace(name)
-		if name == "" || strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		if name == "" || name == "." || name == ".." || strings.Contains(name, "/") || strings.Contains(name, "\\") {
 			return nil, fmt.Errorf("invalid name: %s", name)
 		}
 		filtered = append(filtered, name)

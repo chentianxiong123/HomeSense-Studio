@@ -81,6 +81,11 @@ export class StorageController {
     return { task: this.storage.copyTask(body) }
   }
 
+  @Post('fs/mkdir')
+  mkdir(@Body() body: { path?: string }) {
+    return this.storage.mkdir(body.path ?? '')
+  }
+
   @Get('fs/download')
   async download(@Query('path') rawPath: string, @Res() res: any) {
     const name = String(rawPath || '').split('/').filter(Boolean).at(-1) || 'download'

@@ -69,6 +69,7 @@ export interface StorageProtocolSpec {
     get: boolean
     remove: boolean
     copy: boolean
+    mkdir: boolean
     upload: boolean
     cross_mount_copy: boolean
   }
@@ -150,6 +151,12 @@ export const storageApi = {
     request<{ task: StorageTaskRecord }>('/api/storage/fs/copy-task', {
       method: 'POST',
       body: JSON.stringify({ src_dir: srcDir, dst_dir: dstDir, names }),
+    }),
+
+  mkdir: (path: string) =>
+    request<{ created: number }>('/api/storage/fs/mkdir', {
+      method: 'POST',
+      body: JSON.stringify({ path }),
     }),
 
   downloadUrl: (path: string) =>

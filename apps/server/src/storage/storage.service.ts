@@ -111,7 +111,12 @@ export class StorageService {
 
   copyTask(input: AlistCopyInput): StorageTaskRecord {
     this.ensureMounts()
-    return this.tasks.createCopyTask(input, (report) => this.copy(input, report))
+    return this.tasks.createCopyTask(input, (report) => this.transfers.copyTree(input, (targetPath) => this.list({ path: targetPath }), report))
+  }
+
+  mkdir(path: string): Promise<{ created: number }> {
+    this.ensureMounts()
+    return this.transfers.mkdir(path)
   }
 
   private buildDriverProps(): AlistDriverProps {

@@ -21,6 +21,7 @@ const health = ref<AlistDriverHealthResult | null>(null)
 const list = ref<AlistDriverListResult | null>(null)
 const pathInput = ref('/')
 const copyTarget = ref('')
+const newFolderName = ref('')
 const selected = ref<Record<string, boolean>>({})
 const uploadInput = ref<HTMLInputElement | null>(null)
 const loading = ref(false)
@@ -170,6 +171,27 @@ async function copySelectedTask() {
     message.value = label(`后台任务已创建: ${result.task.id}`, `Background task created: ${result.task.id}`)
     selected.value = {}
     await loadTasks()
+  } catch (err) {
+    error.value = errorText(err)
+  } finally {
+    acting.value = false
+  }
+}
+
+async function createFolder() {
+  const name = newFolderName.value.trim()
+  if (!name || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) {
+    error.value = label('文件夹名称无效', 'Invalid folder name')
+    return
+  }
+  acting.value = true
+  error.value = ''
+  message.value = ''
+  try {
+    await storageApi.mkdir(joinVirtualPath(currentDir.value, name))
+    newFolderName.value = ''
+    message.value = label('文件夹已创建', 'Folder created')
+    await openPath(currentDir.value)
   } catch (err) {
     error.value = errorText(err)
   } finally {
@@ -439,7 +461,7 @@ function errorText(err: unknown): string {
           {{ label('复制', 'Copy') }} {{ selectedNames.length || '' }}
         </button>
         <button class="plain-btn" :disabled="acting || selectedNames.length === 0 || !copyTarget.trim()" @click="copySelectedTask">
-          {{ label('后台复制', 'Copy Task') }} {{ selectedNames.length || '' }}
+          {{ label('后台复制目录', 'Copy Tree') }} {{ selectedNames.length || '' }}
         </button>
         <button class="plain-btn" :disabled="acting || selectedNames.length === 0" @click="downloadSelected">
           {{ label('下载', 'Download') }}
@@ -448,6 +470,10 @@ function errorText(err: unknown): string {
           {{ label('上传', 'Upload') }}
         </button>
         <input ref="uploadInput" class="hidden-file-input" type="file" @change="uploadSelectedFile" />
+        <input v-model="newFolderName" :disabled="acting || !list" spellcheck="false" :placeholder="label('新文件夹名称', 'New folder name')" @keydown.enter="createFolder" />
+        <button class="plain-btn" :disabled="acting || !list || !newFolderName.trim()" @click="createFolder">
+          {{ label('新建文件夹', 'New Folder') }}
+        </button>
         <button class="danger-btn" :disabled="acting || selectedNames.length === 0" @click="removeSelected">
           {{ label('删除', 'Remove') }} {{ selectedNames.length || '' }}
         </button>

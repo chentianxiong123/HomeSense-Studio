@@ -309,7 +309,7 @@ function requiredNames(value: unknown): string[] {
   const names = value.map((item) => String(item || '').trim()).filter(Boolean)
   if (names.length === 0) throw new BadRequestException('names is required')
   for (const name of names) {
-    if (name.includes('/') || name.includes('\\')) {
+    if (name === '.' || name === '..' || name.includes('/') || name.includes('\\')) {
       throw new BadRequestException(`invalid name: ${name}`)
     }
   }

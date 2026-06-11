@@ -36,7 +36,7 @@ const fallbackProtocols: StorageProtocolSpec[] = [
     summary: 'HTTP file protocol',
     default_root_path: '/',
     readonly_default: false,
-    supports: { list: true, get: true, remove: true, copy: true, upload: true, cross_mount_copy: true },
+    supports: { list: true, get: true, remove: true, copy: true, mkdir: true, upload: true, cross_mount_copy: true },
     fields: [
       { key: 'endpoint', label: 'Endpoint', required: true, placeholder: 'https://example.test/dav' },
       { key: 'username', label: 'Username', required: false },
@@ -51,7 +51,7 @@ const fallbackProtocols: StorageProtocolSpec[] = [
     summary: 'Server filesystem root',
     default_root_path: '/',
     readonly_default: false,
-    supports: { list: true, get: true, remove: true, copy: true, upload: true, cross_mount_copy: true },
+    supports: { list: true, get: true, remove: true, copy: true, mkdir: true, upload: true, cross_mount_copy: true },
     fields: [{ key: 'root_path', label: 'Local Root Path', required: true, placeholder: 'D:/files' }],
   },
   {
@@ -61,7 +61,7 @@ const fallbackProtocols: StorageProtocolSpec[] = [
     summary: 'SSH file transfer',
     default_root_path: '/',
     readonly_default: false,
-    supports: { list: true, get: true, remove: true, copy: true, upload: true, cross_mount_copy: true },
+    supports: { list: true, get: true, remove: true, copy: true, mkdir: true, upload: true, cross_mount_copy: true },
     fields: [
       { key: 'endpoint', label: 'Endpoint', required: true, placeholder: 'sftp://192.168.1.10:22' },
       { key: 'username', label: 'Username', required: true },
@@ -77,7 +77,7 @@ const fallbackProtocols: StorageProtocolSpec[] = [
     summary: 'Android filesystem browsing',
     default_root_path: '/sdcard/',
     readonly_default: true,
-    supports: { list: true, get: true, remove: true, copy: true, upload: true, cross_mount_copy: true },
+    supports: { list: true, get: true, remove: true, copy: true, mkdir: true, upload: true, cross_mount_copy: true },
     fields: [
       { key: 'endpoint', label: 'Device', required: true, placeholder: '192.168.1.91:5555' },
       { key: 'root_path', label: 'ADB Root Path', required: false, placeholder: '/sdcard/' },
@@ -90,7 +90,7 @@ const fallbackProtocols: StorageProtocolSpec[] = [
     summary: 'Windows and NAS shares through an OS-mounted server path.',
     default_root_path: '/',
     readonly_default: false,
-    supports: { list: true, get: true, remove: true, copy: true, upload: true, cross_mount_copy: true },
+    supports: { list: true, get: true, remove: true, copy: true, mkdir: true, upload: true, cross_mount_copy: true },
     fields: [
       { key: 'endpoint', label: 'Share', required: true, placeholder: '//nas/share' },
       { key: 'username', label: 'Username', required: false },
@@ -105,7 +105,7 @@ const fallbackProtocols: StorageProtocolSpec[] = [
     summary: 'Unix NAS exports through an OS-mounted server path.',
     default_root_path: '/',
     readonly_default: false,
-    supports: { list: true, get: true, remove: true, copy: true, upload: true, cross_mount_copy: true },
+    supports: { list: true, get: true, remove: true, copy: true, mkdir: true, upload: true, cross_mount_copy: true },
     fields: [
       { key: 'endpoint', label: 'Export', required: true, placeholder: 'nas:/volume1/media' },
       { key: 'root_path', label: 'Mounted Root Path', required: true, placeholder: '/mnt/nfs/media' },

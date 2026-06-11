@@ -7,7 +7,7 @@ import { pipeline } from 'node:stream/promises'
 import { PassThrough, Readable } from 'node:stream'
 import path from 'node:path'
 import { AlistAuthorizationService } from '../alist/alist-authorization.service'
-import type { AlistCopyInput, AlistDriverMutationResult } from '../alist/alist.types'
+import type { AlistCopyInput, AlistDriverEntry, AlistDriverListResult, AlistDriverMutationResult } from '../alist/alist.types'
 import { cliBridge } from '../cli/cli-bridge'
 import { KeyStore } from '../terminal/keystore'
 import { StorageMountService } from './storage-mount.service'
@@ -46,6 +46,18 @@ export class StorageTransferService {
     throw new BadRequestException(`Upload is not implemented for driver: ${driver}`)
   }
 
+  async mkdir(rawPath: string): Promise<{ created: number }> {
+    const mount = this.findMount(rawPath)
+    if (!mount) throw new BadRequestException(`No storage mount matched path: ${rawPath}`)
+    if (mount.readonly) throw new ForbiddenException('mount is readonly')
+    const driver = normalizeDriver(mount.driver)
+    if (driver === 'adb') return this.mkdirAdb(mount, rawPath)
+    if (driver === 'sftp') return this.mkdirSftpPath(mount, rawPath)
+    if (driver === 'webdav') return this.mkdirWebdav(mount, rawPath)
+    if (driver === 'local' || driver === 'smb' || driver === 'nfs') return this.mkdirLocal(mount, rawPath)
+    throw new BadRequestException(`Mkdir is not implemented for driver: ${driver}`)
+  }
+
   async copy(input: AlistCopyInput, report?: TransferProgressReporter): Promise<AlistDriverMutationResult> {
     const srcDir = requiredVirtualPath(input.src_dir, 'src_dir')
     const dstDir = requiredVirtualPath(input.dst_dir, 'dst_dir')
@@ -72,6 +84,39 @@ export class StorageTransferService {
     return { copied }
   }
 
+  async copyTree(
+    input: AlistCopyInput,
+    list: (path: string) => Promise<AlistDriverListResult>,
+    report?: TransferProgressReporter,
+  ): Promise<AlistDriverMutationResult> {
+    const srcDir = requiredVirtualPath(input.src_dir, 'src_dir')
+    const dstDir = requiredVirtualPath(input.dst_dir, 'dst_dir')
+    const names = requiredNames(input.names)
+    const plan: Array<{ srcPath: string; dstPath: string; isDir: boolean }> = []
+
+    for (const name of names) {
+      const srcPath = cleanVirtualPath(path.posix.join(srcDir, name))
+      const dstPath = cleanVirtualPath(path.posix.join(dstDir, name))
+      await this.collectCopyPlan(srcPath, dstPath, list, plan)
+    }
+
+    await this.mkdir(dstDir)
+    let copied = 0
+    const files = plan.filter((item) => !item.isDir)
+    for (const item of plan) {
+      if (item.isDir) {
+        report?.({ progress: progressFor(copied, Math.max(files.length, 1)), message: `creating ${item.dstPath}` })
+        await this.mkdir(item.dstPath)
+        continue
+      }
+      report?.({ progress: progressFor(copied, Math.max(files.length, 1)), message: `copying ${path.posix.basename(item.srcPath)}` })
+      await this.copyOne(item.srcPath, item.dstPath)
+      copied += 1
+      report?.({ progress: progressFor(copied, Math.max(files.length, 1)), message: `copied ${copied}/${files.length}` })
+    }
+    return { copied }
+  }
+
   private async downloadLocal(mount: StorageMountRecord, rawPath: string, output: NodeJS.WritableStream): Promise<{ name: string }> {
     const fullPath = this.localPath(mount, rawPath)
     await pipeline(fs.createReadStream(fullPath), output)
@@ -83,6 +128,11 @@ export class StorageTransferService {
     await mkdir(path.dirname(fullPath), { recursive: true })
     await pipeline(input, fs.createWriteStream(fullPath))
     return { uploaded: 1 }
+  }
+
+  private async mkdirLocal(mount: StorageMountRecord, rawPath: string): Promise<{ created: number }> {
+    await mkdir(this.localPath(mount, rawPath), { recursive: true })
+    return { created: 1 }
   }
 
   private async downloadWebdav(mount: StorageMountRecord, rawPath: string, output: NodeJS.WritableStream): Promise<{ name: string }> {
@@ -105,6 +155,23 @@ export class StorageTransferService {
     } as RequestInit & { duplex: 'half' })
     if (!response.ok) throw new BadRequestException(`WebDAV upload failed: ${response.status}`)
     return { uploaded: 1 }
+  }
+
+  private async mkdirWebdav(mount: StorageMountRecord, rawPath: string): Promise<{ created: number }> {
+    const auth = this.authorizations.getPrivate(mount.authorization_id)
+    const rootPath = cleanVirtualPath(readString(mount.props.root_path) || readString(auth.props.root_path) || '/')
+    const rel = relativePath(mount, rawPath)
+    const parts = cleanVirtualPath(path.posix.join(rootPath, rel)).split('/').filter(Boolean)
+    let current = ''
+    for (const part of parts) {
+      current = path.posix.join(current, part)
+      const base = String(mount.props.address || auth.endpoint || '').replace(/\/+$/, '')
+      const url = `${base}/${current.split('/').filter(Boolean).map(encodeURIComponent).join('/')}`
+      const response = await fetch(url, { method: 'MKCOL', headers: webdavHeaders(auth) })
+      if (response.ok || response.status === 405) continue
+      throw new BadRequestException(`WebDAV mkdir failed: ${response.status}`)
+    }
+    return { created: 1 }
   }
 
   private async downloadAdb(mount: StorageMountRecord, rawPath: string, output: NodeJS.WritableStream): Promise<{ name: string }> {
@@ -149,6 +216,19 @@ export class StorageTransferService {
     }
   }
 
+  private async mkdirAdb(mount: StorageMountRecord, rawPath: string): Promise<{ created: number }> {
+    const context = this.adbContext(mount)
+    const remote = remotePath(context.rootPath, relativePath(mount, rawPath))
+    const result = await cliBridge.run('adb-cli', 'mkdir_path', {
+      device: context.device,
+      path: remote,
+    })
+    if (result.status !== 'success') {
+      throw new BadRequestException(result.message || result.error || 'ADB mkdir_path failed')
+    }
+    return { created: 1 }
+  }
+
   private async downloadSftp(mount: StorageMountRecord, rawPath: string, output: NodeJS.WritableStream): Promise<{ name: string }> {
     return this.withSftp(mount, async (sftp, context) => {
       const remote = remotePath(context.rootPath, relativePath(mount, rawPath))
@@ -163,6 +243,14 @@ export class StorageTransferService {
       await mkdirSftp(sftp, path.posix.dirname(remote))
       await pipeline(input, sftp.createWriteStream(remote))
       return { uploaded: 1 }
+    })
+  }
+
+  private async mkdirSftpPath(mount: StorageMountRecord, rawPath: string): Promise<{ created: number }> {
+    return this.withSftp(mount, async (sftp, context) => {
+      const remote = remotePath(context.rootPath, relativePath(mount, rawPath))
+      await mkdirSftp(sftp, remote)
+      return { created: 1 }
     })
   }
 
@@ -227,6 +315,33 @@ export class StorageTransferService {
     await Promise.all([read, write])
   }
 
+  private async collectCopyPlan(
+    srcPath: string,
+    dstPath: string,
+    list: (path: string) => Promise<AlistDriverListResult>,
+    plan: Array<{ srcPath: string; dstPath: string; isDir: boolean }>,
+  ): Promise<void> {
+    const detail = await this.entryDetail(srcPath, list)
+    if (!detail.is_dir) {
+      plan.push({ srcPath, dstPath, isDir: false })
+      return
+    }
+    plan.push({ srcPath, dstPath, isDir: true })
+    const children = await list(srcPath)
+    for (const child of children.entries) {
+      await this.collectCopyPlan(child.path, cleanVirtualPath(path.posix.join(dstPath, child.name)), list, plan)
+    }
+  }
+
+  private async entryDetail(srcPath: string, list: (path: string) => Promise<AlistDriverListResult>): Promise<Pick<AlistDriverEntry, 'is_dir'>> {
+    const parent = cleanVirtualPath(path.posix.dirname(srcPath))
+    const name = path.posix.basename(srcPath)
+    const siblings = await list(parent)
+    const entry = siblings.entries.find((item) => item.name === name || cleanVirtualPath(item.path) === srcPath)
+    if (!entry) throw new BadRequestException(`source path not found: ${srcPath}`)
+    return { is_dir: entry.is_dir }
+  }
+
   private adbContext(mount: StorageMountRecord): { device: string; rootPath: string } {
     const auth = this.authorizations.getPrivate(mount.authorization_id)
     const device = readString(mount.props.device) || readString(mount.props.address) || readString(auth.endpoint)
@@ -257,7 +372,7 @@ function requiredNames(value: unknown): string[] {
   if (!Array.isArray(value) || value.length === 0) throw new BadRequestException('names is required')
   return value.map((item) => {
     const name = String(item || '').trim()
-    if (!name || name.includes('/') || name.includes('\\')) throw new BadRequestException(`invalid name: ${name}`)
+    if (!name || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) throw new BadRequestException(`invalid name: ${name}`)
     return name
   })
 }
