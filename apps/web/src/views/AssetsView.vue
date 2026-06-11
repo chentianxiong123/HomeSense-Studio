@@ -7,6 +7,7 @@ import { mcpApi, type McpServerRecord } from '@/api/mcp'
 import { runtimeCapabilityApi, type RuntimeCapabilityMap, type RuntimeCapabilitySurface } from '@/api/runtimeCapabilities'
 import { skillApi } from '@/api/skills'
 import type { SkillRecord } from '@/api/skills'
+import AssetDomainBrief from '@/components/assets/AssetDomainBrief.vue'
 import AssetDomainGrid from '@/components/assets/AssetDomainGrid.vue'
 import { useLocale } from '@/composables/useLocale'
 
@@ -435,20 +436,12 @@ function formatChinaTime(date: Date) {
 
       <main :class="{ 'memory-main': selectedDomainKey === 'memory', 'capability-main': selectedDomainKey === 'runtime_capability' }">
         <template v-if="selectedDomainKey === 'runtime_capability'">
-          <div class="memory-brief">
-            <article>
-              <span>{{ label('定位', 'Role') }}</span>
-              <p>{{ selectedDomain.role }}</p>
-            </article>
-            <article>
-              <span>{{ label('LLM 如何使用', 'LLM Usage') }}</span>
-              <p>{{ selectedDomain.llmUsage }}</p>
-            </article>
-            <article>
-              <span>{{ label('下一步', 'Next') }}</span>
-              <p>{{ selectedDomain.nextStep }}</p>
-            </article>
-          </div>
+          <AssetDomainBrief
+            :role="selectedDomain.role"
+            :llm-usage="selectedDomain.llmUsage"
+            :next-step="selectedDomain.nextStep"
+            :label="label"
+          />
 
           <div class="capability-domain-strip">
             <article
@@ -500,20 +493,12 @@ function formatChinaTime(date: Date) {
         </template>
 
         <template v-else-if="selectedDomainKey === 'memory'">
-          <div class="memory-brief">
-            <article>
-              <span>{{ label('定位', 'Role') }}</span>
-              <p>{{ selectedDomain.role }}</p>
-            </article>
-            <article>
-              <span>{{ label('LLM 如何使用', 'LLM Usage') }}</span>
-              <p>{{ selectedDomain.llmUsage }}</p>
-            </article>
-            <article>
-              <span>{{ label('下一步', 'Next') }}</span>
-              <p>{{ selectedDomain.nextStep }}</p>
-            </article>
-          </div>
+          <AssetDomainBrief
+            :role="selectedDomain.role"
+            :llm-usage="selectedDomain.llmUsage"
+            :next-step="selectedDomain.nextStep"
+            :label="label"
+          />
 
           <div class="memory-subtypes">
             <article
@@ -582,20 +567,12 @@ function formatChinaTime(date: Date) {
         </template>
 
         <template v-else-if="selectedDomainKey === 'skill' || selectedDomainKey === 'device_skill'">
-          <div class="memory-brief">
-            <article>
-              <span>{{ label('定位', 'Role') }}</span>
-              <p>{{ selectedDomain.role }}</p>
-            </article>
-            <article>
-              <span>{{ label('LLM 如何使用', 'LLM Usage') }}</span>
-              <p>{{ selectedDomain.llmUsage }}</p>
-            </article>
-            <article>
-              <span>{{ label('下一步', 'Next') }}</span>
-              <p>{{ selectedDomain.nextStep }}</p>
-            </article>
-          </div>
+          <AssetDomainBrief
+            :role="selectedDomain.role"
+            :llm-usage="selectedDomain.llmUsage"
+            :next-step="selectedDomain.nextStep"
+            :label="label"
+          />
 
           <div class="asset-index-panel">
             <div class="memory-list-head">
@@ -628,20 +605,12 @@ function formatChinaTime(date: Date) {
         </template>
 
         <template v-else-if="selectedDomainKey === 'mcp_skill'">
-          <div class="memory-brief">
-            <article>
-              <span>{{ label('定位', 'Role') }}</span>
-              <p>{{ selectedDomain.role }}</p>
-            </article>
-            <article>
-              <span>{{ label('LLM 如何使用', 'LLM Usage') }}</span>
-              <p>{{ selectedDomain.llmUsage }}</p>
-            </article>
-            <article>
-              <span>{{ label('下一步', 'Next') }}</span>
-              <p>{{ selectedDomain.nextStep }}</p>
-            </article>
-          </div>
+          <AssetDomainBrief
+            :role="selectedDomain.role"
+            :llm-usage="selectedDomain.llmUsage"
+            :next-step="selectedDomain.nextStep"
+            :label="label"
+          />
 
           <div class="asset-index-panel">
             <div class="memory-list-head">
@@ -674,18 +643,12 @@ function formatChinaTime(date: Date) {
         </template>
 
         <template v-else>
-          <article>
-            <span>{{ label('定位', 'Role') }}</span>
-            <p>{{ selectedDomain.role }}</p>
-          </article>
-          <article>
-            <span>{{ label('LLM 如何使用', 'LLM Usage') }}</span>
-            <p>{{ selectedDomain.llmUsage }}</p>
-          </article>
-          <article>
-            <span>{{ label('下一步', 'Next') }}</span>
-            <p>{{ selectedDomain.nextStep }}</p>
-          </article>
+          <AssetDomainBrief
+            :role="selectedDomain.role"
+            :llm-usage="selectedDomain.llmUsage"
+            :next-step="selectedDomain.nextStep"
+            :label="label"
+          />
         </template>
       </main>
     </section>
@@ -862,12 +825,6 @@ h1 {
   font-size: 14px;
   font-weight: 700;
   line-height: 1.7;
-}
-
-.memory-brief {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
 }
 
 .memory-subtypes {
@@ -1284,7 +1241,6 @@ h1 {
   }
 
   .domain-detail main,
-  .memory-brief,
   .memory-subtypes,
   .asset-index-grid {
     grid-template-columns: 1fr;
