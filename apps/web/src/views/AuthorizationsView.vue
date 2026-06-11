@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { api, type AuthStatus, type MiDeviceCandidate, type UserDevice } from '@/api'
+import { api } from '@/api'
 import { streamingGatewayApi, type MoonlightWebRuntimeStatus, type StreamingHost, type StreamingHostProbe } from '@/api/streamingGateway'
 import AdbAuthPanel from '@/components/auth/AdbAuthPanel.vue'
 import DlnaAuthPanel from '@/components/auth/DlnaAuthPanel.vue'
+import MiAuthPanel from '@/components/auth/MiAuthPanel.vue'
 import SshAuthPanel from '@/components/auth/SshAuthPanel.vue'
 import StreamingGatewayPanel from '@/components/remote-workspace/StreamingGatewayPanel.vue'
 import StorageCredentialsPanel from '@/components/storage/StorageCredentialsPanel.vue'
@@ -15,6 +16,7 @@ type ExternalProviderId = 'mi' | 'bilibili'
 type LocalProviderId = 'adb' | 'dlna' | 'streaming' | 'alist' | 'ssh' | 'frp' | 'smb'
 
 type ProviderTone = 'ok' | 'warn' | 'bad' | 'muted'
+type MiStatusSummary = { loggedIn: boolean; boundCount: number }
 
 const router = useRouter()
 const { locale } = useLocale()
@@ -24,10 +26,6 @@ const activeTab = ref<AuthTab>('external')
 const selectedExternal = ref<ExternalProviderId>('mi')
 const selectedLocal = ref<LocalProviderId>('adb')
 
-const auth = ref<AuthStatus | null>(null)
-const devices = ref<UserDevice[]>([])
-const candidates = ref<MiDeviceCandidate[]>([])
-const candidatesLoaded = ref(false)
 const streamingHosts = ref<StreamingHost[]>([])
 const streamingHostProbes = ref<Record<string, StreamingHostProbe>>({})
 const streamingRuntimeStatus = ref<MoonlightWebRuntimeStatus | null>(null)
@@ -42,6 +40,9 @@ const streamingHostRoom = ref('')
 const streamingHostNetworkPath = ref('lan')
 const storageCredentialCount = ref(0)
 const storageCredentialsPanel = ref<InstanceType<typeof StorageCredentialsPanel> | null>(null)
+const miAuthPanel = ref<InstanceType<typeof MiAuthPanel> | null>(null)
+const miLoggedIn = ref(false)
+const miBoundCount = ref(0)
 const adbAuthPanel = ref<InstanceType<typeof AdbAuthPanel> | null>(null)
 const adbBoundCount = ref(0)
 const dlnaAuthPanel = ref<InstanceType<typeof DlnaAuthPanel> | null>(null)
@@ -52,9 +53,6 @@ const sshTargetCount = ref(0)
 const busy = ref<Record<string, boolean>>({})
 const errorMessage = ref('')
 const successMessage = ref('')
-const qrPolling = ref(false)
-const qrStatusMessage = ref('')
-let qrPollTimer: ReturnType<typeof setInterval> | null = null
 let successTimer: ReturnType<typeof setTimeout> | null = null
 
 function label(zh: string, en: string) {
@@ -80,22 +78,12 @@ function showSuccess(message: string) {
   }, 2600)
 }
 
+function updateMiStatus(summary: MiStatusSummary) {
+  miLoggedIn.value = summary.loggedIn
+  miBoundCount.value = summary.boundCount
+}
+
 const anyBusy = computed(() => Object.keys(busy.value).length > 0)
-const authData = computed(() => auth.value?.data)
-const authDataRecord = computed(() => authData.value as (AuthStatus['data'] & Record<string, unknown>) | undefined)
-const loggedIn = computed(() => Boolean(authData.value?.logged_in))
-const tokenValid = computed(() => authData.value?.token_valid !== false && loggedIn.value)
-const miUser = computed(() => authData.value?.user_id || label('未连接', 'Not connected'))
-const qrImage = computed(() => getString(authData.value?.qr?.qr_image) || getString(authDataRecord.value?.qr_image))
-const qrLink = computed(() =>
-  getString(authData.value?.qr?.login_url) ||
-  getString(authDataRecord.value?.qr_url) ||
-  getString(authDataRecord.value?.login_url) ||
-  getString(authData.value?.qr_url) ||
-  getString(authData.value?.qr?.lp_url) ||
-  getString(authDataRecord.value?.status_url),
-)
-const miBoundCount = computed(() => devices.value.filter((device) => typeof device.props?.mi_did === 'string' && device.props.mi_did).length)
 const streamingHostCount = computed(() => streamingHosts.value.length)
 
 type StreamingGatewaySpec = {
@@ -112,8 +100,8 @@ const externalProviders = computed(() => [
     id: 'mi' as const,
     name: 'Mi',
     subtitle: label('米家账号', 'Mi account'),
-    status: loggedIn.value ? label('已登录', 'Logged in') : label('未登录', 'Logged out'),
-    tone: loggedIn.value ? 'ok' as const : 'muted' as const,
+    status: miLoggedIn.value ? label('已登录', 'Logged in') : label('未登录', 'Logged out'),
+    tone: miLoggedIn.value ? 'ok' as const : 'muted' as const,
     meta: `${miBoundCount.value} ${label('台设备', 'devices')}`,
   },
   {
@@ -190,14 +178,12 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  stopQrPolling()
   if (successTimer) clearTimeout(successTimer)
 })
 
 async function loadAll() {
   await Promise.allSettled([
-    loadAuthStatus(),
-    loadDevices(),
+    miAuthPanel.value?.refresh(),
     adbAuthPanel.value?.refresh(),
     dlnaAuthPanel.value?.refresh(),
     loadSshTargetCount(),
@@ -214,35 +200,6 @@ async function loadSshTargetCount() {
     sshTargetCount.value = res.data.filter((target) => target.kind === 'ssh').length
   } catch (error) {
     console.warn('failed to load ssh target count', error)
-  }
-}
-
-async function loadAuthStatus(options?: { refresh?: boolean }) {
-  setBusy('mi-status', true)
-  errorMessage.value = ''
-  try {
-    auth.value = await api.auth.status(options)
-  } catch (error) {
-    errorMessage.value = (error as Error).message || String(error)
-  } finally {
-    setBusy('mi-status', false)
-  }
-}
-
-async function refreshMiStatus() {
-  await loadAuthStatus({ refresh: true })
-}
-
-async function loadDevices() {
-  setBusy('devices', true)
-  errorMessage.value = ''
-  try {
-    const deviceResult = await api.userDevices.list()
-    devices.value = deviceResult.devices ?? []
-  } catch (error) {
-    errorMessage.value = (error as Error).message || String(error)
-  } finally {
-    setBusy('devices', false)
   }
 }
 
@@ -318,7 +275,6 @@ async function registerStreamingHost() {
     streamingHostFormOpen.value = false
     streamingMessage.value = label('Sunshine 主机已保存', 'Sunshine host saved')
     await loadStreamingHosts()
-    await loadDevices()
   } catch (error) {
     streamingError.value = (error as Error).message || String(error)
   } finally {
@@ -366,7 +322,6 @@ async function removeStreamingHost(host: StreamingHost) {
     await streamingGatewayApi.removeHost(host.id)
     streamingMessage.value = label('Sunshine 主机已删除', 'Sunshine host removed')
     await loadStreamingHosts()
-    await loadDevices()
   } catch (error) {
     streamingError.value = (error as Error).message || String(error)
   } finally {
@@ -378,117 +333,6 @@ function openStreamingRuntime() {
   const endpoint = streamingRuntimeStatus.value?.endpoint || ''
   if (!endpoint.startsWith('http')) return
   window.open(endpoint, '_blank', 'noopener,noreferrer')
-}
-
-async function startMiQrLogin() {
-  stopQrPolling()
-  setBusy('mi-login', true)
-  errorMessage.value = ''
-  qrStatusMessage.value = ''
-  try {
-    auth.value = await api.auth.qrStart()
-    const message = auth.value.data?.message || label('请使用米家 App 扫码', 'Scan with Mi Home')
-    qrStatusMessage.value = message
-
-    if (qrImage.value || qrLink.value) {
-      qrPolling.value = true
-      qrPollTimer = setInterval(() => {
-        void pollMiQrStatus()
-      }, 2000)
-      return
-    }
-
-    await loadAuthStatus()
-  } catch (error) {
-    errorMessage.value = (error as Error).message || String(error)
-  } finally {
-    setBusy('mi-login', false)
-  }
-}
-
-async function pollMiQrStatus() {
-  try {
-    const result = await api.auth.qrStatus()
-    const payload = result.data as (AuthStatus['data'] & Record<string, unknown>) | undefined
-    const rawStatus = String(payload?.status ?? result.status ?? '')
-
-    if (payload?.logged_in || rawStatus === 'success' || rawStatus === 'confirmed') {
-      auth.value = result
-      qrStatusMessage.value = payload?.message || label('已登录', 'Logged in')
-      stopQrPolling()
-      await loadAuthStatus()
-      return
-    }
-
-    if (rawStatus === 'expired' || rawStatus === 'failed' || result.status === 'error') {
-      qrStatusMessage.value = result.message || payload?.message || label('二维码已失效', 'QR code expired')
-      stopQrPolling()
-      return
-    }
-
-    qrStatusMessage.value = payload?.message || result.message || label('等待扫码确认', 'Waiting for confirmation')
-  } catch (error) {
-    qrStatusMessage.value = (error as Error).message || String(error)
-    stopQrPolling()
-  }
-}
-
-function stopQrPolling() {
-  qrPolling.value = false
-  if (qrPollTimer) {
-    clearInterval(qrPollTimer)
-    qrPollTimer = null
-  }
-}
-
-async function resetMiQr() {
-  stopQrPolling()
-  setBusy('mi-reset', true)
-  errorMessage.value = ''
-  try {
-    const result = await api.auth.qrReset()
-    qrStatusMessage.value = result.data?.message || label('已重置二维码状态', 'QR state reset')
-    await loadAuthStatus()
-  } catch (error) {
-    errorMessage.value = (error as Error).message || String(error)
-  } finally {
-    setBusy('mi-reset', false)
-  }
-}
-
-async function logoutMi() {
-  stopQrPolling()
-  setBusy('mi-logout', true)
-  errorMessage.value = ''
-  try {
-    auth.value = await api.auth.logout()
-    candidates.value = []
-    candidatesLoaded.value = false
-    qrStatusMessage.value = ''
-    showSuccess(label('Mi 已退出', 'Mi logged out'))
-  } catch (error) {
-    errorMessage.value = (error as Error).message || String(error)
-  } finally {
-    setBusy('mi-logout', false)
-  }
-}
-
-async function loadMiCandidates() {
-  setBusy('mi-candidates', true)
-  errorMessage.value = ''
-  try {
-    const result = await api.userDevices.miCandidates()
-    candidates.value = result.devices ?? []
-    candidatesLoaded.value = true
-  } catch (error) {
-    errorMessage.value = (error as Error).message || String(error)
-  } finally {
-    setBusy('mi-candidates', false)
-  }
-}
-
-function getString(value: unknown): string {
-  return typeof value === 'string' ? value : ''
 }
 
 </script>
@@ -534,80 +378,14 @@ function getString(value: unknown): string {
         </button>
       </aside>
 
-      <section v-if="selectedExternal === 'mi'" class="detail-surface">
-        <div class="detail-head">
-          <div>
-            <span class="eyebrow">{{ label('外部账号', 'External') }}</span>
-            <h2>Mi</h2>
-          </div>
-          <span :class="['pill', loggedIn ? 'ok' : 'muted']">
-            {{ loggedIn ? label('已登录', 'Logged in') : label('未登录', 'Logged out') }}
-          </span>
-        </div>
-
-        <div class="mi-account">
-          <div class="account-main">
-            <span class="field-label">{{ label('账号', 'Account') }}</span>
-            <strong>{{ miUser }}</strong>
-            <div class="token-line">
-              <span :class="['pill', tokenValid ? 'ok' : 'muted']">{{ tokenValid ? 'Token OK' : label('未验证', 'Unverified') }}</span>
-              <span>{{ miBoundCount }} {{ label('台设备绑定 Mi', 'Mi device bindings') }}</span>
-            </div>
-          </div>
-          <div class="account-actions">
-            <button class="plain-btn" :disabled="isBusy('mi-status')" @click="refreshMiStatus">{{ label('检查', 'Check') }}</button>
-            <button class="primary-btn" :disabled="isBusy('mi-login')" @click="startMiQrLogin">
-              {{ isBusy('mi-login') ? label('生成中', 'Starting') : label('扫码登录', 'QR Login') }}
-            </button>
-            <button v-if="qrPolling || qrImage || qrLink" class="plain-btn" :disabled="isBusy('mi-reset')" @click="resetMiQr">
-              {{ label('重置二维码', 'Reset QR') }}
-            </button>
-            <button class="plain-btn" @click="router.push('/authorizations/mi-cli')">mi-cli</button>
-            <button v-if="loggedIn" class="danger-btn" :disabled="isBusy('mi-logout')" @click="logoutMi">{{ label('退出', 'Logout') }}</button>
-          </div>
-        </div>
-
-        <div class="qr-row">
-          <div class="qr-frame">
-            <img v-if="qrImage" :src="qrImage" alt="Mi QR Code" />
-            <a v-else-if="qrLink" :href="qrLink" target="_blank" rel="noreferrer">{{ label('打开二维码链接', 'Open QR link') }}</a>
-            <span v-else>{{ loggedIn ? label('当前无需扫码', 'No QR needed') : label('未生成二维码', 'No QR generated') }}</span>
-          </div>
-          <div class="qr-copy">
-            <strong>{{ loggedIn ? label('米家账号已接管', 'Mi account connected') : label('米家扫码登录', 'Mi QR login') }}</strong>
-            <span>{{ qrStatusMessage || authData?.message || label('状态来自 mi-cli', 'Status from mi-cli') }}</span>
-            <span v-if="qrPolling" class="polling-text">{{ label('轮询中', 'Polling') }}</span>
-          </div>
-        </div>
-
-        <section class="subsection">
-          <div class="subsection-head">
-            <div>
-              <strong>{{ label('Mi 候选设备', 'Mi Candidates') }}</strong>
-              <small>{{ candidatesLoaded ? `${candidates.length}` : label('按需读取', 'Load on demand') }}</small>
-            </div>
-            <button class="plain-btn" :disabled="isBusy('mi-candidates')" @click="loadMiCandidates">
-              {{ isBusy('mi-candidates') ? label('读取中', 'Loading') : label('读取候选', 'Load') }}
-            </button>
-          </div>
-          <div v-if="!candidatesLoaded" class="empty-line">{{ label('尚未读取。', 'Not loaded yet.') }}</div>
-          <div v-else-if="candidates.length === 0" class="empty-line">{{ label('没有候选设备。', 'No candidates.') }}</div>
-          <div v-else class="candidate-table">
-            <div class="candidate-row header">
-              <span>{{ label('名称', 'Name') }}</span>
-              <span>{{ label('型号', 'Model') }}</span>
-              <span>DID</span>
-              <span>{{ label('房间', 'Room') }}</span>
-            </div>
-            <div v-for="candidate in candidates.slice(0, 12)" :key="candidate.did" class="candidate-row">
-              <strong>{{ candidate.name || candidate.did }}</strong>
-              <code>{{ candidate.model || '-' }}</code>
-              <code>{{ candidate.did }}</code>
-              <span>{{ candidate.room_name || '-' }}</span>
-            </div>
-          </div>
-        </section>
-      </section>
+      <MiAuthPanel
+        v-if="selectedExternal === 'mi'"
+        ref="miAuthPanel"
+        :label="label"
+        @status-change="updateMiStatus"
+        @error="errorMessage = $event"
+        @success="showSuccess"
+      />
 
       <section v-else class="detail-surface">
         <div class="detail-head">
@@ -783,9 +561,7 @@ h2 {
 }
 
 .head-actions,
-.account-actions,
-.row-actions,
-.subsection-head {
+.row-actions {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -810,9 +586,7 @@ h2 {
 }
 
 .scope-tab strong,
-.provider-item strong,
-.account-main strong,
-.subsection-head strong {
+.provider-item strong {
   color: var(--text-primary);
   font-size: 15px;
   font-weight: 900;
@@ -822,10 +596,6 @@ h2 {
 .scope-tab span,
 .provider-item small,
 .provider-item em,
-.field-label,
-.token-line,
-.qr-copy span,
-.subsection-head small,
 .empty-line {
   color: var(--text-tertiary);
   font-size: 13px;
@@ -903,89 +673,17 @@ h2 {
   gap: 14px;
 }
 
-.detail-head,
-.mi-account,
-.qr-row {
+.detail-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
 }
 
-.mi-account,
-.qr-row,
-.empty-line,
-.candidate-row {
+.empty-line {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   background: #ffffff;
-}
-
-.mi-account,
-.qr-row {
-  padding: 16px;
-}
-
-.account-main,
-.qr-copy,
-.subsection-head > div {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.token-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.qr-row {
-  justify-content: flex-start;
-}
-
-.qr-frame {
-  width: 164px;
-  min-height: 164px;
-  border: 1px dashed #cbd5e1;
-  border-radius: 8px;
-  background: #f8fafc;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px;
-  text-align: center;
-}
-
-.qr-frame img {
-  width: 138px;
-  height: 138px;
-  border-radius: 6px;
-  background: #fff;
-}
-
-.qr-frame a,
-.qr-frame span {
-  color: #0f766e;
-  font-size: 13px;
-  font-weight: 900;
-  overflow-wrap: anywhere;
-}
-
-.polling-text {
-  color: #2563eb;
-}
-
-.subsection,
-.candidate-table {
-  display: grid;
-  gap: 8px;
-}
-
-.subsection-head {
-  justify-content: space-between;
 }
 
 .empty-line {
@@ -995,39 +693,6 @@ h2 {
 
 .empty-line.left {
   text-align: left;
-}
-
-.candidate-row {
-  min-height: 42px;
-  padding: 9px 11px;
-  display: grid;
-  grid-template-columns: minmax(140px, 1fr) minmax(150px, 1fr) minmax(130px, 0.8fr) minmax(80px, 0.5fr);
-  gap: 10px;
-  align-items: center;
-}
-
-.candidate-row.header {
-  min-height: 30px;
-  border: 0;
-  background: transparent;
-  color: var(--text-tertiary);
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.candidate-row strong,
-.candidate-row span,
-code {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-code {
-  color: var(--text-secondary);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
-  font-weight: 800;
 }
 
 .row-actions {
@@ -1147,21 +812,14 @@ button:disabled {
   }
 
   .page-head,
-  .detail-head,
-  .mi-account,
-  .qr-row {
+  .detail-head {
     align-items: flex-start;
     flex-direction: column;
   }
 
   .scope-tabs,
-  .provider-rail,
-  .candidate-row {
+  .provider-rail {
     grid-template-columns: 1fr;
-  }
-
-  .qr-frame {
-    width: 100%;
   }
 }
 </style>
