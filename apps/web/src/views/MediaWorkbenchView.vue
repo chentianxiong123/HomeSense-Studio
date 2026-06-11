@@ -2,13 +2,11 @@
 import { computed, onMounted, ref } from 'vue'
 import { mediaApi } from '@/api/media'
 import type { ResourceSearchHit } from '@/api/resources'
-import BilibiliSearchPanel from '@/components/media/BilibiliSearchPanel.vue'
 import MediaBookmarksPanel from '@/components/media/MediaBookmarksPanel.vue'
 import MediaNowPlayingPanel from '@/components/media/MediaNowPlayingPanel.vue'
 import MediaOutputPanel from '@/components/media/MediaOutputPanel.vue'
 import MediaQueuePanel from '@/components/media/MediaQueuePanel.vue'
-import MediaUrlSniffPanel from '@/components/media/MediaUrlSniffPanel.vue'
-import ResourceSearchPanel from '@/components/resources/ResourceSearchPanel.vue'
+import MediaSourcePanel from '@/components/media/MediaSourcePanel.vue'
 import { useLocale } from '@/composables/useLocale'
 import { useMediaPlayer } from '@/features/media/player'
 import type { MediaBookmark, MediaCandidate, MediaItem, MediaPlayMode, MediaSourceSite } from '@/features/media/types'
@@ -524,56 +522,44 @@ function titleFromUrl(url: string): string {
     </header>
 
     <main class="media-layout">
-      <section class="panel source-panel">
-        <BilibiliSearchPanel
-          v-model:keyword="biliKeyword"
-          :loading="biliLoading"
-          :error="biliError"
-          :results="biliResults"
-          :resolving-id="resolvingId"
-          :label="label"
-          :format-time="formatTime"
-          @search="searchBilibili"
-          @play="playBilibili"
-          @queue="queueBilibili"
-          @bookmark="bookmarkBilibili"
-        />
-        <div class="source-divider">
-          <span>{{ label('互联网资源', 'Internet Resources') }}</span>
-        </div>
-
-        <ResourceSearchPanel
-          @select="selectResourceUrl"
-          @sniff="sniffResourceHit"
-          @play="playResourceHit"
-          @queue="queueResourceHit"
-          @bookmark="bookmarkResourceHit"
-        />
-
-        <MediaUrlSniffPanel
-          v-model:url="urlInput"
-          v-model:title="titleInput"
-          v-model:artist="artistInput"
-          :sniff-loading="sniffLoading"
-          :candidates="sniffCandidates"
-          :preparing-candidate-id="preparingCandidateId"
-          :form-error="formError"
-          :sniff-error="sniffError"
-          :session-error="session.state === 'error' ? (session.error || '') : ''"
-          :label="label"
-          :stream-kind-label="streamKindLabel"
-          :candidate-subtitle="candidateSubtitle"
-          @submit="submitUrl"
-          @sniff="sniffMediaUrl"
-          @queue="queueUrl"
-          @bookmark="bookmarkUrl"
-          @select-source-url="selectSourceSiteUrl"
-          @source-sniff="applySourceSiteSniff"
-          @play-candidate="playCandidate"
-          @queue-candidate="queueCandidate"
-          @bookmark-candidate="bookmarkCandidate"
-        />
-      </section>
+      <MediaSourcePanel
+        v-model:bili-keyword="biliKeyword"
+        v-model:url="urlInput"
+        v-model:title="titleInput"
+        v-model:artist="artistInput"
+        :bili-loading="biliLoading"
+        :bili-error="biliError"
+        :bili-results="biliResults"
+        :resolving-id="resolvingId"
+        :sniff-loading="sniffLoading"
+        :candidates="sniffCandidates"
+        :preparing-candidate-id="preparingCandidateId"
+        :form-error="formError"
+        :sniff-error="sniffError"
+        :session-error="session.state === 'error' ? (session.error || '') : ''"
+        :label="label"
+        :format-time="formatTime"
+        :stream-kind-label="streamKindLabel"
+        :candidate-subtitle="candidateSubtitle"
+        @search-bilibili="searchBilibili"
+        @play-bilibili="playBilibili"
+        @queue-bilibili="queueBilibili"
+        @bookmark-bilibili="bookmarkBilibili"
+        @select-resource="selectResourceUrl"
+        @sniff-resource="sniffResourceHit"
+        @play-resource="playResourceHit"
+        @queue-resource="queueResourceHit"
+        @bookmark-resource="bookmarkResourceHit"
+        @submit-url="submitUrl"
+        @sniff-url="sniffMediaUrl"
+        @queue-url="queueUrl"
+        @bookmark-url="bookmarkUrl"
+        @select-source-url="selectSourceSiteUrl"
+        @source-sniff="applySourceSiteSniff"
+        @play-candidate="playCandidate"
+        @queue-candidate="queueCandidate"
+        @bookmark-candidate="bookmarkCandidate"
+      />
 
       <MediaNowPlayingPanel
         :active-item="activeItem"
@@ -729,28 +715,6 @@ h2 {
   min-height: 260px;
 }
 
-.panel-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.source-divider {
-  min-height: 1px;
-  border-top: 1px solid #e2e8f0;
-  display: flex;
-}
-
-.source-divider span {
-  margin-top: -8px;
-  padding-right: 9px;
-  background: #fff;
-  color: var(--text-tertiary);
-  font-size: 12px;
-  font-weight: 900;
-}
-
 @media (max-width: 1080px) {
   .media-page {
     padding: 22px 18px 126px;
@@ -762,8 +726,7 @@ h2 {
 }
 
 @media (max-width: 700px) {
-  .page-head,
-  .panel-head {
+  .page-head {
     align-items: stretch;
     flex-direction: column;
   }
