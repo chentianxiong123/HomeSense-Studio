@@ -9,6 +9,12 @@ import { type RoomConnectionLine } from '@/components/devices/RoomConnectionLine
 import RoomSettingsDialog from '@/components/devices/RoomSettingsDialog.vue'
 import { useLocale } from '@/composables/useLocale'
 import { useDeviceGroups } from '@/composables/useDeviceGroups'
+import {
+  useDevicesLayout,
+  type DevicePropsDraft,
+  type DeviceRatio,
+  type RoomPropsDraft,
+} from '@/composables/useDevicesLayout'
 import { pixelToRatio, ratioToPixel, looksLikeRatio, clampRatio } from '@/utils/roomCoords'
 
 const { locale } = useLocale()
@@ -46,21 +52,6 @@ const viewportWidth = ref(1000)
 const viewportHeight = ref(700)
 const isEditMode = ref(false)
 
-type LayoutKey = 'desktop' | 'mobile'
-// Room layout: canvas-pixel coordinates (x, y, w, h) on the floor plan.
-type RoomLayoutDraft = { x?: number; y?: number; w?: number; h?: number }
-type RoomPropsDraft = Record<string, unknown> & {
-  desktop?: RoomLayoutDraft
-  mobile?: RoomLayoutDraft
-  bgColor?: string
-}
-// Device layout: 0..1 ratios relative to the parent room's width/height.
-type DeviceRatio = { x?: number; y?: number }
-type DevicePropsDraft = Record<string, unknown> & {
-  desktop?: DeviceRatio
-  mobile?: DeviceRatio
-}
-
 const roomColorPresets = [
   { value: '', preview: 'rgba(255, 255, 255, 0.45)', zh: '默认', en: 'Default' },
   { value: 'rgba(14, 165, 233, 0.14)', preview: 'rgba(14, 165, 233, 0.14)', zh: '天空蓝', en: 'Sky Blue' },
@@ -92,134 +83,7 @@ const isPanning = ref(false)
 const panStartRawX = ref(0)
 const panStartRawY = ref(0)
 
-// Orientation Detection
 const isMobilePortrait = ref(false)
-
-function currentLayoutKey(): LayoutKey {
-  return isMobilePortrait.value ? 'mobile' : 'desktop'
-}
-
-function roomPropsRecord(room: Room): RoomPropsDraft {
-  if (!room.props || typeof room.props !== 'object') room.props = {}
-  return room.props as RoomPropsDraft
-}
-
-function getRoomLayoutSource(room: Room): RoomLayoutDraft {
-  const props = roomPropsRecord(room)
-  const layout = props[currentLayoutKey()]
-  if (layout && typeof layout === 'object') return layout
-  return props as RoomLayoutDraft
-}
-
-function getRoomBackground(room: Room, fallback = 'rgba(255, 255, 255, 0.45)'): string {
-  const background = roomPropsRecord(room).bgColor
-  return typeof background === 'string' && background.trim()
-    ? background
-    : fallback
-}
-
-const activeRooms = computed(() => {
-  return rooms.value.filter((room) => {
-    const layout = getRoomLayoutSource(room)
-    return (
-      typeof layout.x === 'number' &&
-      typeof layout.y === 'number' &&
-      typeof layout.w === 'number' &&
-      typeof layout.h === 'number'
-    )
-  })
-})
-
-function getRoomLayout(room: Room): { x: number; y: number; w: number; h: number } {
-  const layout = getRoomLayoutSource(room)
-  return {
-    x: layout.x ?? 50,
-    y: layout.y ?? 50,
-    w: layout.w ?? 260,
-    h: layout.h ?? 200,
-  }
-}
-
-function ensureRoomLayout(room: Room): RoomLayoutDraft {
-  const props = roomPropsRecord(room)
-  const key = currentLayoutKey()
-  const existing = props[key]
-  if (!existing || typeof existing !== 'object') {
-    const layout = getRoomLayout(room)
-    props[key] = { x: layout.x, y: layout.y, w: layout.w, h: layout.h }
-    room.props = props
-  }
-  return props[key] as RoomLayoutDraft
-}
-
-function getRoomCardStyle(room: Room) {
-  const layout = getRoomLayout(room)
-  return {
-    left: `${layout.x}px`,
-    top: `${layout.y}px`,
-    width: `${layout.w}px`,
-    height: `${layout.h}px`,
-    background: getRoomBackground(room),
-  }
-}
-
-function getDeviceLayoutSource(device: UserDevice): DeviceRatio {
-  const props = (device.props && typeof device.props === 'object'
-    ? device.props
-    : {}) as DevicePropsDraft
-  if (props !== device.props) device.props = props
-  const layout = props[currentLayoutKey()]
-  if (layout && typeof layout === 'object') return layout
-  return {} as DeviceRatio
-}
-
-function ensureDeviceLayout(device: UserDevice): DeviceRatio {
-  const props = (device.props && typeof device.props === 'object'
-    ? device.props
-    : {}) as DevicePropsDraft
-  if (props !== device.props) device.props = props
-  const key = currentLayoutKey()
-  const existing = props[key]
-  if (!existing || typeof existing !== 'object') {
-    props[key] = { x: 0.5, y: 0.5 }
-    device.props = props
-  }
-  return props[key] as DeviceRatio
-}
-
-// Returns the device's position as a 0..1 ratio relative to its parent room.
-function getDeviceLayout(device: UserDevice): { x: number; y: number } {
-  const layout = getDeviceLayoutSource(device)
-  return {
-    x: typeof layout.x === 'number' ? layout.x : 0.5,
-    y: typeof layout.y === 'number' ? layout.y : 0.5,
-  }
-}
-
-// Find the parent room for a device, falling back to the active or first room.
-function findParentRoom(device: UserDevice): Room | null {
-  const explicit = propNumber(device, 'room_id')
-  if (explicit != null) {
-    const r = rooms.value.find((room) => room.id === explicit)
-    if (r) return r
-  }
-  return activeRooms.value[0] ?? rooms.value[0] ?? null
-}
-
-// Returns the device's pixel position **inside its parent room** — the device
-// is rendered as a descendant of the room card, so its CSS left/top are
-// relative to the room's origin, not the canvas. Devices without a parent
-// room are hidden (display: none).
-function getDeviceStyle(device: UserDevice) {
-  const room = findParentRoom(device)
-  if (!room) return { display: 'none' }
-  const roomLayout = getRoomLayout(room)
-  const ratio = getDeviceLayout(device)
-  return {
-    left: `${ratio.x * roomLayout.w}px`,
-    top: `${ratio.y * roomLayout.h}px`,
-  }
-}
 
 function propString(d: UserDevice | null, key: string): string {
   if (!d) return ''
@@ -236,6 +100,25 @@ function propNumber(d: UserDevice | null, key: string): number | null {
   }
   return null
 }
+
+const {
+  activeRooms,
+  currentLayoutKey,
+  roomPropsRecord,
+  getRoomLayoutSource,
+  getRoomLayout,
+  ensureRoomLayout,
+  getRoomCardStyle,
+  ensureDeviceLayout,
+  getDeviceLayout,
+  findParentRoom,
+  getDeviceStyle,
+} = useDevicesLayout({
+  rooms,
+  devices,
+  isMobilePortrait,
+  propNumber,
+})
 
 const canvasRef = ref<InstanceType<typeof DevicesFloorCanvas> | null>(null)
 const roomElementRefs = new Map<number, HTMLElement>()
