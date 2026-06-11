@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, type UserDevice, type Room, type MiDeviceCandidate } from '@/api'
 import { cliApi } from '@/api/cli'
+import DeviceCreatorDialog from '@/components/devices/DeviceCreatorDialog.vue'
 import { useLocale } from '@/composables/useLocale'
 import { useDeviceGroups } from '@/composables/useDeviceGroups'
 import { pixelToRatio, ratioToPixel, looksLikeRatio, clampRatio } from '@/utils/roomCoords'
@@ -1302,57 +1303,19 @@ function getRoomConnections(roomId: number) {
       </div>
     </Teleport>
 
-    <Teleport to="body">
-      <div v-if="deviceCreatorOpen" class="room-settings-overlay" @click="closeDeviceCreator">
-        <form class="room-settings-panel glass-panel" @click.stop @submit.prevent="createDeviceFromDialog">
-          <header class="room-settings-head">
-            <div>
-              <span class="room-settings-kicker">{{ label('设备操作', 'Device Operations') }}</span>
-              <h3>{{ label('新增设备', 'Add Device') }}</h3>
-            </div>
-            <button class="room-settings-close" type="button" @click="closeDeviceCreator">×</button>
-          </header>
-
-          <label class="room-form-field">
-            <span>{{ label('设备名称', 'Device name') }}</span>
-            <input v-model="newDeviceName" type="text" :placeholder="label('例如：客厅电视', 'e.g. Living Room TV')" />
-          </label>
-
-          <label class="room-form-field">
-            <span>{{ label('设备类型', 'Device type') }}</span>
-            <select v-model="newDeviceType">
-              <option v-for="option in deviceTypeOptions" :key="option.value" :value="option.value">
-                {{ isZh ? option.zh : option.en }}
-              </option>
-            </select>
-          </label>
-
-          <label class="room-form-field">
-            <span>{{ label('所属房间', 'Room') }}</span>
-            <select v-model="newDeviceRoomId">
-              <option :value="null">{{ label('请选择房间', 'Select a room') }}</option>
-              <option v-for="room in activeRooms" :key="room.id" :value="room.id">
-                {{ room.name }}
-              </option>
-            </select>
-          </label>
-
-          <footer class="room-settings-actions">
-            <span class="device-create-note">
-              {{ label('创建后会出现在房间中心，可继续拖拽调整位置。', 'It will appear in the room center and can be dragged afterward.') }}
-            </span>
-            <div class="room-settings-save-group">
-              <button class="room-cancel-btn" type="button" :disabled="creatingDevice" @click="closeDeviceCreator">
-                {{ label('取消', 'Cancel') }}
-              </button>
-              <button class="room-save-btn" type="submit" :disabled="creatingDevice">
-                {{ creatingDevice ? label('创建中...', 'Creating...') : label('创建设备', 'Create Device') }}
-              </button>
-            </div>
-          </footer>
-        </form>
-      </div>
-    </Teleport>
+    <DeviceCreatorDialog
+      v-model:name="newDeviceName"
+      v-model:type="newDeviceType"
+      v-model:room-id="newDeviceRoomId"
+      :open="deviceCreatorOpen"
+      :rooms="activeRooms"
+      :device-type-options="deviceTypeOptions"
+      :creating="creatingDevice"
+      :is-zh="isZh"
+      :label="label"
+      @close="closeDeviceCreator"
+      @submit="createDeviceFromDialog"
+    />
   </div>
 </template>
 
