@@ -2,9 +2,9 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, type AuthStatus, type MiDeviceCandidate, type UserDevice } from '@/api'
-import { cliApi } from '@/api/cli'
 import { mediaApi } from '@/api/media'
 import { streamingGatewayApi, type MoonlightWebRuntimeStatus, type StreamingHost, type StreamingHostProbe } from '@/api/streamingGateway'
+import AdbAuthPanel from '@/components/auth/AdbAuthPanel.vue'
 import SshAuthPanel from '@/components/auth/SshAuthPanel.vue'
 import StreamingGatewayPanel from '@/components/remote-workspace/StreamingGatewayPanel.vue'
 import StorageCredentialsPanel from '@/components/storage/StorageCredentialsPanel.vue'
@@ -28,14 +28,6 @@ const auth = ref<AuthStatus | null>(null)
 const devices = ref<UserDevice[]>([])
 const candidates = ref<MiDeviceCandidate[]>([])
 const candidatesLoaded = ref(false)
-const adbFormOpen = ref(false)
-const editingAdbDevice = ref<UserDevice | null>(null)
-const formName = ref('')
-const formAdbAddress = ref('')
-const adbScanSubnet = ref('')
-const adbScanLoaded = ref(false)
-const adbScanResults = ref<AdbScanCandidate[]>([])
-const adbTestResults = ref<Record<string, { ok: boolean; message: string }>>({})
 const dlnaFormOpen = ref(false)
 const editingDlnaDevice = ref<UserDevice | null>(null)
 const formDlnaName = ref('')
@@ -57,6 +49,8 @@ const streamingHostRoom = ref('')
 const streamingHostNetworkPath = ref('lan')
 const storageCredentialCount = ref(0)
 const storageCredentialsPanel = ref<InstanceType<typeof StorageCredentialsPanel> | null>(null)
+const adbAuthPanel = ref<InstanceType<typeof AdbAuthPanel> | null>(null)
+const adbBoundCount = ref(0)
 const sshAuthPanel = ref<InstanceType<typeof SshAuthPanel> | null>(null)
 const sshTargetCount = ref(0)
 
@@ -107,26 +101,8 @@ const qrLink = computed(() =>
   getString(authDataRecord.value?.status_url),
 )
 const miBoundCount = computed(() => devices.value.filter((device) => typeof device.props?.mi_did === 'string' && device.props.mi_did).length)
-const adbBoundCount = computed(() => devices.value.filter((device) => typeof device.props?.adb_ip === 'string' && (device.props.adb_ip as string).trim()).length)
 const dlnaBoundCount = computed(() => devices.value.filter((device) => typeof device.props?.dlna_location === 'string' && (device.props.dlna_location as string).trim()).length)
 const streamingHostCount = computed(() => streamingHosts.value.length)
-
-type AdbScanCandidate = {
-  ip: string
-  port: number
-  address: string
-  open?: boolean
-  latency_ms?: number
-  adb_status?: string
-}
-
-type AdbScanData = {
-  subnet: string
-  ports: number[]
-  scanned: number
-  candidates: AdbScanCandidate[]
-  count: number
-}
 
 type DlnaCandidate = {
   id: string
@@ -143,13 +119,6 @@ type StreamingGatewaySpec = {
   detail: string
   capabilities: string[]
 }
-
-const adbRows = computed(() => {
-  return [...devices.value]
-    .filter((device) => typeof device.props?.adb_ip === 'string' && (device.props.adb_ip as string).trim())
-    .sort((left, right) => left.name.localeCompare(right.name, isZh.value ? 'zh-Hans-CN' : 'en'))
-    .map((device) => ({ device }))
-})
 
 const dlnaRows = computed(() => {
   return [...devices.value]
@@ -249,6 +218,7 @@ async function loadAll() {
   await Promise.allSettled([
     loadAuthStatus(),
     loadDevices(),
+    adbAuthPanel.value?.refresh(),
     loadSshTargetCount(),
     sshAuthPanel.value?.refresh(),
     loadStreamingHosts(),
@@ -292,79 +262,6 @@ async function loadDevices() {
     errorMessage.value = (error as Error).message || String(error)
   } finally {
     setBusy('devices', false)
-  }
-}
-
-async function openCreateAdbDevice() {
-  editingAdbDevice.value = null
-  formName.value = ''
-  formAdbAddress.value = ''
-  adbFormOpen.value = true
-}
-
-function openEditAdbDevice(device: UserDevice) {
-  editingAdbDevice.value = device
-  formName.value = device.name
-  formAdbAddress.value = (device.props?.adb_ip as string) ?? ''
-  adbFormOpen.value = true
-}
-
-function closeAdbForm() {
-  adbFormOpen.value = false
-  editingAdbDevice.value = null
-}
-
-async function submitAdbDevice() {
-  const name = formName.value.trim()
-  if (!name) return
-
-  const adbAddress = normalizeAdbAddress(formAdbAddress.value)
-  if (!adbAddress) return
-  const ipAddress = endpointHost(adbAddress)
-  const payload: { name: string; props: Record<string, unknown> } = {
-    name,
-    props: {
-      device_type: editingAdbDevice.value?.props?.device_type ?? 'other',
-      adb_ip: adbAddress,
-      ...(ipAddress ? { ip_address: ipAddress } : {}),
-    },
-  }
-  if (editingAdbDevice.value?.props?.room_id != null) {
-    payload.props.room_id = editingAdbDevice.value.props.room_id
-  }
-
-  const key = editingAdbDevice.value ? `adb-edit-${editingAdbDevice.value.id}` : 'adb-create'
-  setBusy(key, true)
-  errorMessage.value = ''
-  try {
-    if (editingAdbDevice.value) {
-      await api.userDevices.update(editingAdbDevice.value.id, payload)
-      showSuccess(label('ADB 端点已更新', 'ADB endpoint updated'))
-    } else {
-      await api.userDevices.create(payload)
-      showSuccess(label('ADB 端点已添加', 'ADB endpoint added'))
-    }
-    closeAdbForm()
-    await loadDevices()
-  } catch (error) {
-    errorMessage.value = (error as Error).message || String(error)
-  } finally {
-    setBusy(key, false)
-  }
-}
-
-async function deleteAdbDevice(device: UserDevice) {
-  if (!window.confirm(label(`删除 ADB 端点「${device.name}」？`, `Delete ADB endpoint "${device.name}"?`))) return
-  setBusy(`adb-delete-${device.id}`, true)
-  errorMessage.value = ''
-  try {
-    await api.userDevices.delete(device.id)
-    await loadDevices()
-    showSuccess(label('ADB 端点已删除', 'ADB endpoint deleted'))
-  } catch (error) {
-    errorMessage.value = (error as Error).message || String(error)
-  } finally {
-    setBusy(`adb-delete-${device.id}`, false)
   }
 }
 
@@ -500,86 +397,6 @@ function openStreamingRuntime() {
   const endpoint = streamingRuntimeStatus.value?.endpoint || ''
   if (!endpoint.startsWith('http')) return
   window.open(endpoint, '_blank', 'noopener,noreferrer')
-}
-
-async function scanAdbTargets() {
-  setBusy('adb-scan', true)
-  errorMessage.value = ''
-  adbScanLoaded.value = false
-  try {
-    const params: Record<string, unknown> = { ports: [5555], timeout_ms: 350 }
-    if (adbScanSubnet.value.trim()) params.subnet = adbScanSubnet.value.trim()
-    const result = await cliApi.run<AdbScanData>('adb-cli', {
-      action: 'scan_network',
-      params,
-      ttl_ms: 0,
-      bypass_cache: true,
-    })
-    if (result.status !== 'success' || !result.data) {
-      throw new Error(result.message || result.error || 'Failed to scan ADB targets')
-    }
-    adbScanResults.value = result.data.candidates ?? []
-    if (!adbScanSubnet.value.trim()) adbScanSubnet.value = result.data.subnet
-    adbScanLoaded.value = true
-  } catch (error) {
-    errorMessage.value = (error as Error).message || String(error)
-  } finally {
-    setBusy('adb-scan', false)
-  }
-}
-
-async function saveAdbCandidate(candidate: AdbScanCandidate) {
-  const address = normalizeAdbAddress(candidate.address)
-  if (!address) return
-  if (isAdbAddressSaved(address)) {
-    showSuccess(label('ADB 端点已存在', 'ADB endpoint already exists'))
-    return
-  }
-  const ipAddress = endpointHost(address)
-  setBusy(`adb-save-candidate-${address}`, true)
-  errorMessage.value = ''
-  try {
-    await api.userDevices.create({
-      name: `ADB ${address}`,
-      props: {
-        device_type: 'other',
-        adb_ip: address,
-        ...(ipAddress ? { ip_address: ipAddress } : {}),
-      },
-    })
-    await loadDevices()
-    showSuccess(label('ADB 候选已保存', 'ADB candidate saved'))
-  } catch (error) {
-    errorMessage.value = (error as Error).message || String(error)
-  } finally {
-    setBusy(`adb-save-candidate-${address}`, false)
-  }
-}
-
-async function testAdbAddress(address: string) {
-  const normalized = normalizeAdbAddress(address)
-  if (!normalized) return
-  setBusy(`adb-test-${normalized}`, true)
-  adbTestResults.value = { ...adbTestResults.value, [normalized]: { ok: false, message: label('测试中', 'Testing') } }
-  try {
-    const result = await cliApi.run<{ message?: string; address?: string }>('adb-cli', {
-      action: 'connect',
-      params: { device: normalized, max_attempts: 1, backoff_seconds: 1 },
-      ttl_ms: 0,
-      bypass_cache: true,
-    })
-    adbTestResults.value = {
-      ...adbTestResults.value,
-      [normalized]: {
-        ok: result.status === 'success',
-        message: result.data?.message || result.message || result.error || result.status,
-      },
-    }
-  } catch (error) {
-    adbTestResults.value = { ...adbTestResults.value, [normalized]: { ok: false, message: (error as Error).message || String(error) } }
-  } finally {
-    setBusy(`adb-test-${normalized}`, false)
-  }
 }
 
 function openCreateDlnaDevice() {
@@ -828,18 +645,8 @@ function getString(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
-function normalizeAdbAddress(value: string): string {
-  const address = value.trim()
-  return address && !address.includes(':') ? `${address}:5555` : address
-}
-
 function endpointHost(value: string): string {
   return value.split(':')[0]?.trim() ?? ''
-}
-
-function isAdbAddressSaved(address: string): boolean {
-  const normalized = normalizeAdbAddress(address)
-  return devices.value.some((device) => normalizeAdbAddress(getString(device.props?.adb_ip)) === normalized)
 }
 
 function isDlnaLocationSaved(location: string): boolean {
@@ -1001,112 +808,14 @@ function dlnaEndpoint(candidate: DlnaCandidate): string {
         </button>
       </aside>
 
-      <section v-if="selectedLocal === 'adb'" class="detail-surface">
-        <div class="detail-head">
-          <div>
-            <span class="eyebrow">{{ label('局域网账号', 'Local Network') }}</span>
-            <h2>ADB</h2>
-          </div>
-          <span :class="['pill', adbBoundCount > 0 ? 'ok' : 'muted']">
-            {{ adbBoundCount }} {{ label('个端点', 'endpoints') }}
-          </span>
-        </div>
-
-        <div class="list-toolbar">
-          <div>
-            <strong>ADB CLI</strong>
-            <small>{{ label('扫描候选只探测 5555 端口；保存后才进入设备授权。', 'Scan only probes port 5555; save a candidate to authorize it.') }}</small>
-          </div>
-          <div class="toolbar-actions">
-            <input v-model="adbScanSubnet" class="toolbar-input" placeholder="192.168.31.0/24" />
-            <button class="plain-btn" :disabled="isBusy('adb-scan')" @click="scanAdbTargets">
-              {{ isBusy('adb-scan') ? label('扫描中', 'Scanning') : label('扫描', 'Scan') }}
-            </button>
-            <button class="primary-btn" :disabled="isBusy('adb-create')" @click="openCreateAdbDevice">{{ label('新增端点', 'Add Endpoint') }}</button>
-            <button class="plain-btn" :disabled="isBusy('devices')" @click="loadDevices">{{ label('刷新', 'Refresh') }}</button>
-          </div>
-        </div>
-
-        <section class="subsection">
-          <div class="subsection-head">
-            <div>
-              <strong>{{ label('扫描候选', 'Scan Candidates') }}</strong>
-              <small>{{ adbScanLoaded ? `${adbScanResults.length}` : label('按需扫描', 'Scan on demand') }}</small>
-            </div>
-          </div>
-          <div v-if="!adbScanLoaded" class="empty-line left">
-            {{ label('输入网段或留空自动推断本机 /24 网段。', 'Enter a subnet or leave blank to infer the local /24 subnet.') }}
-          </div>
-          <div v-else-if="adbScanResults.length === 0" class="empty-line">
-            {{ label('没有发现开放 ADB 端口。', 'No open ADB ports found.') }}
-          </div>
-          <div v-else class="target-table">
-            <div class="target-row header">
-              <span>{{ label('地址', 'Address') }}</span>
-              <span>{{ label('状态', 'Status') }}</span>
-              <span>{{ label('操作', 'Actions') }}</span>
-            </div>
-            <div v-for="candidate in adbScanResults" :key="candidate.address" class="target-row">
-              <div class="endpoint-cell">
-                <code>{{ candidate.address }}</code>
-                <small v-if="candidate.latency_ms != null">{{ candidate.latency_ms }}ms</small>
-              </div>
-              <div class="endpoint-cell">
-                <span class="pill" :class="isAdbAddressSaved(candidate.address) ? 'ok' : 'muted'">
-                  {{ isAdbAddressSaved(candidate.address) ? label('已保存', 'Saved') : (candidate.adb_status || label('候选', 'Candidate')) }}
-                </span>
-                <small v-if="adbTestResults[candidate.address]" :class="['probe-result', adbTestResults[candidate.address].ok ? 'ok-text' : 'bad-text']">
-                  {{ adbTestResults[candidate.address].message }}
-                </small>
-              </div>
-              <div class="row-actions">
-                <button class="plain-btn compact" :disabled="isBusy(`adb-test-${candidate.address}`)" @click="testAdbAddress(candidate.address)">
-                  {{ isBusy(`adb-test-${candidate.address}`) ? label('测试中', 'Testing') : label('测试', 'Test') }}
-                </button>
-                <button class="primary-btn compact" :disabled="isAdbAddressSaved(candidate.address) || isBusy(`adb-save-candidate-${candidate.address}`)" @click="saveAdbCandidate(candidate)">
-                  {{ label('保存', 'Save') }}
-                </button>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <div v-if="adbRows.length === 0" class="empty-line">
-          {{ label('还没有 ADB 端点。', 'No ADB endpoints yet.') }}
-        </div>
-
-        <div v-else class="target-table">
-          <div class="target-row header">
-            <span>{{ label('名称', 'Name') }}</span>
-            <span>{{ label('地址', 'Endpoint') }}</span>
-            <span>{{ label('操作', 'Actions') }}</span>
-          </div>
-          <div v-for="row in adbRows" :key="row.device.id" class="target-row">
-            <div class="device-cell">
-              <strong>{{ row.device.name }}</strong>
-            </div>
-
-            <div class="endpoint-cell">
-              <code>{{ row.device.props?.adb_ip }}</code>
-              <small v-if="adbTestResults[getString(row.device.props?.adb_ip)]" :class="['probe-result', adbTestResults[getString(row.device.props?.adb_ip)].ok ? 'ok-text' : 'bad-text']">
-                {{ adbTestResults[getString(row.device.props?.adb_ip)].message }}
-              </small>
-            </div>
-
-            <div class="row-actions">
-              <button class="plain-btn compact" :disabled="isBusy(`adb-test-${row.device.props?.adb_ip}`)" @click="testAdbAddress(getString(row.device.props?.adb_ip))">
-                {{ label('测试', 'Test') }}
-              </button>
-              <button class="plain-btn compact" :disabled="isBusy(`adb-edit-${row.device.id}`)" @click="openEditAdbDevice(row.device)">
-                {{ label('编辑', 'Edit') }}
-              </button>
-              <button class="danger-btn compact" :disabled="isBusy(`adb-delete-${row.device.id}`)" @click="deleteAdbDevice(row.device)">
-                {{ label('删除', 'Delete') }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
+      <AdbAuthPanel
+        v-if="selectedLocal === 'adb'"
+        ref="adbAuthPanel"
+        :label="label"
+        @count-change="adbBoundCount = $event"
+        @error="errorMessage = $event"
+        @success="showSuccess"
+      />
 
       <section v-else-if="selectedLocal === 'dlna'" class="detail-surface">
         <div class="detail-head">
@@ -1284,41 +993,6 @@ function dlnaEndpoint(candidate: DlnaCandidate): string {
     </section>
 
     <Teleport to="body">
-      <div v-if="adbFormOpen" class="dialog-overlay" @click.self="closeAdbForm">
-        <form class="dialog-panel" @submit.prevent="submitAdbDevice">
-          <div class="dialog-head">
-            <div>
-              <span class="eyebrow">{{ label('ADB 端点', 'ADB Endpoint') }}</span>
-              <h2>{{ editingAdbDevice ? label('编辑端点', 'Edit Endpoint') : label('新增端点', 'Add Endpoint') }}</h2>
-            </div>
-            <button type="button" class="plain-btn compact" @click="closeAdbForm">{{ label('关闭', 'Close') }}</button>
-          </div>
-
-          <div class="form-grid">
-            <label class="form-field">
-              <span>{{ label('名称', 'Name') }}</span>
-              <input v-model="formName" class="form-input" :placeholder="label('客厅盒子 ADB', 'Living Room ADB')" />
-            </label>
-
-            <label class="form-field">
-              <span>{{ label('IP:端口', 'IP:Port') }}</span>
-              <input v-model="formAdbAddress" class="form-input" placeholder="192.168.31.91:5555" />
-            </label>
-          </div>
-
-          <div class="dialog-actions">
-            <button type="button" class="plain-btn" @click="closeAdbForm">{{ label('取消', 'Cancel') }}</button>
-            <button
-              type="submit"
-              class="primary-btn"
-              :disabled="!formName.trim() || !formAdbAddress.trim() || isBusy('adb-create') || (editingAdbDevice ? isBusy(`adb-edit-${editingAdbDevice.id}`) : false)"
-            >
-              {{ editingAdbDevice ? label('保存', 'Save') : label('创建', 'Create') }}
-            </button>
-          </div>
-        </form>
-      </div>
-
       <div v-if="dlnaFormOpen" class="dialog-overlay" @click.self="closeDlnaForm">
         <form class="dialog-panel" @submit.prevent="submitDlnaDevice">
           <div class="dialog-head">
@@ -1555,7 +1229,6 @@ h2 {
 .list-toolbar,
 .empty-line,
 .candidate-row,
-.adb-row,
 .target-row {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
@@ -1625,7 +1298,6 @@ h2 {
 
 .subsection,
 .candidate-table,
-.adb-table,
 .target-table {
   display: grid;
   gap: 8px;
@@ -1654,7 +1326,6 @@ h2 {
 }
 
 .candidate-row.header,
-.adb-row.header,
 .target-row.header {
   min-height: 30px;
   border: 0;
@@ -1677,15 +1348,6 @@ code {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 12px;
   font-weight: 800;
-}
-
-.adb-row {
-  min-height: 52px;
-  padding: 11px;
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1fr) minmax(150px, auto);
-  gap: 10px;
-  align-items: center;
 }
 
 .target-row {
@@ -1917,14 +1579,11 @@ button:disabled {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .adb-row,
-  .adb-row.header,
   .target-row,
   .target-row.header {
     grid-template-columns: 1fr;
   }
 
-  .adb-row.header,
   .target-row.header {
     display: none;
   }
