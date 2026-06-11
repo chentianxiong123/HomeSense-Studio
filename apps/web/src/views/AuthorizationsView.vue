@@ -11,7 +11,7 @@ import AuthScopeTabs from '@/components/auth/AuthScopeTabs.vue'
 import DlnaAuthPanel from '@/components/auth/DlnaAuthPanel.vue'
 import MiAuthPanel from '@/components/auth/MiAuthPanel.vue'
 import SshAuthPanel from '@/components/auth/SshAuthPanel.vue'
-import StreamingGatewayPanel from '@/components/remote-workspace/StreamingGatewayPanel.vue'
+import StreamingAuthPanel from '@/components/auth/StreamingAuthPanel.vue'
 import StorageCredentialsPanel from '@/components/storage/StorageCredentialsPanel.vue'
 import { useLocale } from '@/composables/useLocale'
 
@@ -391,56 +391,35 @@ function openStreamingRuntime() {
         @success="showSuccess"
       />
 
-      <section v-else-if="selectedLocal === 'streaming'" class="detail-surface">
-        <div class="detail-head">
-          <div>
-            <span class="eyebrow">{{ label('局域网账号', 'Local Network') }}</span>
-            <h2>{{ label('串流', 'Streaming') }}</h2>
-          </div>
-          <div class="row-actions">
-            <span :class="['pill', streamingHostCount > 0 ? 'ok' : 'muted']">
-              {{ streamingHostCount }} {{ label('台主机', 'hosts') }}
-            </span>
-            <button class="plain-btn compact" type="button" @click="router.push('/streaming')">
-              {{ label('打开工作台', 'Open Workbench') }}
-            </button>
-          </div>
-        </div>
-
-        <StreamingGatewayPanel
-          :specs="streamingGatewaySpecs"
-          :hosts="streamingHosts"
-          :probes="streamingHostProbes"
-          :runtime-status="streamingRuntimeStatus"
-          :registered="streamingHostCount > 0"
-          :loading="isBusy('streaming-hosts')"
-          :action-loading="isBusy('streaming-register')"
-          :error="streamingError"
-          :message="streamingMessage"
-          :show-form="streamingHostFormOpen"
-          :host-label="streamingHostLabel"
-          :host-endpoint="streamingHostEndpoint"
-          :host-base-port="streamingHostBasePort"
-          :host-mac="streamingHostMac"
-          :host-room="streamingHostRoom"
-          :host-network-path="streamingHostNetworkPath"
-          :label="label"
-          @refresh-hosts="loadStreamingHosts"
-          @refresh-runtime="loadStreamingRuntimeStatus"
-          @toggle-form="streamingHostFormOpen = !streamingHostFormOpen"
-          @register-host="registerStreamingHost"
-          @probe-host="probeStreamingHost"
-          @wake-host="wakeStreamingHost"
-          @remove-host="removeStreamingHost"
-          @open-runtime="openStreamingRuntime"
-          @update:host-label="streamingHostLabel = $event"
-          @update:host-endpoint="streamingHostEndpoint = $event"
-          @update:host-base-port="streamingHostBasePort = $event"
-          @update:host-mac="streamingHostMac = $event"
-          @update:host-room="streamingHostRoom = $event"
-          @update:host-network-path="streamingHostNetworkPath = $event"
-        />
-      </section>
+      <StreamingAuthPanel
+        v-else-if="selectedLocal === 'streaming'"
+        v-model:host-label="streamingHostLabel"
+        v-model:host-endpoint="streamingHostEndpoint"
+        v-model:host-base-port="streamingHostBasePort"
+        v-model:host-mac="streamingHostMac"
+        v-model:host-room="streamingHostRoom"
+        v-model:host-network-path="streamingHostNetworkPath"
+        :specs="streamingGatewaySpecs"
+        :hosts="streamingHosts"
+        :probes="streamingHostProbes"
+        :runtime-status="streamingRuntimeStatus"
+        :host-count="streamingHostCount"
+        :loading="isBusy('streaming-hosts')"
+        :action-loading="isBusy('streaming-register')"
+        :error="streamingError"
+        :message="streamingMessage"
+        :show-form="streamingHostFormOpen"
+        :label="label"
+        @open-workbench="router.push('/streaming')"
+        @refresh-hosts="loadStreamingHosts"
+        @refresh-runtime="loadStreamingRuntimeStatus"
+        @toggle-form="streamingHostFormOpen = !streamingHostFormOpen"
+        @register-host="registerStreamingHost"
+        @probe-host="probeStreamingHost"
+        @wake-host="wakeStreamingHost"
+        @remove-host="removeStreamingHost"
+        @open-runtime="openStreamingRuntime"
+      />
 
       <StorageCredentialsPanel
         v-else-if="selectedLocal === 'alist'"
@@ -491,44 +470,10 @@ function openStreamingRuntime() {
   gap: 16px;
 }
 
-.detail-surface,
 .notice {
   border: 1px solid #e2e8f0;
   background: #fff;
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.04);
-}
-
-.eyebrow {
-  display: inline-flex;
-  color: #0f766e;
-  font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0;
-}
-
-h2 {
-  margin: 5px 0 0;
-  color: var(--text-primary);
-  font-weight: 900;
-  letter-spacing: 0;
-}
-
-h2 {
-  font-size: 24px;
-}
-
-.row-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.empty-line {
-  color: var(--text-tertiary);
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.45;
 }
 
 .workspace {
@@ -536,123 +481,6 @@ h2 {
   grid-template-columns: 260px minmax(0, 1fr);
   gap: 12px;
   align-items: start;
-}
-
-.ok,
-.pill.ok {
-  background: #10b981;
-}
-
-.detail-surface {
-  min-height: 470px;
-  border-radius: 8px;
-  padding: 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.detail-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-}
-
-.empty-line {
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #ffffff;
-}
-
-.empty-line {
-  padding: 18px;
-  text-align: center;
-}
-
-.empty-line.left {
-  text-align: left;
-}
-
-.row-actions {
-  justify-content: flex-end;
-}
-
-.plain-btn,
-.primary-btn,
-.danger-btn {
-  min-height: 34px;
-  padding: 0 12px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 900;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.plain-btn {
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  color: var(--text-secondary);
-}
-
-.plain-btn:hover:not(:disabled) {
-  border-color: #14b8a6;
-  color: #0f766e;
-}
-
-.primary-btn {
-  border: 1px solid #0f766e;
-  background: #0f766e;
-  color: #fff;
-}
-
-.danger-btn {
-  border: 1px solid #fecaca;
-  background: #fef2f2;
-  color: #dc2626;
-}
-
-.compact {
-  min-height: 30px;
-  padding: 0 9px;
-}
-
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 26px;
-  padding: 0 9px;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 900;
-  white-space: nowrap;
-}
-
-.pill.ok {
-  background: #ecfdf5;
-  color: #047857;
-}
-
-.pill.warn {
-  background: #fffbeb;
-  color: #b45309;
-}
-
-.pill.bad {
-  background: #fef2f2;
-  color: #dc2626;
-}
-
-.pill.muted {
-  background: #f1f5f9;
-  color: #64748b;
 }
 
 .notice {
@@ -684,11 +512,5 @@ button:disabled {
   .auth-page {
     padding: 16px;
   }
-
-  .detail-head {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
 }
 </style>
