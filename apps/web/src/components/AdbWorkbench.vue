@@ -4,6 +4,7 @@ import { cliApi } from '@/api/cli'
 import type { RemoteWorkspaceFileEntry, RemoteWorkspaceFileList, RemoteWorkspaceFilePreview } from '@/api/remoteWorkspace'
 import { streamingGatewayApi, type AdbScrcpySession } from '@/api/streamingGateway'
 import AdbFilesPanel from '@/components/adb/AdbFilesPanel.vue'
+import AdbScreenCapturePanel from '@/components/adb/AdbScreenCapturePanel.vue'
 import AdbScrcpyPanel from '@/components/adb/AdbScrcpyPanel.vue'
 import TerminalPanel from '@/components/TerminalPanel.vue'
 
@@ -663,21 +664,15 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else-if="activePanel === 'screen'" class="screen-grid">
-      <div class="surface screen-surface">
-        <div class="surface-head">
-          <h3>{{ label('屏幕截图', 'Screen Capture') }}</h3>
-          <button class="ghost-btn" :disabled="screenshotLoading" @click="refreshScreenshot">{{ screenshotLoading ? label('截取中', 'Capturing') : label('刷新截图', 'Refresh') }}</button>
-        </div>
-        <div v-if="screenshotSrc" class="screen-stage">
-          <img :src="screenshotSrc" :alt="label('ADB 截图', 'ADB screenshot')" @click="tapScreenshot" />
-          <div class="screen-meta">
-            <span>{{ screenshot?.width }} x {{ screenshot?.height }}</span>
-            <span>{{ formatBytes(screenshot?.size_bytes) }}</span>
-            <span>{{ label('点击图片可发送 tap', 'Click image to send tap') }}</span>
-          </div>
-        </div>
-        <div v-else class="empty-line">{{ label('点击刷新截图读取当前屏幕。', 'Refresh to capture the current screen.') }}</div>
-      </div>
+      <AdbScreenCapturePanel
+        :screenshot="screenshot"
+        :screenshot-src="screenshotSrc"
+        :loading="screenshotLoading"
+        :label="label"
+        :format-bytes="formatBytes"
+        @refresh="refreshScreenshot"
+        @tap="tapScreenshot"
+      />
 
       <AdbScrcpyPanel
         v-model:max-size="scrcpyMaxSize"
@@ -976,7 +971,6 @@ button:disabled {
 }
 
 .full-surface,
-.screen-surface,
 .terminal-surface { min-height: 320px; }
 
 .screen-grid {
@@ -984,44 +978,6 @@ button:disabled {
   grid-template-columns: minmax(320px, 1fr) minmax(320px, 0.95fr);
   gap: 14px;
   align-items: start;
-}
-
-.screen-stage {
-  display: grid;
-  grid-template-columns: minmax(220px, 360px) minmax(180px, 1fr);
-  gap: 16px;
-  align-items: start;
-}
-
-.screen-stage img {
-  display: block;
-  width: 100%;
-  max-height: 560px;
-  object-fit: contain;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  background: #0f172a;
-  cursor: crosshair;
-}
-
-.screen-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  color: #475569;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.screen-meta span {
-  display: inline-flex;
-  width: fit-content;
-  max-width: 100%;
-  padding: 7px 10px;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  background: #fff;
-  overflow-wrap: anywhere;
 }
 
 .empty-line.compact {
@@ -1115,7 +1071,6 @@ button:disabled {
   .endpoint-box { align-items: flex-start; }
   .panel-grid { grid-template-columns: 1fr; }
   .screen-grid { grid-template-columns: 1fr; }
-  .screen-stage { grid-template-columns: 1fr; }
   .remote-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ui-node { grid-template-columns: 48px minmax(0, 1fr); }
   .ui-node code { display: none; }
