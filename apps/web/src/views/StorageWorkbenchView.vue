@@ -5,6 +5,8 @@ import { alistApi, type AlistAuthorizationRecord, type AlistDriverEntry, type Al
 import type { RemoteWorkspaceFileEntry, RemoteWorkspaceFileList } from '@/api/remoteWorkspace'
 import { storageApi, type StorageMountRecord, type StorageTaskRecord } from '@/api/storage'
 import RemoteFileBrowserPanel from '@/components/RemoteFileBrowserPanel.vue'
+import StorageMountDialog from '@/components/storage/StorageMountDialog.vue'
+import StorageTaskStrip from '@/components/storage/StorageTaskStrip.vue'
 import { useLocale } from '@/composables/useLocale'
 
 const router = useRouter()
@@ -40,6 +42,7 @@ const mountReadonly = ref(false)
 const selectedNames = computed(() => Object.entries(selected.value).filter(([, value]) => value).map(([name]) => name))
 const currentDir = computed(() => list.value?.path || pathInput.value || '/')
 const selectedAuthorization = computed(() => authorizations.value.find((item) => item.id === mountAuthorizationId.value) ?? null)
+const mountFormSaving = computed(() => isBusy('mount-create') || (editingMountId.value ? isBusy(`mount-edit-${editingMountId.value}`) : false))
 const storageFileList = computed<RemoteWorkspaceFileList | null>(() => {
   if (!list.value) return null
   return {
@@ -479,13 +482,7 @@ function errorText(err: unknown): string {
         </button>
       </div>
 
-      <div v-if="tasks.length > 0" class="task-strip">
-        <button class="plain-btn compact" :disabled="acting" @click="loadTasks">{{ label('刷新任务', 'Refresh Tasks') }}</button>
-        <div v-for="task in tasks.slice(0, 4)" :key="task.id" class="task-chip" :class="task.status">
-          <strong>{{ task.kind }} · {{ task.status }}</strong>
-          <small>{{ task.error || `${task.message || ''}${task.message ? ' · ' : ''}${task.progress}%` }}</small>
-        </div>
-      </div>
+      <StorageTaskStrip :tasks="tasks" :disabled="acting" :label="label" @refresh="loadTasks" />
 
       <RemoteFileBrowserPanel
         :title="label('统一文件浏览器', 'Unified File Browser')"
@@ -512,57 +509,25 @@ function errorText(err: unknown): string {
       />
     </section>
 
-    <Teleport to="body">
-      <div v-if="mountFormOpen" class="dialog-overlay" @click.self="closeMountForm">
-        <form class="dialog-panel" @submit.prevent="submitMount">
-          <div class="dialog-head">
-            <div>
-              <span class="eyebrow">{{ label('系统挂载', 'System Mount') }}</span>
-              <h2>{{ editingMountId ? label('编辑挂载', 'Edit Mount') : label('新增挂载', 'Add Mount') }}</h2>
-            </div>
-            <button type="button" class="plain-btn compact" @click="closeMountForm">{{ label('关闭', 'Close') }}</button>
-          </div>
-
-          <div class="form-grid">
-            <label class="form-field full">
-              <span>{{ label('授权', 'Authorization') }}</span>
-              <select v-model.number="mountAuthorizationId" class="form-input">
-                <option v-for="auth in authorizations" :key="auth.id" :value="auth.id">
-                  {{ auth.name }} · {{ auth.driver }}
-                </option>
-              </select>
-              <small v-if="selectedAuthorization">{{ authSummary(selectedAuthorization) }}</small>
-            </label>
-
-            <label class="form-field">
-              <span>{{ label('显示名称', 'Name') }}</span>
-              <input v-model="mountName" class="form-input" :placeholder="label('家庭资料', 'Home Files')" />
-            </label>
-
-            <label class="form-field">
-              <span>{{ label('虚拟路径', 'Virtual Path') }}</span>
-              <input v-model="mountPath" class="form-input" placeholder="/资料" />
-            </label>
-
-            <label class="check-field full">
-              <input v-model="mountReadonly" type="checkbox" />
-              <span>{{ label('只读挂载', 'Readonly mount') }}</span>
-            </label>
-          </div>
-
-          <div class="dialog-actions">
-            <button type="button" class="plain-btn" @click="closeMountForm">{{ label('取消', 'Cancel') }}</button>
-            <button
-              type="submit"
-              class="primary-btn"
-              :disabled="!selectedAuthorization || !mountName.trim() || !mountPath.trim() || isBusy('mount-create') || (editingMountId ? isBusy(`mount-edit-${editingMountId}`) : false)"
-            >
-              {{ editingMountId ? label('保存', 'Save') : label('创建', 'Create') }}
-            </button>
-          </div>
-        </form>
-      </div>
-    </Teleport>
+    <StorageMountDialog
+      :open="mountFormOpen"
+      :editing="Boolean(editingMountId)"
+      :authorizations="authorizations"
+      :selected-authorization="selectedAuthorization"
+      :authorization-id="mountAuthorizationId"
+      :name="mountName"
+      :path="mountPath"
+      :readonly="mountReadonly"
+      :saving="mountFormSaving"
+      :label="label"
+      :auth-summary="authSummary"
+      @close="closeMountForm"
+      @submit="submitMount"
+      @update:authorization-id="mountAuthorizationId = $event"
+      @update:name="mountName = $event"
+      @update:path="mountPath = $event"
+      @update:readonly="mountReadonly = $event"
+    />
   </main>
 </template>
 
@@ -622,10 +587,8 @@ h2 {
 
 .head-actions,
 .mount-actions,
-.dialog-actions,
 .path-row,
-.copy-row,
-.task-strip {
+.copy-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -663,7 +626,6 @@ h2 {
 
 .mount-head small,
 .mount-main small,
-.form-field small,
 .empty-line {
   color: var(--text-tertiary);
   font-size: 13px;
@@ -728,47 +690,6 @@ code {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 13px;
   font-weight: 700;
-}
-
-.task-strip {
-  min-height: 44px;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #f8fafc;
-  padding: 8px;
-}
-
-.task-chip {
-  min-width: 150px;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #fff;
-  padding: 7px 9px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.task-chip strong {
-  color: #0f172a;
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.task-chip small {
-  color: #64748b;
-  font-size: 11px;
-  font-weight: 750;
-}
-
-.task-chip.success {
-  border-color: rgba(15, 118, 110, 0.24);
-  background: #f0fdfa;
-}
-
-.task-chip.error {
-  border-color: #fecaca;
-  background: #fef2f2;
 }
 
 .hidden-file-input {
@@ -892,91 +813,6 @@ button:disabled {
   opacity: 0.5;
 }
 
-.dialog-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  background: rgba(15, 23, 42, 0.32);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-}
-
-.dialog-panel {
-  width: min(520px, 100%);
-  max-height: 88vh;
-  overflow-y: auto;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.2);
-  padding: 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.dialog-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.form-field,
-.check-field {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.form-field.full,
-.check-field.full {
-  grid-column: 1 / -1;
-}
-
-.form-field span,
-.check-field span {
-  color: var(--text-tertiary);
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.check-field {
-  flex-direction: row;
-  align-items: center;
-}
-
-.form-input {
-  width: 100%;
-  min-height: 38px;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  background: #fff;
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 800;
-  outline: none;
-  padding: 0 10px;
-}
-
-.form-input:focus {
-  border-color: #14b8a6;
-  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.1);
-}
-
-.dialog-actions {
-  justify-content: flex-end;
-}
-
 @media (max-width: 760px) {
   .storage-page {
     padding: 16px;
@@ -1011,8 +847,5 @@ button:disabled {
     display: none;
   }
 
-  .form-grid {
-    grid-template-columns: 1fr;
-  }
 }
 </style>
