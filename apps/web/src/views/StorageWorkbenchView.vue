@@ -5,6 +5,7 @@ import { alistApi, type AlistAuthorizationRecord, type AlistDriverEntry, type Al
 import type { RemoteWorkspaceFileEntry, RemoteWorkspaceFileList } from '@/api/remoteWorkspace'
 import { storageApi, type StorageMountRecord, type StorageTaskRecord } from '@/api/storage'
 import RemoteFileBrowserPanel from '@/components/RemoteFileBrowserPanel.vue'
+import StorageFileActionBar from '@/components/storage/StorageFileActionBar.vue'
 import StorageMountDialog from '@/components/storage/StorageMountDialog.vue'
 import StorageMountList from '@/components/storage/StorageMountList.vue'
 import StorageTaskStrip from '@/components/storage/StorageTaskStrip.vue'
@@ -26,7 +27,6 @@ const pathInput = ref('/')
 const copyTarget = ref('')
 const newFolderName = ref('')
 const selected = ref<Record<string, boolean>>({})
-const uploadInput = ref<HTMLInputElement | null>(null)
 const loading = ref(false)
 const acting = ref(false)
 const error = ref('')
@@ -207,10 +207,6 @@ function downloadSelected() {
   const name = selectedNames.value[0]
   if (!name) return
   window.open(storageApi.downloadUrl(joinVirtualPath(currentDir.value, name)), '_blank', 'noopener,noreferrer')
-}
-
-function chooseUpload() {
-  uploadInput.value?.click()
 }
 
 async function uploadSelectedFile(event: Event) {
@@ -438,29 +434,20 @@ function errorText(err: unknown): string {
     />
 
     <section class="file-workbench">
-      <div class="copy-row">
-        <input v-model="copyTarget" :disabled="acting" spellcheck="false" :placeholder="label('复制到目标路径，例如 /资料/电影', 'Copy target path, e.g. /files/movies')" />
-        <button class="plain-btn" :disabled="acting || selectedNames.length === 0 || !copyTarget.trim()" @click="copySelected">
-          {{ label('复制', 'Copy') }} {{ selectedNames.length || '' }}
-        </button>
-        <button class="plain-btn" :disabled="acting || selectedNames.length === 0 || !copyTarget.trim()" @click="copySelectedTask">
-          {{ label('后台复制目录', 'Copy Tree') }} {{ selectedNames.length || '' }}
-        </button>
-        <button class="plain-btn" :disabled="acting || selectedNames.length === 0" @click="downloadSelected">
-          {{ label('下载', 'Download') }}
-        </button>
-        <button class="plain-btn" :disabled="acting || !list" @click="chooseUpload">
-          {{ label('上传', 'Upload') }}
-        </button>
-        <input ref="uploadInput" class="hidden-file-input" type="file" @change="uploadSelectedFile" />
-        <input v-model="newFolderName" :disabled="acting || !list" spellcheck="false" :placeholder="label('新文件夹名称', 'New folder name')" @keydown.enter="createFolder" />
-        <button class="plain-btn" :disabled="acting || !list || !newFolderName.trim()" @click="createFolder">
-          {{ label('新建文件夹', 'New Folder') }}
-        </button>
-        <button class="danger-btn" :disabled="acting || selectedNames.length === 0" @click="removeSelected">
-          {{ label('删除', 'Remove') }} {{ selectedNames.length || '' }}
-        </button>
-      </div>
+      <StorageFileActionBar
+        v-model:copy-target="copyTarget"
+        v-model:new-folder-name="newFolderName"
+        :selected-count="selectedNames.length"
+        :acting="acting"
+        :has-list="Boolean(list)"
+        :label="label"
+        @copy="copySelected"
+        @copy-task="copySelectedTask"
+        @download="downloadSelected"
+        @upload="uploadSelectedFile"
+        @create-folder="createFolder"
+        @remove="removeSelected"
+      />
 
       <StorageTaskStrip :tasks="tasks" :disabled="acting" :label="label" @refresh="loadTasks" />
 
@@ -565,8 +552,7 @@ h2 {
 }
 
 .head-actions,
-.path-row,
-.copy-row {
+.path-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -597,8 +583,7 @@ code {
   font-weight: 800;
 }
 
-.path-row input,
-.copy-row input {
+.path-row input {
   flex: 1;
   min-width: 180px;
   min-height: 36px;
@@ -610,10 +595,6 @@ code {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 13px;
   font-weight: 700;
-}
-
-.hidden-file-input {
-  display: none;
 }
 
 .file-table {
@@ -739,8 +720,7 @@ button:disabled {
   }
 
   .page-head,
-  .path-row,
-  .copy-row {
+  .path-row {
     align-items: stretch;
     flex-direction: column;
   }
