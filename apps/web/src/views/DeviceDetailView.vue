@@ -2,13 +2,12 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, type UserDevice } from '@/api'
-import { cliApi } from '@/api/cli'
 import { useLocale } from '@/composables/useLocale'
+import { useDeviceDetailCapabilities } from '@/composables/useDeviceDetailCapabilities'
 import AppBrowserModal from '@/components/AppBrowserModal.vue'
 import AdbWorkbench from '@/components/AdbWorkbench.vue'
 import DeviceCapabilitiesPanel from '@/components/devices/DeviceCapabilitiesPanel.vue'
-import type { DeviceCapability, DeviceExecutionHistoryEntry, DeviceIrKey } from '@/types/deviceCapabilities'
-import { formatChinaTime } from '@/utils/chinaTime'
+import type { DeviceCapability } from '@/types/deviceCapabilities'
 
 const { locale } = useLocale()
 const isZh = computed(() => locale.value === 'zh')
@@ -29,62 +28,47 @@ function goBack() {
 
 const loading = ref(true)
 const device = ref<UserDevice | null>(null)
-const capabilities = ref<DeviceCapability[]>([])
-const capsLoading = ref(false)
-const capsError = ref('')
 const errorMessage = ref('')
-const executingCap = ref('')
-const execResult = ref('')
-const execError = ref('')
-const textInputs = ref<Record<string, string>>({})
-const execHistory = ref<DeviceExecutionHistoryEntry[]>([])
-
-const irKeys = ref<DeviceIrKey[]>([])
-const irKeysLoading = ref(false)
-const irControllerName = ref('')
 const showAppBrowser = ref(false)
-const miNameMap = ref<Record<string, string>>({})
 
 function propString(d: UserDevice | null, key: string): string {
   if (!d) return ''
   const v = d.props?.[key]
   return typeof v === 'string' ? v : ''
 }
-function propNumber(d: UserDevice | null, key: string): number | null {
-  if (!d) return null
-  const v = d.props?.[key]
-  if (typeof v === 'number') return v
-  if (typeof v === 'string' && v.trim() !== '') {
-    const n = Number(v)
-    return Number.isFinite(n) ? n : null
-  }
-  return null
-}
 
-async function persistCapabilities(newCaps: unknown[]): Promise<void> {
-  if (!device.value) return
-  const newProps = { ...device.value.props, capabilities: newCaps }
-  try {
-    await api.userDevices.update(device.value.id, { props: newProps })
-    device.value = { ...device.value, props: newProps }
-  } catch (e) {
-    console.error('Failed to persist capabilities snapshot', e)
-  }
-}
-
-function miDidOf(d: UserDevice | null): string {
-  return propString(d, 'mi_did')
-}
-function adbIpOf(d: UserDevice | null): string {
-  return propString(d, 'adb_ip')
-}
-function deviceTypeOf(d: UserDevice | null): string {
-  return propString(d, 'device_type') || 'other'
-}
-function miNameFor(did: string): string {
-  if (!did) return ''
-  return miNameMap.value[did] || did
-}
+const {
+  capabilities,
+  capsLoading,
+  capsError,
+  executingCap,
+  execResult,
+  execError,
+  textInputs,
+  execHistory,
+  irKeys,
+  irKeysLoading,
+  miActionCaps,
+  miPropertyCaps,
+  adbCaps,
+  isIrDevice,
+  isAdbDevice,
+  miDidOf,
+  adbIpOf,
+  miNameFor,
+  ensureMiNames,
+  refreshCapabilities,
+  loadHistory,
+  loadIrKeys,
+  executeIrKey,
+  executeCapability,
+  setTextInput,
+} = useDeviceDetailCapabilities({
+  deviceId,
+  device,
+  label,
+  propString,
+})
 
 onMounted(async () => {
   loading.value = true
@@ -106,239 +90,6 @@ onMounted(async () => {
     loading.value = false
   }
 })
-
-async function ensureMiNames(): Promise<void> {
-  if (Object.keys(miNameMap.value).length > 0) return
-  try {
-    const r = await cliApi.run<{ summary: Array<{ did: string; name?: string; model?: string }> }>('mi-cli', {
-      action: 'discover',
-      params: { summary_only: true },
-      ttl_ms: 60_000,
-    })
-    if (r.status === 'success' && r.data?.summary) {
-      const next: Record<string, string> = {}
-      for (const d of r.data.summary) {
-        if (d.did) next[d.did] = d.name || d.model || d.did
-      }
-      miNameMap.value = next
-    }
-  } catch {}
-}
-
-async function refreshCapabilities(): Promise<void> {
-  if (!device.value) return
-  const collected: DeviceCapability[] = []
-  const miDid = miDidOf(device.value)
-  if (miDid) {
-    const resp = await cliApi.run<{ capabilities: DeviceCapability[] }>('mi-cli', {
-      action: 'device_capabilities',
-      params: { did: miDid },
-      ttl_ms: 60_000,
-    })
-    if (resp.status === 'success' && resp.data?.capabilities) {
-      for (const c of resp.data.capabilities) collected.push({ ...c, source: 'mi' })
-    }
-  }
-  const adbIp = adbIpOf(device.value)
-  if (adbIp) {
-    const resp = await cliApi.run<{ capabilities: DeviceCapability[] }>('adb-cli', {
-      action: 'capabilities',
-      params: { device_type: deviceTypeOf(device.value) },
-      ttl_ms: 60_000,
-    })
-    if (resp.status === 'success' && resp.data?.capabilities) {
-      for (const c of resp.data.capabilities) collected.push(c)
-    }
-  }
-  if (collected.length === 0) return
-  capabilities.value = collected
-  await persistCapabilities(collected)
-}
-
-async function loadHistory() {
-  try {
-    const result = await api.userDevices.capabilityHistory(deviceId)
-    if (result.history) {
-      execHistory.value = result.history.map((e: { time: string; deviceId: string; capability: string; params: string; status: string; result?: string }) => ({
-        capability: e.capability,
-        params: e.params,
-        result: e.status === 'ok' ? (e.result || label('成功', 'Success')) : label('失败: ', 'Failed: ') + e.status,
-        time: formatChinaTime(e.time),
-      })).reverse()
-    }
-  } catch {
-    // silent
-  }
-}
-
-async function loadIrKeys() {
-  irKeysLoading.value = true
-  try {
-    const miDid = miDidOf(device.value)
-    if (!miDid) {
-      irKeys.value = []
-      return
-    }
-    const resp = await cliApi.run<{ keys: Array<{ key_id: string | number; name: string; type?: string }>; name: string }>('mi-cli', {
-      action: 'device_ir_keys',
-      params: { did: miDid },
-      ttl_ms: 60_000,
-    })
-    if (resp.status === 'success' && resp.data) {
-      irKeys.value = (resp.data.keys ?? []).map((k) => ({
-        key_id: String(k.key_id),
-        name: k.name,
-        type: k.type,
-      }))
-      irControllerName.value = resp.data.name
-    } else {
-      irKeys.value = []
-    }
-  } catch {
-    irKeys.value = []
-  } finally {
-    irKeysLoading.value = false
-  }
-}
-
-async function executeIrKey(keyId: string) {
-  if (executingCap.value) return
-  executingCap.value = 'ir_press'
-  execResult.value = ''
-  execError.value = ''
-  try {
-    const miDid = miDidOf(device.value)
-    const resp = await cliApi.run('mi-cli', {
-      action: 'device_ir_press',
-      params: { did: miDid, key_id: keyId },
-      ttl_ms: 0,
-      bypass_cache: true,
-    })
-    if (resp.status === 'success') {
-      execResult.value = label('按键已发送', 'Key sent')
-      logUsage('mi', 'ir_press', keyId, 'ok')
-    } else {
-      execError.value = resp.message || resp.error || label('发送失败', 'Failed')
-    }
-  } catch (e) {
-    execError.value = (e as Error).message || String(e)
-  } finally {
-    executingCap.value = ''
-  }
-}
-
-async function executeCapability(cap: DeviceCapability) {
-  if (executingCap.value) return
-  const params = textInputs.value[cap.name]
-  if (cap.type === 'string' && !params && cap.name !== '播放音乐' && cap.name !== 'Play Music') {
-    execError.value = label('请输入文本', 'Please enter text')
-    return
-  }
-  executingCap.value = cap.name
-  execResult.value = ''
-  execError.value = ''
-  try {
-    const source = cap.source ?? 'mi'
-    const cli = source === 'adb' ? 'adb-cli' : 'mi-cli'
-    const action = resolveAdbAction(cap) ?? resolveMiAction(cap) ?? ''
-    if (!action) {
-      execError.value = label('无法识别的能力', 'Unrecognized capability')
-      return
-    }
-    const cliParams = buildCliParams(cap, params)
-    const resp = await cliApi.run(cli, {
-      action,
-      params: cliParams,
-      ttl_ms: 0,
-      bypass_cache: true,
-    })
-    if (resp.status === 'success') {
-      execResult.value = label('已发送: ', 'Sent: ') + cap.name
-      textInputs.value[cap.name] = ''
-    } else {
-      execError.value = resp.message || resp.error || label('执行失败', 'Execution failed')
-    }
-    loadHistory()
-  } catch (e) {
-    execError.value = (e as Error).message || String(e)
-    loadHistory()
-  } finally {
-    executingCap.value = ''
-  }
-}
-
-function resolveAdbAction(cap: DeviceCapability): string | null {
-  return typeof cap.capability_id === 'string' && cap.capability_id.startsWith('adb.')
-    ? cap.capability_id.slice(4)
-    : null
-}
-
-function resolveMiAction(cap: DeviceCapability): string | null {
-  if (typeof cap.capability_id === 'string' && cap.capability_id.startsWith('mi.')) {
-    return cap.capability_id.slice(3)
-  }
-  return null
-}
-
-function buildCliParams(cap: DeviceCapability, rawValue?: string): Record<string, unknown> {
-  const text = rawValue?.trim()
-  if (!text) return {}
-  const properties = readSchemaProperties(cap.input_schema)
-  if (properties.package) return { package: text }
-  if (properties.index || (properties.index && properties.text)) {
-    if (text.startsWith('index:')) return { index: Number(text.slice(6).trim()) }
-    const index = Number(text)
-    return Number.isFinite(index) ? { index } : { text }
-  }
-  if (properties.x && properties.y) {
-    const [x, y] = text.split(',').map((item) => Number(item.trim()))
-    return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : { value: text }
-  }
-  if (properties.start_x && properties.start_y && properties.end_x && properties.end_y) {
-    const [start_x, start_y, end_x, end_y, duration] = text.split(',').map((item) => Number(item.trim()))
-    if ([start_x, start_y, end_x, end_y].every(Number.isFinite)) {
-      return {
-        start_x,
-        start_y,
-        end_x,
-        end_y,
-        ...(Number.isFinite(duration) ? { duration } : {}),
-      }
-    }
-    return { value: text }
-  }
-  if (properties.text) return { text }
-  if (properties.value) return { value: coerceCapabilityValue(text) }
-  if (cap.capability_id === 'mi.ir_key' || cap.name === '遥控按键') return { key_id: text }
-  return { value: coerceCapabilityValue(text) }
-}
-
-function logUsage(source: string, capability: string, params: string, status: string): void {
-  fetch('/api/command/usage', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ device_id: deviceId, source, capability, params, status }),
-  }).catch(() => {})
-}
-
-function readSchemaProperties(schema: Record<string, unknown> | undefined): Record<string, unknown> {
-  const properties = schema?.properties
-  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) return {}
-  return properties as Record<string, unknown>
-}
-
-function coerceCapabilityValue(value: string): unknown {
-  if (/^-?\d+(\.\d+)?$/.test(value)) return Number(value)
-  if (value === 'true') return true
-  if (value === 'false') return false
-  return value
-}
-
-const miActionCaps = computed(() => capabilities.value.filter(c => c.source === 'mi' && c.kind === 'action' && c.name !== '遥控按键' && c.name !== 'Remote Keys'))
-const miPropertyCaps = computed(() => capabilities.value.filter(c => c.source === 'mi' && c.kind === 'property'))
-const adbCaps = computed(() => capabilities.value.filter(c => c.source === 'adb'))
-const isIrDevice = computed(() => capabilities.value.some(c => c.name === '遥控按键' || c.name === 'Remote Keys'))
-const isAdbDevice = computed(() => capabilities.value.some(c => c.source === 'adb'))
 
 const deviceTypeOptions: Record<string, { zh: string; en: string }> = {
   television: { zh: '电视', en: 'TV' },
@@ -362,10 +113,6 @@ function sourceTags(d: UserDevice): string[] {
   if (propString(d, 'mi_did')) tags.push('Mi')
   if (propString(d, 'adb_ip')) tags.push('ADB')
   return tags
-}
-
-function setTextInput(capabilityName: string, value: string): void {
-  textInputs.value = { ...textInputs.value, [capabilityName]: value }
 }
 
 const canOpenConsole = computed(() => {
