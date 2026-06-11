@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { cliApi } from '@/api/cli'
 import type { RemoteWorkspaceFileEntry, RemoteWorkspaceFileList, RemoteWorkspaceFilePreview } from '@/api/remoteWorkspace'
 import { streamingGatewayApi, type AdbScrcpySession } from '@/api/streamingGateway'
+import AdbAppsPanel from '@/components/adb/AdbAppsPanel.vue'
 import AdbFilesPanel from '@/components/adb/AdbFilesPanel.vue'
 import AdbScreenCapturePanel from '@/components/adb/AdbScreenCapturePanel.vue'
 import AdbScrcpyPanel from '@/components/adb/AdbScrcpyPanel.vue'
@@ -698,24 +699,16 @@ onBeforeUnmount(() => {
       />
     </div>
 
-    <div v-else-if="activePanel === 'apps'" class="surface full-surface">
-      <div class="surface-head">
-        <h3>{{ label('应用管理', 'Application Manager') }}</h3>
-        <button class="ghost-btn" :disabled="!!busy" @click="loadApps(true)">{{ label('刷新', 'Refresh') }}</button>
-      </div>
-      <input v-model="appSearch" class="wide-input" :placeholder="label('搜索包名或应用名', 'Search package or app name')" />
-      <div v-if="busy === 'apps'" class="empty-line">{{ label('正在加载应用...', 'Loading apps...') }}</div>
-      <div v-else-if="filteredApps.length === 0" class="empty-line">{{ label('没有应用数据', 'No app data') }}</div>
-      <div v-else class="app-table">
-        <div v-for="app in filteredApps" :key="app.package" class="app-row">
-          <div>
-            <strong>{{ app.name }}</strong>
-            <code>{{ app.package }}</code>
-          </div>
-          <button :disabled="!!busy" @click="launchApp(app.package)">{{ label('启动', 'Launch') }}</button>
-        </div>
-      </div>
-    </div>
+    <AdbAppsPanel
+      v-else-if="activePanel === 'apps'"
+      v-model:search="appSearch"
+      :apps="filteredApps"
+      :busy="!!busy"
+      :loading="busy === 'apps'"
+      :label="label"
+      @refresh="loadApps(true)"
+      @launch="launchApp"
+    />
 
     <div v-else-if="activePanel === 'inspect'" class="surface full-surface">
       <div class="surface-head">
@@ -781,8 +774,7 @@ onBeforeUnmount(() => {
 
 .workbench-head,
 .surface-head,
-.feedback-row,
-.app-row {
+.feedback-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -836,7 +828,6 @@ code {
 .panel-tab,
 .ghost-btn,
 .inline-form button,
-.app-row button,
 .remote-grid button {
   border: 1px solid #cbd5e1;
   border-radius: 6px;
@@ -903,7 +894,6 @@ code {
 .ghost-btn { padding: 7px 11px; }
 .ghost-btn:hover:not(:disabled),
 .inline-form button:hover:not(:disabled),
-.app-row button:hover:not(:disabled),
 .remote-grid button:hover:not(:disabled) {
   border-color: #2563eb;
   color: #1d4ed8;
@@ -932,8 +922,7 @@ button:disabled {
   margin-top: 8px;
 }
 
-.inline-form input,
-.wide-input {
+.inline-form input {
   flex: 1;
   min-width: 0;
   border: 1px solid #cbd5e1;
@@ -984,8 +973,6 @@ button:disabled {
   padding: 18px 0;
 }
 
-.wide-input { width: 100%; margin-bottom: 12px; }
-
 .empty-line {
   padding: 36px 0;
   text-align: center;
@@ -994,7 +981,6 @@ button:disabled {
   font-weight: 700;
 }
 
-.app-table,
 .ui-list {
   display: flex;
   flex-direction: column;
@@ -1002,27 +988,6 @@ button:disabled {
   max-height: 420px;
   overflow: auto;
 }
-
-.app-row {
-  padding: 10px 12px;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  background: #fff;
-}
-
-.app-row div {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.app-row strong {
-  color: #0f172a;
-  font-size: 14px;
-}
-
-.app-row button { padding: 7px 12px; }
 
 .ui-node {
   display: grid;
@@ -1063,8 +1028,7 @@ button:disabled {
 
 @media (max-width: 900px) {
   .workbench-head,
-  .surface-head,
-  .app-row {
+  .surface-head {
     align-items: stretch;
     flex-direction: column;
   }
