@@ -263,8 +263,8 @@ export const api = {
       }),
     capabilityHistory: (id: number) =>
       request<{ history: Array<{ time: string; deviceId: string; capability: string; params: string; status: string; result?: string }> }>(`/api/user-devices/${id}/capabilities/history`),
-    irKeys: (id: number) =>
-      request<{ status: string; data?: { controller_id: string; name: string; keys: Array<{ key_id: string; name: string; type?: string }> }; error?: string; message?: string }>(`/api/user-devices/${id}/ir-keys`),
+    irKeys: (id: number, refresh?: boolean) =>
+      request<{ status: string; data?: { controller_id: string; name: string; type?: string; source?: string; keys: Array<{ key_id: string; name: string; type?: string; normalized?: string; zone?: string; position?: string }>; layout?: Record<string, string[]>; updated_at?: string }; error?: string; message?: string; warnings?: string[] }>(`/api/user-devices/${id}/ir-keys${refresh ? '?refresh=true' : ''}`),
     irPress: (id: number, keyId: string) =>
       request<{ status: string; data?: { key_id: string; result: unknown }; error?: string; message?: string }>(`/api/user-devices/${id}/ir-press`, {
         method: 'POST',

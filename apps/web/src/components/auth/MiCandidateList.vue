@@ -12,6 +12,7 @@ defineProps<{
 
 const emit = defineEmits<{
   (event: 'load'): void
+  (event: 'refresh'): void
 }>()
 </script>
 
@@ -22,9 +23,14 @@ const emit = defineEmits<{
         <strong>{{ label('Mi 候选设备', 'Mi Candidates') }}</strong>
         <small>{{ loaded ? `${candidates.length}` : label('按需读取', 'Load on demand') }}</small>
       </div>
-      <button class="plain-btn" :disabled="loading" @click="emit('load')">
-        {{ loading ? label('读取中', 'Loading') : label('读取候选', 'Load') }}
-      </button>
+      <div class="candidate-actions">
+        <button class="plain-btn" :disabled="loading" @click="emit('load')">
+          {{ loading ? label('读取中', 'Loading') : label('读取候选', 'Load') }}
+        </button>
+        <button class="plain-btn" :disabled="loading" @click="emit('refresh')">
+          {{ label('重新发现', 'Rediscover') }}
+        </button>
+      </div>
     </div>
     <div v-if="!loaded" class="empty-line">{{ label('尚未读取。', 'Not loaded yet.') }}</div>
     <div v-else-if="candidates.length === 0" class="empty-line">{{ label('没有候选设备。', 'No candidates.') }}</div>
@@ -56,6 +62,12 @@ const emit = defineEmits<{
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.candidate-actions {
+  display: flex;
   gap: 8px;
   flex-wrap: wrap;
 }

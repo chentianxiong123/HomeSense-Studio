@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { api, type AuthStatus, type MiDeviceCandidate, type UserDevice } from '@/api'
 import MiCandidateList from './MiCandidateList.vue'
 
@@ -17,11 +16,12 @@ const emit = defineEmits<{
   (event: 'success', value: string): void
 }>()
 
-const router = useRouter()
 const auth = ref<AuthStatus | null>(null)
 const devices = ref<UserDevice[]>([])
 const candidates = ref<MiDeviceCandidate[]>([])
 const candidatesLoaded = ref(false)
+const qrDialogOpen = ref(false)
+const candidatesDialogOpen = ref(false)
 const busy = ref<Record<string, boolean>>({})
 const qrPolling = ref(false)
 const qrStatusMessage = ref('')
@@ -101,6 +101,7 @@ async function startMiQrLogin() {
   stopQrPolling()
   setBusy('mi-login', true)
   qrStatusMessage.value = ''
+  qrDialogOpen.value = true
   try {
     auth.value = await api.auth.qrStart()
     qrStatusMessage.value = auth.value.data?.message || label('请使用米家 App 扫码', 'Scan with Mi Home')
@@ -182,10 +183,11 @@ async function logoutMi() {
   }
 }
 
-async function loadMiCandidates() {
+async function loadMiCandidates(refresh = false) {
+  candidatesDialogOpen.value = true
   setBusy('mi-candidates', true)
   try {
-    const result = await api.userDevices.miCandidates()
+    const result = await api.userDevices.miCandidates({ refresh })
     candidates.value = result.devices ?? []
     candidatesLoaded.value = true
   } catch (error) {
@@ -216,54 +218,80 @@ defineExpose({ refresh, stopQrPolling })
       </span>
     </div>
 
-    <div class="mi-account">
+    <div class="mi-account compact">
       <div class="account-main">
         <span class="field-label">{{ label('账号', 'Account') }}</span>
         <strong>{{ miUser }}</strong>
-        <div class="token-line">
-          <span :class="['pill', tokenValid ? 'ok' : 'muted']">{{ tokenValid ? 'Token OK' : label('未验证', 'Unverified') }}</span>
-          <span>{{ miBoundCount }} {{ label('台设备绑定 Mi', 'Mi device bindings') }}</span>
-        </div>
+        <span class="compact-line">{{ miBoundCount }} {{ label('台设备已绑定', 'bound devices') }}</span>
       </div>
       <div class="account-actions">
         <button class="plain-btn" :disabled="isBusy('mi-status')" @click="refreshMiStatus">{{ label('检查', 'Check') }}</button>
         <button class="primary-btn" :disabled="isBusy('mi-login')" @click="startMiQrLogin">
           {{ isBusy('mi-login') ? label('生成中', 'Starting') : label('扫码登录', 'QR Login') }}
         </button>
-        <button v-if="qrPolling || qrImage || qrLink" class="plain-btn" :disabled="isBusy('mi-reset')" @click="resetMiQr">
-          {{ label('重置二维码', 'Reset QR') }}
+        <button class="plain-btn" :disabled="isBusy('mi-candidates')" @click="loadMiCandidates(false)">
+          {{ isBusy('mi-candidates') ? label('发现中', 'Discovering') : label('发现设备', 'Discover') }}
         </button>
-        <button class="plain-btn" @click="router.push('/authorizations/mi-cli')">mi-cli</button>
         <button v-if="loggedIn" class="danger-btn" :disabled="isBusy('mi-logout')" @click="logoutMi">{{ label('退出', 'Logout') }}</button>
       </div>
     </div>
 
-    <div class="qr-row">
-      <div class="qr-frame">
-        <img v-if="qrImage" :src="qrImage" alt="Mi QR Code" />
-        <a v-else-if="qrLink" :href="qrLink" target="_blank" rel="noreferrer">{{ label('打开二维码链接', 'Open QR link') }}</a>
-        <span v-else>{{ loggedIn ? label('当前无需扫码', 'No QR needed') : label('未生成二维码', 'No QR generated') }}</span>
-      </div>
-      <div class="qr-copy">
-        <strong>{{ loggedIn ? label('米家账号已接管', 'Mi account connected') : label('米家扫码登录', 'Mi QR login') }}</strong>
-        <span>{{ qrStatusMessage || authData?.message || label('状态来自 mi-cli', 'Status from mi-cli') }}</span>
-        <span v-if="qrPolling" class="polling-text">{{ label('轮询中', 'Polling') }}</span>
-      </div>
+    <div class="simple-status">
+      <span>{{ authData?.message || label('状态来自 mi-cli', 'Status from mi-cli') }}</span>
+      <span v-if="!tokenValid && loggedIn">{{ label('需要重新检查登录状态', 'Login should be checked again') }}</span>
     </div>
 
-    <MiCandidateList
-      :candidates="candidates"
-      :loaded="candidatesLoaded"
-      :loading="isBusy('mi-candidates')"
-      :label="label"
-      @load="loadMiCandidates"
-    />
+    <div v-if="qrDialogOpen" class="modal-backdrop" @click.self="qrDialogOpen = false">
+      <section class="mi-modal">
+        <div class="modal-head">
+          <div>
+            <span class="eyebrow">Mi</span>
+            <h3>{{ label('扫码登录', 'QR Login') }}</h3>
+          </div>
+          <button class="icon-btn" @click="qrDialogOpen = false">×</button>
+        </div>
+        <div class="qr-row">
+          <div class="qr-frame">
+            <img v-if="qrImage" :src="qrImage" alt="Mi QR Code" />
+            <a v-else-if="qrLink" :href="qrLink" target="_blank" rel="noreferrer">{{ label('打开二维码链接', 'Open QR link') }}</a>
+            <span v-else>{{ loggedIn ? label('当前无需扫码', 'No QR needed') : label('未生成二维码', 'No QR generated') }}</span>
+          </div>
+          <div class="qr-copy">
+            <strong>{{ loggedIn ? label('米家账号已连接', 'Mi account connected') : label('请使用米家 App 扫码', 'Scan with Mi Home') }}</strong>
+            <span>{{ qrStatusMessage || authData?.message || label('等待 mi-cli 返回状态', 'Waiting for mi-cli status') }}</span>
+            <span v-if="qrPolling" class="polling-text">{{ label('轮询中', 'Polling') }}</span>
+            <button v-if="qrPolling || qrImage || qrLink" class="plain-btn" :disabled="isBusy('mi-reset')" @click="resetMiQr">
+              {{ label('重置二维码', 'Reset QR') }}
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="candidatesDialogOpen" class="modal-backdrop" @click.self="candidatesDialogOpen = false">
+      <section class="mi-modal wide">
+        <div class="modal-head">
+          <div>
+            <span class="eyebrow">Mi</span>
+            <h3>{{ label('发现设备', 'Discover Devices') }}</h3>
+          </div>
+          <button class="icon-btn" @click="candidatesDialogOpen = false">×</button>
+        </div>
+        <MiCandidateList
+          :candidates="candidates"
+          :loaded="candidatesLoaded"
+          :loading="isBusy('mi-candidates')"
+          :label="label"
+          @load="loadMiCandidates(false)"
+          @refresh="loadMiCandidates(true)"
+        />
+      </section>
+    </div>
   </section>
 </template>
 
 <style scoped>
 .detail-surface {
-  min-height: 470px;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   padding: 22px;
@@ -278,7 +306,8 @@ defineExpose({ refresh, stopQrPolling })
 .mi-account,
 .qr-row,
 .account-actions,
-.token-line {
+.token-line,
+.modal-head {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -286,7 +315,8 @@ defineExpose({ refresh, stopQrPolling })
 }
 
 .detail-head,
-.mi-account {
+.mi-account,
+.modal-head {
   justify-content: space-between;
 }
 
@@ -311,6 +341,10 @@ h2 {
   background: #fff;
 }
 
+.mi-account.compact {
+  align-items: center;
+}
+
 .account-main,
 .qr-copy {
   min-width: 0;
@@ -327,11 +361,68 @@ h2 {
 
 .field-label,
 .token-line,
-.qr-copy span {
+.qr-copy span,
+.compact-line,
+.simple-status {
   color: var(--text-tertiary);
   font-size: 13px;
   font-weight: 700;
   line-height: 1.45;
+}
+
+.simple-status {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.mi-modal {
+  width: min(620px, 100%);
+  max-height: min(86vh, 720px);
+  overflow-y: auto;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 12px;
+  background: #fff;
+  padding: 22px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+}
+
+.mi-modal.wide {
+  width: min(920px, 100%);
+}
+
+.modal-head {
+  margin-bottom: 16px;
+}
+
+.modal-head h3 {
+  margin: 4px 0 0;
+  color: var(--text-primary);
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.icon-btn {
+  width: 34px;
+  height: 34px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .qr-row {
@@ -432,6 +523,14 @@ button:disabled {
 
   .qr-frame {
     width: 100%;
+  }
+
+  .account-actions {
+    width: 100%;
+  }
+
+  .account-actions button {
+    flex: 1 1 120px;
   }
 }
 </style>

@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import type { UserDevice } from '@/api'
+import type { AlistAuthorizationRecord } from '@/api/alist'
 
 type LabelFn = (zh: string, en: string) => string
 
 defineProps<{
-  rows: Array<{ device: UserDevice }>
+  rows: AlistAuthorizationRecord[]
   testResults: Record<string, { ok: boolean; message: string }>
   label: LabelFn
   isBusy: (key: string) => boolean
@@ -12,13 +12,9 @@ defineProps<{
 
 const emit = defineEmits<{
   (event: 'test', address: string): void
-  (event: 'edit', device: UserDevice): void
-  (event: 'delete', device: UserDevice): void
+  (event: 'edit', source: AlistAuthorizationRecord): void
+  (event: 'delete', source: AlistAuthorizationRecord): void
 }>()
-
-function getString(value: unknown): string {
-  return typeof value === 'string' ? value : ''
-}
 </script>
 
 <template>
@@ -32,24 +28,24 @@ function getString(value: unknown): string {
       <span>{{ label('地址', 'Endpoint') }}</span>
       <span>{{ label('操作', 'Actions') }}</span>
     </div>
-    <div v-for="row in rows" :key="row.device.id" class="target-row">
+    <div v-for="row in rows" :key="row.id" class="target-row">
       <div class="device-cell">
-        <strong>{{ row.device.name }}</strong>
+        <strong>{{ row.name }}</strong>
       </div>
       <div class="endpoint-cell">
-        <code>{{ row.device.props?.adb_ip }}</code>
-        <small v-if="testResults[getString(row.device.props?.adb_ip)]" :class="['probe-result', testResults[getString(row.device.props?.adb_ip)].ok ? 'ok-text' : 'bad-text']">
-          {{ testResults[getString(row.device.props?.adb_ip)].message }}
+        <code>{{ row.endpoint }}</code>
+        <small v-if="testResults[row.endpoint]" :class="['probe-result', testResults[row.endpoint].ok ? 'ok-text' : 'bad-text']">
+          {{ testResults[row.endpoint].message }}
         </small>
       </div>
       <div class="row-actions">
-        <button class="plain-btn compact" :disabled="isBusy(`adb-test-${row.device.props?.adb_ip}`)" @click="emit('test', getString(row.device.props?.adb_ip))">
+        <button class="plain-btn compact" :disabled="isBusy(`adb-test-${row.endpoint}`)" @click="emit('test', row.endpoint)">
           {{ label('测试', 'Test') }}
         </button>
-        <button class="plain-btn compact" :disabled="isBusy(`adb-edit-${row.device.id}`)" @click="emit('edit', row.device)">
+        <button class="plain-btn compact" :disabled="isBusy(`adb-edit-${row.id}`)" @click="emit('edit', row)">
           {{ label('编辑', 'Edit') }}
         </button>
-        <button class="danger-btn compact" :disabled="isBusy(`adb-delete-${row.device.id}`)" @click="emit('delete', row.device)">
+        <button class="danger-btn compact" :disabled="isBusy(`adb-delete-${row.id}`)" @click="emit('delete', row)">
           {{ label('删除', 'Delete') }}
         </button>
       </div>
