@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { api, type UserDevice, type Room, type MiDeviceCandidate } from '@/api'
-import { cliApi } from '@/api/cli'
+import { api, type UserDevice, type Room } from '@/api'
 import { deviceTypeOptions, roomColorPresets } from '@/components/devices/deviceOptions'
 import DeviceCreatorDialog from '@/components/devices/DeviceCreatorDialog.vue'
 import DevicesFloorCanvas from '@/components/devices/DevicesFloorCanvas.vue'
@@ -38,8 +37,6 @@ function showSuccess(msg: string) {
 
 const devices = ref<UserDevice[]>([])
 const rooms = ref<Room[]>([])
-const miCandidates = ref<MiDeviceCandidate[]>([])
-const miCandidatesLoading = ref(false)
 const onlineStatus = ref<Record<number, boolean>>({})
 let pingTimer: ReturnType<typeof setInterval> | null = null
 
@@ -165,7 +162,6 @@ onMounted(async () => {
   detectOrientation()
   await loadData()
   startPing()
-  void ensureMiNamesLoaded()
   updateViewportSize()
   window.addEventListener('resize', onResize)
 })
@@ -193,6 +189,7 @@ async function loadData() {
       api.rooms.list(),
     ])
     devices.value = devRes.devices ?? []
+    writeDeviceDetailSnapshots(devices.value)
     rooms.value = roomRes.rooms ?? []
     await groups.load()
 
@@ -328,36 +325,6 @@ function deviceIcon(t: string): string {
   return 'device'
 }
 
-function miNameFor(did: string): string {
-  if (!did) return ''
-  const c = miCandidates.value.find((x) => x.did === did)
-  return c?.name || c?.model || did
-}
-
-async function ensureMiNamesLoaded() {
-  if (miCandidates.value.length > 0 || miCandidatesLoading.value) return
-  miCandidatesLoading.value = true
-  try {
-    const r = await cliApi.run<{ summary: Array<{ did: string; name?: string; model?: string }> }>('mi-cli', {
-      action: 'discover',
-      params: { summary_only: true },
-      ttl_ms: 60_000,
-    })
-    if (r.status === 'success' && r.data?.summary) {
-      miCandidates.value = r.data.summary.map((d) => ({
-        did: d.did,
-        name: d.name ?? '',
-        model: d.model ?? '',
-        device_type: '',
-        room_name: '',
-        home_name: '',
-      }))
-    }
-  } catch {} finally {
-    miCandidatesLoading.value = false
-  }
-}
-
 function selectDevice(device: UserDevice) {
   selectedDeviceId.value = device.id
 }
@@ -367,7 +334,22 @@ function roomDevices(room: Room) {
 }
 
 function openDeviceDetail(device: UserDevice) {
+  writeDeviceDetailSnapshot(device)
   router.push(`/devices/${device.id}?from=/devices`)
+}
+
+function deviceDetailCacheKey(id: number) {
+  return `homesense.device-detail.${id}`
+}
+
+function writeDeviceDetailSnapshot(device: UserDevice) {
+  try {
+    localStorage.setItem(deviceDetailCacheKey(device.id), JSON.stringify(device))
+  } catch {}
+}
+
+function writeDeviceDetailSnapshots(items: UserDevice[]) {
+  for (const device of items) writeDeviceDetailSnapshot(device)
 }
 
 function handleRoomDblClick(room: Room) {

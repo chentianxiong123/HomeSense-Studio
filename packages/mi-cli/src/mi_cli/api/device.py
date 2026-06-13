@@ -35,14 +35,11 @@ def _get_home_owner(auth_data: dict, home_id: int) -> int:
 
 def handle_discover(command: dict) -> dict:
     auth_data = _load_auth_data()
-
-    if not _check_available(auth_data):
-        return {"status": "error", "error": "AUTH_FAILED", "message": "未登录，请先执行 login_qr"}
-
     renew = command.get("renew", False)
     summary_only = command.get("summary_only", False)
 
-    # 对照 hass-xiaomi-miot: 先读缓存
+    # Device discovery remains usable from cache only for non-forced reads.
+    # HomeSense can pass renew=true when it needs the real CLI/cloud path.
     cached_devices, cached_homes = _get_cached_devices(renew=renew)
     if cached_devices is not None:
         summary = build_discover_summary(cached_devices)
@@ -50,12 +47,31 @@ def handle_discover(command: dict) -> dict:
             return {"status": "success", "data": {"summary": summary, "count": len(summary)}}
         return {"status": "success", "data": {"devices": cached_devices, "homes": cached_homes, "summary": summary}}
 
+    if not _check_available(auth_data):
+        if not renew:
+            dat = _load_device_cache()
+            stale_devices = dat.get("devices", [])
+        else:
+            stale_devices = []
+        if stale_devices:
+            summary = build_discover_summary(stale_devices)
+            data = {
+                "summary": summary,
+                "count": len(summary),
+                "stale": True,
+                "warning": "米家云端探测失败，已返回本地设备缓存",
+            }
+            if not summary_only:
+                data.update({"devices": stale_devices, "homes": dat.get("homes", [])})
+            return {"status": "success", "data": data}
+        return {"status": "error", "error": "AUTH_FAILED", "message": "登录凭据不可用，请重新登录"}
+
     # 缓存过期或强制刷新 → 调 API
     try:
         homes = _get_homes_list(auth_data)
     except Exception as e:
         # 对照 hass-xiaomi-miot: 连不上但有过期缓存也能用
-        dat = _load_device_cache()
+        dat = _load_device_cache() if not renew else {}
         if dat.get("devices"):
             stale_devices = dat.get("devices", [])
             summary = build_discover_summary(stale_devices)
@@ -330,8 +346,6 @@ def handle_device_prop(command: dict) -> dict:
 def handle_device_info(command: dict) -> dict:
     """AI-friendly: query single device by did or fuzzy name match. Returns full device info with capabilities."""
     auth_data = _load_auth_data()
-    if not _check_available(auth_data):
-        return {"status": "error", "error": "AUTH_FAILED", "message": "未登录"}
 
     did = command.get("did")
     name = command.get("name")
@@ -343,6 +357,8 @@ def handle_device_info(command: dict) -> dict:
     if cached_devices is None:
         dat = _load_device_cache()
         cached_devices = dat.get("devices", [])
+    if not cached_devices and not _check_available(auth_data):
+        return {"status": "error", "error": "AUTH_FAILED", "message": "未登录"}
 
     candidates = []
     if did:
@@ -390,18 +406,26 @@ def handle_device_info(command: dict) -> dict:
 def handle_device_capabilities(command: dict) -> dict:
     """返回设备的中文能力列表，无 siid/piid/aiid，适合给 LLM 使用."""
     auth_data = _load_auth_data()
-    if not _check_available(auth_data):
-        return {"status": "error", "error": "AUTH_FAILED", "message": "未登录"}
 
     did = command.get("did")
     name = command.get("name")
+    renew = command.get("renew", False)
     if not did and not name:
         return {"status": "error", "error": "INVALID_PARAMS", "message": "缺少 did 或 name 参数"}
 
-    cached_devices, _ = _get_cached_devices(renew=False)
+    cached_devices, _ = _get_cached_devices(renew=renew)
     if cached_devices is None:
-        dat = _load_device_cache()
-        cached_devices = dat.get("devices", [])
+        discover_result = handle_discover({"action": "discover", "renew": renew})
+        if discover_result.get("status") == "success":
+            data = discover_result.get("data", {})
+            cached_devices = data.get("devices", []) if isinstance(data, dict) else []
+        elif not renew:
+            dat = _load_device_cache()
+            cached_devices = dat.get("devices", [])
+        else:
+            return discover_result
+    if not cached_devices and not _check_available(auth_data):
+        return {"status": "error", "error": "AUTH_FAILED", "message": "未登录"}
 
     candidates = []
     if did:

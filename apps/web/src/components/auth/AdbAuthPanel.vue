@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { api, type UserDevice } from '@/api'
+import { alistApi, type AlistAuthorizationRecord } from '@/api/alist'
 import { cliApi } from '@/api/cli'
 import AdbEndpointDialog from './AdbEndpointDialog.vue'
 import AdbEndpointList from './AdbEndpointList.vue'
@@ -26,9 +26,9 @@ const emit = defineEmits<{
   (event: 'success', value: string): void
 }>()
 
-const devices = ref<UserDevice[]>([])
+const sources = ref<AlistAuthorizationRecord[]>([])
 const adbFormOpen = ref(false)
-const editingAdbDevice = ref<UserDevice | null>(null)
+const editingAdbSource = ref<AlistAuthorizationRecord | null>(null)
 const formName = ref('')
 const formAdbAddress = ref('')
 const adbScanSubnet = ref('')
@@ -38,10 +38,9 @@ const adbTestResults = ref<Record<string, { ok: boolean; message: string }>>({})
 const busy = ref<Record<string, boolean>>({})
 
 const adbRows = computed(() => {
-  return [...devices.value]
-    .filter((device) => typeof device.props?.adb_ip === 'string' && (device.props.adb_ip as string).trim())
+  return [...sources.value]
+    .filter((source) => source.driver === 'adb')
     .sort((left, right) => left.name.localeCompare(right.name))
-    .map((device) => ({ device }))
 })
 
 const adbBoundCount = computed(() => adbRows.value.length)
@@ -61,73 +60,70 @@ function isBusy(key: string) {
   return Boolean(busy.value[key])
 }
 
-const adbFormSaving = computed(() => isBusy('adb-create') || (editingAdbDevice.value ? isBusy(`adb-edit-${editingAdbDevice.value.id}`) : false))
+const adbFormSaving = computed(() => isBusy('adb-create') || (editingAdbSource.value ? isBusy(`adb-edit-${editingAdbSource.value.id}`) : false))
 
 async function refresh() {
-  await loadDevices()
+  await loadSources()
 }
 
-async function loadDevices() {
-  setBusy('devices', true)
+async function loadSources() {
+  setBusy('sources', true)
   try {
-    const deviceResult = await api.userDevices.list()
-    devices.value = deviceResult.devices ?? []
+    const result = await alistApi.listAuthorizations()
+    sources.value = result.authorizations ?? []
     emit('count-change', adbBoundCount.value)
   } catch (error) {
     emit('error', (error as Error).message || String(error))
   } finally {
-    setBusy('devices', false)
+    setBusy('sources', false)
   }
 }
 
 function openCreateAdbDevice() {
-  editingAdbDevice.value = null
+  editingAdbSource.value = null
   formName.value = ''
   formAdbAddress.value = ''
   adbFormOpen.value = true
 }
 
-function openEditAdbDevice(device: UserDevice) {
-  editingAdbDevice.value = device
-  formName.value = device.name
-  formAdbAddress.value = getString(device.props?.adb_ip)
+function openEditAdbDevice(source: AlistAuthorizationRecord) {
+  editingAdbSource.value = source
+  formName.value = source.name
+  formAdbAddress.value = source.endpoint
   adbFormOpen.value = true
 }
 
 function closeAdbForm() {
   adbFormOpen.value = false
-  editingAdbDevice.value = null
+  editingAdbSource.value = null
 }
 
 async function submitAdbDevice() {
   const name = formName.value.trim()
   const adbAddress = normalizeAdbAddress(formAdbAddress.value)
   if (!name || !adbAddress) return
-  const ipAddress = endpointHost(adbAddress)
-  const payload: { name: string; props: Record<string, unknown> } = {
+  const payload = {
     name,
+    driver: 'adb',
+    endpoint: adbAddress,
     props: {
-      device_type: editingAdbDevice.value?.props?.device_type ?? 'other',
-      adb_ip: adbAddress,
-      ...(ipAddress ? { ip_address: ipAddress } : {}),
+      root_path: '/sdcard/',
+      device: adbAddress,
     },
   }
-  if (editingAdbDevice.value?.props?.room_id != null) {
-    payload.props.room_id = editingAdbDevice.value.props.room_id
-  }
 
-  const key = editingAdbDevice.value ? `adb-edit-${editingAdbDevice.value.id}` : 'adb-create'
+  const key = editingAdbSource.value ? `adb-edit-${editingAdbSource.value.id}` : 'adb-create'
   setBusy(key, true)
   try {
-    if (editingAdbDevice.value) {
-      await api.userDevices.update(editingAdbDevice.value.id, payload)
+    if (editingAdbSource.value) {
+      await alistApi.updateAuthorization(editingAdbSource.value.id, payload)
       emit('success', label('ADB 端点已更新', 'ADB endpoint updated'))
     } else {
-      await api.userDevices.create(payload)
+      await alistApi.createAuthorization(payload)
       emit('success', label('ADB 端点已添加', 'ADB endpoint added'))
     }
     closeAdbForm()
-    await loadDevices()
+    await loadSources()
   } catch (error) {
     emit('error', (error as Error).message || String(error))
   } finally {
@@ -135,17 +131,17 @@ async function submitAdbDevice() {
   }
 }
 
-async function deleteAdbDevice(device: UserDevice) {
-  if (!window.confirm(label(`删除 ADB 端点「${device.name}」？`, `Delete ADB endpoint "${device.name}"?`))) return
-  setBusy(`adb-delete-${device.id}`, true)
+async function deleteAdbDevice(source: AlistAuthorizationRecord) {
+  if (!window.confirm(label(`删除 ADB 来源「${source.name}」？`, `Delete ADB source "${source.name}"?`))) return
+  setBusy(`adb-delete-${source.id}`, true)
   try {
-    await api.userDevices.delete(device.id)
-    await loadDevices()
+    await alistApi.removeAuthorization(source.id)
+    await loadSources()
     emit('success', label('ADB 端点已删除', 'ADB endpoint deleted'))
   } catch (error) {
     emit('error', (error as Error).message || String(error))
   } finally {
-    setBusy(`adb-delete-${device.id}`, false)
+    setBusy(`adb-delete-${source.id}`, false)
   }
 }
 
@@ -181,18 +177,18 @@ async function saveAdbCandidate(candidate: AdbScanCandidate) {
     emit('success', label('ADB 端点已存在', 'ADB endpoint already exists'))
     return
   }
-  const ipAddress = endpointHost(address)
   setBusy(`adb-save-candidate-${address}`, true)
   try {
-    await api.userDevices.create({
+    await alistApi.createAuthorization({
       name: `ADB ${address}`,
+      driver: 'adb',
+      endpoint: address,
       props: {
-        device_type: 'other',
-        adb_ip: address,
-        ...(ipAddress ? { ip_address: ipAddress } : {}),
+        root_path: '/sdcard/',
+        device: address,
       },
     })
-    await loadDevices()
+    await loadSources()
     emit('success', label('ADB 候选已保存', 'ADB candidate saved'))
   } catch (error) {
     emit('error', (error as Error).message || String(error))
@@ -227,26 +223,18 @@ async function testAdbAddress(address: string) {
   }
 }
 
-function getString(value: unknown): string {
-  return typeof value === 'string' ? value : ''
-}
-
 function normalizeAdbAddress(value: string): string {
   const address = value.trim()
   return address && !address.includes(':') ? `${address}:5555` : address
 }
 
-function endpointHost(value: string): string {
-  return value.split(':')[0]?.trim() ?? ''
-}
-
 function isAdbAddressSaved(address: string): boolean {
   const normalized = normalizeAdbAddress(address)
-  return devices.value.some((device) => normalizeAdbAddress(getString(device.props?.adb_ip)) === normalized)
+  return sources.value.some((source) => source.driver === 'adb' && normalizeAdbAddress(source.endpoint) === normalized)
 }
 
 onMounted(() => {
-  void loadDevices()
+  void loadSources()
 })
 
 defineExpose({ refresh })
@@ -267,7 +255,7 @@ defineExpose({ refresh })
     <div class="list-toolbar">
       <div>
         <strong>ADB CLI</strong>
-        <small>{{ label('扫描候选只探测 5555 端口；保存后才进入设备授权。', 'Scan only probes port 5555; save a candidate to authorize it.') }}</small>
+        <small>{{ label('扫描候选只探测 5555 端口；保存后进入认证中心来源。', 'Scan only probes port 5555; saved candidates become Authorization Center sources.') }}</small>
       </div>
       <div class="toolbar-actions">
         <input v-model="adbScanSubnet" class="toolbar-input" placeholder="192.168.31.0/24" />
@@ -275,7 +263,7 @@ defineExpose({ refresh })
           {{ isBusy('adb-scan') ? label('扫描中', 'Scanning') : label('扫描', 'Scan') }}
         </button>
         <button class="primary-btn" :disabled="isBusy('adb-create')" @click="openCreateAdbDevice">{{ label('新增端点', 'Add Endpoint') }}</button>
-        <button class="plain-btn" :disabled="isBusy('devices')" @click="loadDevices">{{ label('刷新', 'Refresh') }}</button>
+        <button class="plain-btn" :disabled="isBusy('sources')" @click="loadSources">{{ label('刷新', 'Refresh') }}</button>
       </div>
     </div>
 
@@ -302,7 +290,7 @@ defineExpose({ refresh })
 
     <AdbEndpointDialog
       :open="adbFormOpen"
-      :editing="Boolean(editingAdbDevice)"
+      :editing="Boolean(editingAdbSource)"
       :name="formName"
       :address="formAdbAddress"
       :saving="adbFormSaving"

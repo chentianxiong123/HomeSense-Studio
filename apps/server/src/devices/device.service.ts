@@ -6,6 +6,7 @@ import { pingAllDevices } from './device-network'
 import { buildDeviceCardProjection, buildDeviceRuntimeCard } from './device-card-projection'
 import type {
   CreateUserDeviceInput,
+  DeviceRuntimeManifest,
   UpdateUserDeviceInput,
   UserDevice,
 } from './device.types'
@@ -28,6 +29,32 @@ export class DeviceService {
 
   async pingAll() {
     return { online: await pingAllDevices() }
+  }
+
+  async runtimeManifest(options: {
+    online: boolean
+    capabilities: 'none' | 'summary' | 'full'
+    limit?: number
+  }): Promise<{ manifest: DeviceRuntimeManifest }> {
+    const devices = this.listRows(options.limit)
+    const cards = options.online
+      ? await Promise.all(devices.map((device) => buildDeviceRuntimeCard(device)))
+      : devices.map((device) => buildDeviceCardProjection(device))
+    return {
+      manifest: {
+        version: 1,
+        generated_at: new Date().toISOString(),
+        include_capabilities: options.capabilities,
+        devices: cards.map((card) => {
+          const caps = Array.isArray(card.props?.capabilities) ? card.props.capabilities as Array<Record<string, unknown>> : []
+          return {
+            ...card,
+            capability_count: caps.length,
+            ...(options.capabilities === 'none' ? {} : { capabilities: caps }),
+          }
+        }),
+      },
+    }
   }
 
   get(id: number): UserDevice {
@@ -71,6 +98,26 @@ export class DeviceService {
     this.get(id)
     getDb().prepare('DELETE FROM devices WHERE id = ?').run(id)
     return { status: 'deleted', id }
+  }
+
+  recordCapabilityUsage(input: {
+    deviceId: number
+    capability: string
+    params?: string
+    status: string
+    result?: unknown
+  }): void {
+    fs.mkdirSync(path.dirname(HISTORY_LOG), { recursive: true })
+    const result = input.result === undefined ? '' : JSON.stringify(input.result).replace(/\r?\n/g, ' ')
+    const line = [
+      new Date().toISOString(),
+      input.deviceId,
+      safeHistoryField(input.capability),
+      safeHistoryField(input.params ?? ''),
+      safeHistoryField(input.status),
+      safeHistoryField(result),
+    ].join('|')
+    fs.writeFileSync(HISTORY_LOG, `${line}\n`, { flag: 'a' })
   }
 
   getCapabilityHistory(id: string) {
@@ -170,6 +217,10 @@ export class DeviceService {
 function normalizeAdbIp(value: string): string {
   const adbIp = value.trim()
   return adbIp && !adbIp.includes(':') ? `${adbIp}:5555` : adbIp
+}
+
+function safeHistoryField(value: unknown): string {
+  return String(value ?? '').replace(/\r?\n/g, ' ').replace(/\|/g, '/')
 }
 
 function safeParseProps(raw: string): Record<string, unknown> {

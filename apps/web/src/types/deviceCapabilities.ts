@@ -14,7 +14,21 @@ export interface DeviceCapability {
 export interface DeviceIrKey {
   key_id: string
   name: string
+  raw_name?: string
   type?: string
+  normalized?: string
+  zone?: string
+  position?: string
+}
+
+export interface DeviceIrRemoteProfile {
+  controller_id?: string
+  name?: string
+  type?: string
+  source?: string
+  keys: DeviceIrKey[]
+  layout?: Record<string, string[]>
+  updated_at?: string
 }
 
 export interface DeviceExecutionHistoryEntry {

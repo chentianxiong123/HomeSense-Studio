@@ -1,77 +1,35 @@
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
 import { Body, Controller, Get, Post, Query } from '@nestjs/common'
 import { cliBridge } from '../cli/cli-bridge'
+import { deleteRuntimeSnapshot, readRuntimeSnapshot, writeRuntimeSnapshot } from '../db/runtime-snapshot'
 
-type AuthFileData = Record<string, unknown>
-
-const REQUIRED_AUTH_FIELDS = ['ssecurity', 'userId', 'cUserId', 'serviceToken'] as const
-
-function authFilePath() {
-  return path.join(process.env.MI_CLI_CONFIG_DIR || path.join(os.homedir(), '.cache', 'mi-cli'), 'auth.json')
-}
-
-function authField(value: unknown) {
-  return typeof value === 'string' ? value : ''
-}
-
-function readAuthFile(): AuthFileData {
-  const file = authFilePath()
-  if (!fs.existsSync(file)) return {}
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf8')) as AuthFileData
-  } catch {
-    return {}
-  }
-}
-
-function authFieldsPresent(authData: AuthFileData) {
-  return Object.fromEntries(REQUIRED_AUTH_FIELDS.map((field) => [field, Boolean(authData[field])]))
-}
-
-function localAuthStatus() {
-  const startedAt = Date.now()
-  const authData = readAuthFile()
-  const hasSavedLogin = Object.keys(authData).length > 0
-  const missing = REQUIRED_AUTH_FIELDS.filter((field) => !authData[field])
-  const expireTime = Number(authData.expireTime || 0)
-  const expired = expireTime > 0 && expireTime <= Date.now()
-  const loggedIn = missing.length === 0 && !expired
-
-  return {
-    status: 'success' as const,
-    data: {
-      logged_in: loggedIn,
-      token_valid: loggedIn,
-      has_saved_login: hasSavedLogin,
-      user_id: authField(authData.userId),
-      auth_fields_present: authFieldsPresent(authData),
-      message: loggedIn ? '已登录（本地缓存）' : hasSavedLogin ? '本地凭据不完整或已过期' : '未登录',
-      source: 'local_auth_file',
-      expire_time: expireTime || undefined,
-    },
-    duration_ms: Date.now() - startedAt,
-  }
-}
+const MI_AUTH_STATUS_SNAPSHOT = 'mi.auth.status'
 
 @Controller('auth')
 export class AuthController {
   @Get('status')
-  status(@Query('refresh') refresh?: string) {
-    if (!refresh) return localAuthStatus()
-    return cliBridge.run('mi-cli', 'login_status')
+  async status(@Query('refresh') refresh?: string) {
+    if (!isTruthyQuery(refresh)) {
+      const snapshot = readRuntimeSnapshot<Record<string, unknown>>(MI_AUTH_STATUS_SNAPSHOT)
+      if (snapshot) return snapshot
+    }
+    const result = await cliBridge.run('mi-cli', 'login_status', { refresh: isTruthyQuery(refresh) })
+    if (isLoggedInResult(result)) writeRuntimeSnapshot(MI_AUTH_STATUS_SNAPSHOT, result)
+    return result
   }
 
   @Post('login')
-  login(@Body() body?: { username?: string; password?: string }) {
+  async login(@Body() body?: { username?: string; password?: string }) {
+    let result
     if (body?.username || body?.password) {
-      return cliBridge.run('mi-cli', 'login_password', {
+      result = await cliBridge.run('mi-cli', 'login_password', {
         username: body.username ?? '',
         password: body.password ?? '',
       })
+    } else {
+      result = await cliBridge.run('mi-cli', 'login_qr')
     }
-    return cliBridge.run('mi-cli', 'login_qr')
+    if (isLoggedInResult(result)) writeRuntimeSnapshot(MI_AUTH_STATUS_SNAPSHOT, result)
+    return result
   }
 
   @Post('verify-ticket')
@@ -84,8 +42,11 @@ export class AuthController {
   }
 
   @Post('logout')
-  logout() {
-    return cliBridge.run('mi-cli', 'login_logout')
+  async logout() {
+    const result = await cliBridge.run('mi-cli', 'login_logout')
+    deleteRuntimeSnapshot(MI_AUTH_STATUS_SNAPSHOT)
+    deleteRuntimeSnapshot('mi.devices.candidates')
+    return result
   }
 
   @Post('qr/start')
@@ -94,12 +55,24 @@ export class AuthController {
   }
 
   @Get('qr/status')
-  qrStatus() {
-    return cliBridge.run('mi-cli', 'login_qr_status')
+  async qrStatus() {
+    const result = await cliBridge.run('mi-cli', 'login_qr_status')
+    if (isLoggedInResult(result)) writeRuntimeSnapshot(MI_AUTH_STATUS_SNAPSHOT, result)
+    return result
   }
 
   @Post('qr/reset')
   qrReset() {
     return cliBridge.run('mi-cli', 'login_qr_reset')
   }
+}
+
+function isTruthyQuery(value: string | undefined): boolean {
+  return value === 'true' || value === '1'
+}
+
+function isLoggedInResult(result: Awaited<ReturnType<typeof cliBridge.run>>): boolean {
+  if (result.status !== 'success') return false
+  const data = result.data
+  return Boolean(data && typeof data === 'object' && !Array.isArray(data) && (data as { logged_in?: unknown }).logged_in)
 }

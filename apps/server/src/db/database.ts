@@ -142,6 +142,13 @@ const tables = [
       finished_at TEXT,
       PRIMARY KEY (id)
     )`,
+  `CREATE TABLE IF NOT EXISTS runtime_snapshots (
+      key TEXT NOT NULL,
+      value_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (key)
+    )`,
 ]
 
 const indexes = [
@@ -184,7 +191,30 @@ export function getDb(): Database.Database {
 
 export function applySchema(target: Database.Database): void {
   for (const sql of tables) target.exec(sql)
+  applyCompatibilityMigrations(target)
   for (const sql of indexes) target.exec(sql)
+}
+
+function applyCompatibilityMigrations(target: Database.Database): void {
+  ensureColumn(target, 'alist_authorizations', 'username', 'TEXT')
+  ensureColumn(target, 'alist_authorizations', 'secret_json', "TEXT DEFAULT '{}'")
+  ensureColumn(target, 'alist_authorizations', 'props_json', "TEXT DEFAULT '{}'")
+  ensureColumn(target, 'alist_authorizations', 'created_at', 'TEXT')
+  ensureColumn(target, 'alist_authorizations', 'updated_at', 'TEXT')
+  target.exec(`
+    UPDATE alist_authorizations
+    SET
+      secret_json = COALESCE(secret_json, '{}'),
+      props_json = COALESCE(props_json, '{}'),
+      created_at = COALESCE(created_at, datetime('now')),
+      updated_at = COALESCE(updated_at, datetime('now'))
+  `)
+}
+
+function ensureColumn(target: Database.Database, table: string, column: string, definition: string): void {
+  const columns = target.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  if (columns.some((item) => item.name === column)) return
+  target.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
 }
 
 function migrateLegacyToDevices(target: Database.Database): void {

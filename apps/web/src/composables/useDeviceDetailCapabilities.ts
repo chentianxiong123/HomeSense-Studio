@@ -1,7 +1,6 @@
 import { computed, ref, type Ref } from 'vue'
 import { api, type UserDevice } from '@/api'
-import { cliApi } from '@/api/cli'
-import type { DeviceCapability, DeviceExecutionHistoryEntry, DeviceIrKey } from '@/types/deviceCapabilities'
+import type { DeviceCapability, DeviceExecutionHistoryEntry, DeviceIrKey, DeviceIrRemoteProfile } from '@/types/deviceCapabilities'
 import { formatChinaTime } from '@/utils/chinaTime'
 
 type LabelFn = (zh: string, en: string) => string
@@ -24,7 +23,6 @@ export function useDeviceDetailCapabilities(options: {
   const irKeys = ref<DeviceIrKey[]>([])
   const irKeysLoading = ref(false)
   const irControllerName = ref('')
-  const miNameMap = ref<Record<string, string>>({})
 
   function miDidOf(device: UserDevice | null): string {
     return options.propString(device, 'mi_did')
@@ -34,72 +32,36 @@ export function useDeviceDetailCapabilities(options: {
     return options.propString(device, 'adb_ip')
   }
 
-  function deviceTypeOf(device: UserDevice | null): string {
-    return options.propString(device, 'device_type') || 'other'
-  }
-
   function miNameFor(did: string): string {
-    if (!did) return ''
-    return miNameMap.value[did] || did
+    return did || ''
   }
 
-  async function persistCapabilities(newCaps: unknown[]): Promise<void> {
+  function hydrateIrRemoteProfile(): void {
+    const profile = readIrRemoteProfile(options.device.value?.props?.ir_remote_profile)
+    irKeys.value = profile?.keys ?? []
+    irControllerName.value = profile?.name ?? ''
+  }
+
+  async function refreshCapabilities(refresh = true): Promise<void> {
     if (!options.device.value) return
-    const newProps = { ...options.device.value.props, capabilities: newCaps }
+    capsLoading.value = true
+    capsError.value = ''
     try {
-      await api.userDevices.update(options.device.value.id, { props: newProps })
-      options.device.value = { ...options.device.value, props: newProps }
+      const resp = await api.userDevices.capabilities(options.device.value.id, refresh)
+      if (resp.status === 'success' && resp.data?.capabilities) {
+        capabilities.value = resp.data.capabilities
+        const newProps = { ...options.device.value.props, capabilities: resp.data.capabilities }
+        options.device.value = { ...options.device.value, props: newProps }
+      } else if (resp.status === 'error') {
+        capsError.value = resp.message || resp.error || options.label('能力读取失败', 'Failed to load capabilities')
+      } else if (!capsError.value) {
+        capabilities.value = []
+      }
     } catch (e) {
-      console.error('Failed to persist capabilities snapshot', e)
+      capsError.value = (e as Error).message || String(e)
+    } finally {
+      capsLoading.value = false
     }
-  }
-
-  async function ensureMiNames(): Promise<void> {
-    if (Object.keys(miNameMap.value).length > 0) return
-    try {
-      const result = await cliApi.run<{ summary: Array<{ did: string; name?: string; model?: string }> }>('mi-cli', {
-        action: 'discover',
-        params: { summary_only: true },
-        ttl_ms: 60_000,
-      })
-      if (result.status === 'success' && result.data?.summary) {
-        const next: Record<string, string> = {}
-        for (const item of result.data.summary) {
-          if (item.did) next[item.did] = item.name || item.model || item.did
-        }
-        miNameMap.value = next
-      }
-    } catch {}
-  }
-
-  async function refreshCapabilities(): Promise<void> {
-    if (!options.device.value) return
-    const collected: DeviceCapability[] = []
-    const miDid = miDidOf(options.device.value)
-    if (miDid) {
-      const resp = await cliApi.run<{ capabilities: DeviceCapability[] }>('mi-cli', {
-        action: 'device_capabilities',
-        params: { did: miDid },
-        ttl_ms: 60_000,
-      })
-      if (resp.status === 'success' && resp.data?.capabilities) {
-        for (const cap of resp.data.capabilities) collected.push({ ...cap, source: 'mi' })
-      }
-    }
-    const adbIp = adbIpOf(options.device.value)
-    if (adbIp) {
-      const resp = await cliApi.run<{ capabilities: DeviceCapability[] }>('adb-cli', {
-        action: 'capabilities',
-        params: { device_type: deviceTypeOf(options.device.value) },
-        ttl_ms: 60_000,
-      })
-      if (resp.status === 'success' && resp.data?.capabilities) {
-        for (const cap of resp.data.capabilities) collected.push(cap)
-      }
-    }
-    if (collected.length === 0) return
-    capabilities.value = collected
-    await persistCapabilities(collected)
   }
 
   async function loadHistory() {
@@ -118,31 +80,27 @@ export function useDeviceDetailCapabilities(options: {
     }
   }
 
-  async function loadIrKeys() {
+  async function loadIrKeys(refresh = false) {
     irKeysLoading.value = true
     try {
-      const miDid = miDidOf(options.device.value)
-      if (!miDid) {
+      if (!miDidOf(options.device.value)) {
         irKeys.value = []
         return
       }
-      const resp = await cliApi.run<{ keys: Array<{ key_id: string | number; name: string; type?: string }>; name: string }>('mi-cli', {
-        action: 'device_ir_keys',
-        params: { did: miDid },
-        ttl_ms: 60_000,
-      })
+      const resp = await api.userDevices.irKeys(options.deviceId, refresh)
       if (resp.status === 'success' && resp.data) {
-        irKeys.value = (resp.data.keys ?? []).map((key) => ({
-          key_id: String(key.key_id),
-          name: key.name,
-          type: key.type,
-        }))
+        irKeys.value = normalizeIrKeys(resp.data.keys ?? [])
         irControllerName.value = resp.data.name
+        const currentDevice = options.device.value
+        if (currentDevice) {
+          const newProps = { ...currentDevice.props, ir_remote_profile: { ...resp.data, keys: irKeys.value } }
+          options.device.value = { ...currentDevice, props: newProps }
+        }
       } else {
-        irKeys.value = []
+        hydrateIrRemoteProfile()
       }
     } catch {
-      irKeys.value = []
+      hydrateIrRemoteProfile()
     } finally {
       irKeysLoading.value = false
     }
@@ -154,16 +112,10 @@ export function useDeviceDetailCapabilities(options: {
     execResult.value = ''
     execError.value = ''
     try {
-      const miDid = miDidOf(options.device.value)
-      const resp = await cliApi.run('mi-cli', {
-        action: 'device_ir_press',
-        params: { did: miDid, key_id: keyId },
-        ttl_ms: 0,
-        bypass_cache: true,
-      })
+      const resp = await api.userDevices.irPress(options.deviceId, keyId)
       if (resp.status === 'success') {
         execResult.value = options.label('按键已发送', 'Key sent')
-        logUsage('mi', 'ir_press', keyId, 'ok')
+        loadHistory()
       } else {
         execError.value = resp.message || resp.error || options.label('发送失败', 'Failed')
       }
@@ -185,19 +137,17 @@ export function useDeviceDetailCapabilities(options: {
     execResult.value = ''
     execError.value = ''
     try {
-      const source = cap.source ?? 'mi'
-      const cli = source === 'adb' ? 'adb-cli' : 'mi-cli'
-      const action = resolveAdbAction(cap) ?? resolveMiAction(cap) ?? ''
-      if (!action) {
+      const capabilityId = cap.capability_id ?? ''
+      if (!capabilityId && !cap.name) {
         execError.value = options.label('无法识别的能力', 'Unrecognized capability')
         return
       }
-      const cliParams = buildCliParams(cap, params)
-      const resp = await cliApi.run(cli, {
-        action,
-        params: cliParams,
-        ttl_ms: 0,
-        bypass_cache: true,
+      const argumentsPayload = buildCliParams(cap, params)
+      const resp = await api.userDevices.executeCapability(options.deviceId, {
+        capability_id: capabilityId,
+        capability: cap.name,
+        params: params || '',
+        arguments: argumentsPayload,
       })
       if (resp.status === 'success') {
         execResult.value = options.label('已发送: ', 'Sent: ') + cap.name
@@ -205,7 +155,6 @@ export function useDeviceDetailCapabilities(options: {
       } else {
         execError.value = resp.message || resp.error || options.label('执行失败', 'Execution failed')
       }
-      logUsage(source, action, params || '', resp.status === 'success' ? 'ok' : (resp.error || 'error'))
       loadHistory()
     } catch (e) {
       execError.value = (e as Error).message || String(e)
@@ -213,19 +162,6 @@ export function useDeviceDetailCapabilities(options: {
     } finally {
       executingCap.value = ''
     }
-  }
-
-  function resolveAdbAction(cap: DeviceCapability): string | null {
-    return typeof cap.capability_id === 'string' && cap.capability_id.startsWith('adb.')
-      ? cap.capability_id.slice(4)
-      : null
-  }
-
-  function resolveMiAction(cap: DeviceCapability): string | null {
-    if (typeof cap.capability_id === 'string' && cap.capability_id.startsWith('mi.')) {
-      return cap.capability_id.slice(3)
-    }
-    return null
   }
 
   function buildCliParams(cap: DeviceCapability, rawValue?: string): Record<string, unknown> {
@@ -261,14 +197,6 @@ export function useDeviceDetailCapabilities(options: {
     return { value: coerceCapabilityValue(text) }
   }
 
-  function logUsage(source: string, capability: string, params: string, status: string): void {
-    fetch('/api/command/usage', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ device_id: options.deviceId, source, capability, params, status }),
-    }).catch(() => {})
-  }
-
   function readSchemaProperties(schema: Record<string, unknown> | undefined): Record<string, unknown> {
     const properties = schema?.properties
     if (!properties || typeof properties !== 'object' || Array.isArray(properties)) return {}
@@ -280,6 +208,28 @@ export function useDeviceDetailCapabilities(options: {
     if (value === 'true') return true
     if (value === 'false') return false
     return value
+  }
+
+  function readIrRemoteProfile(value: unknown): DeviceIrRemoteProfile | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const profile = value as Partial<DeviceIrRemoteProfile>
+    if (!Array.isArray(profile.keys)) return null
+    return { ...profile, keys: normalizeIrKeys(profile.keys) }
+  }
+
+  function normalizeIrKeys(keys: unknown[]): DeviceIrKey[] {
+    return keys
+      .filter((key): key is Record<string, unknown> => Boolean(key) && typeof key === 'object' && !Array.isArray(key))
+      .map((key) => ({
+        key_id: String(key.key_id ?? ''),
+        name: String(key.name ?? ''),
+        raw_name: typeof key.raw_name === 'string' ? key.raw_name : undefined,
+        type: typeof key.type === 'string' ? key.type : undefined,
+        normalized: typeof key.normalized === 'string' ? key.normalized : undefined,
+        zone: typeof key.zone === 'string' ? key.zone : undefined,
+        position: typeof key.position === 'string' ? key.position : undefined,
+      }))
+      .filter((key) => key.key_id && key.name)
   }
 
   const miActionCaps = computed(() => capabilities.value.filter(cap => cap.source === 'mi' && cap.kind === 'action' && cap.name !== '遥控按键' && cap.name !== 'Remote Keys'))
@@ -303,7 +253,6 @@ export function useDeviceDetailCapabilities(options: {
     execHistory,
     irKeys,
     irKeysLoading,
-    irControllerName,
     miActionCaps,
     miPropertyCaps,
     adbCaps,
@@ -312,7 +261,7 @@ export function useDeviceDetailCapabilities(options: {
     miDidOf,
     adbIpOf,
     miNameFor,
-    ensureMiNames,
+    hydrateIrRemoteProfile,
     refreshCapabilities,
     loadHistory,
     loadIrKeys,

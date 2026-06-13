@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { DeviceCapability, DeviceExecutionHistoryEntry, DeviceIrKey } from '@/types/deviceCapabilities'
 
-defineProps<{
+const props = defineProps<{
   label: (zh: string, en: string) => string
   hasCapabilitySource: boolean
   capsLoading: boolean
@@ -23,12 +24,27 @@ defineProps<{
 
 defineEmits<{
   refresh: []
-  loadIrKeys: []
+  loadIrKeys: [refresh?: boolean]
   executeIrKey: [keyId: string]
   executeCapability: [capability: DeviceCapability]
   openAppBrowser: []
   updateTextInput: [capabilityName: string, value: string]
 }>()
+
+const remoteKeysByPosition = computed(() => {
+  const map = new Map<string, DeviceIrKey>()
+  for (const key of props.irKeys) {
+    const position = key.position || key.normalized || key.name
+    if (position && !map.has(position)) map.set(position, key)
+  }
+  return map
+})
+
+const numberKeys = computed(() => ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'].map((position) => remoteKeysByPosition.value.get(position)).filter(Boolean) as DeviceIrKey[])
+
+function remoteKey(position: string): DeviceIrKey | undefined {
+  return remoteKeysByPosition.value.get(position)
+}
 </script>
 
 <template>
@@ -60,19 +76,58 @@ defineEmits<{
       <div v-if="execError" class="exec-feedback exec-error">{{ execError }}</div>
 
       <div v-if="isIrDevice" class="cap-group">
-        <h3 class="cap-group-title">{{ label('遥控按键', 'Remote Keys') }} · {{ irKeys.length }}</h3>
+        <div class="cap-group-head">
+          <h3 class="cap-group-title">{{ label('遥控按键', 'Remote Keys') }} · {{ irKeys.length }}</h3>
+          <button class="mini-refresh-btn" :disabled="irKeysLoading" @click="$emit('loadIrKeys', true)">
+            {{ label('刷新码表', 'Refresh Keys') }}
+          </button>
+        </div>
         <div v-if="irKeysLoading" class="caps-loading">{{ label('加载按键…', 'Loading keys…') }}</div>
         <div v-else-if="irKeys.length === 0" class="caps-loading clickable-loading" @click="$emit('loadIrKeys')">
           {{ label('点击加载按键码表', 'Click to load key map') }}
         </div>
-        <div v-else class="ir-keypad">
-          <button
-            v-for="key in irKeys"
-            :key="key.key_id"
-            class="ir-key-btn"
-            :disabled="executingCap === 'ir_press'"
-            @click="$emit('executeIrKey', key.key_id)"
-          >{{ key.name }}</button>
+        <div v-else class="remote-control-pad">
+          <div class="remote-row remote-top-row">
+            <button v-if="remoteKey('power')" class="remote-key key-danger" :disabled="executingCap === 'ir_press'" @click="$emit('executeIrKey', remoteKey('power')!.key_id)">{{ remoteKey('power')!.name }}</button>
+            <button v-if="remoteKey('home')" class="remote-key" :disabled="executingCap === 'ir_press'" @click="$emit('executeIrKey', remoteKey('home')!.key_id)">{{ remoteKey('home')!.name }}</button>
+            <button v-if="remoteKey('menu')" class="remote-key" :disabled="executingCap === 'ir_press'" @click="$emit('executeIrKey', remoteKey('menu')!.key_id)">{{ remoteKey('menu')!.name }}</button>
+            <button v-if="remoteKey('back')" class="remote-key" :disabled="executingCap === 'ir_press'" @click="$emit('executeIrKey', remoteKey('back')!.key_id)">{{ remoteKey('back')!.name }}</button>
+          </div>
+
+          <div class="remote-main-row">
+            <div class="remote-side-stack">
+              <button v-if="remoteKey('volume_up')" class="remote-key tall-key" :disabled="executingCap === 'ir_press'" @click="$emit('executeIrKey', remoteKey('volume_up')!.key_id)">{{ remoteKey('volume_up')!.name }}</button>
+              <button v-if="remoteKey('volume_down')" class="remote-key tall-key" :disabled="executingCap === 'ir_press'" @click="$emit('executeIrKey', remoteKey('volume_down')!.key_id)">{{ remoteKey('volume_down')!.name }}</button>
+              <button v-if="remoteKey('mute')" class="remote-key" :disabled="executingCap === 'ir_press'" @click="$emit('executeIrKey', remoteKey('mute')!.key_id)">{{ remoteKey('mute')!.name }}</button>
+            </div>
+
+            <div class="remote-dpad">
+              <span></span>
+              <button v-if="remoteKey('up')" class="remote-key dpad-key" :disabled="executingCap === 'ir_press'" @click="$emit('executeIrKey', remoteKey('up')!.key_id)">{{ remoteKey('up')!.name }}</button>
+              <span></span>
+              <button v-if="remoteKey('left')" class="remote-key dpad-key" :disabled="executingCap === 'ir_press'" @click="$emit('executeIrKey', remoteKey('left')!.key_id)">{{ remoteKey('left')!.name }}</button>
+              <button v-if="remoteKey('ok')" class="remote-key ok-key" :disabled="executingCap === 'ir_press'" @click="$emit('executeIrKey', remoteKey('ok')!.key_id)">{{ remoteKey('ok')!.name }}</button>
+              <button v-if="remoteKey('right')" class="remote-key dpad-key" :disabled="executingCap === 'ir_press'" @click="$emit('executeIrKey', remoteKey('right')!.key_id)">{{ remoteKey('right')!.name }}</button>
+              <span></span>
+              <button v-if="remoteKey('down')" class="remote-key dpad-key" :disabled="executingCap === 'ir_press'" @click="$emit('executeIrKey', remoteKey('down')!.key_id)">{{ remoteKey('down')!.name }}</button>
+              <span></span>
+            </div>
+
+            <div class="remote-side-stack">
+              <button v-if="remoteKey('channel_up')" class="remote-key tall-key" :disabled="executingCap === 'ir_press'" @click="$emit('executeIrKey', remoteKey('channel_up')!.key_id)">{{ remoteKey('channel_up')!.name }}</button>
+              <button v-if="remoteKey('channel_down')" class="remote-key tall-key" :disabled="executingCap === 'ir_press'" @click="$emit('executeIrKey', remoteKey('channel_down')!.key_id)">{{ remoteKey('channel_down')!.name }}</button>
+            </div>
+          </div>
+
+          <div v-if="numberKeys.length > 0" class="remote-number-grid">
+            <button
+              v-for="key in numberKeys"
+              :key="key.key_id"
+              class="remote-key number-key"
+              :disabled="executingCap === 'ir_press'"
+              @click="$emit('executeIrKey', key.key_id)"
+            >{{ key.name }}</button>
+          </div>
         </div>
       </div>
 
@@ -260,6 +315,35 @@ defineEmits<{
   opacity: 0.6;
 }
 
+.cap-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.cap-group-head .cap-group-title {
+  margin-bottom: 0;
+}
+
+.mini-refresh-btn {
+  min-height: 30px;
+  padding: 6px 10px;
+  border: 1px solid rgba(99, 102, 241, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #6366f1;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.mini-refresh-btn:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
 .cap-cards {
   display: flex;
   flex-wrap: wrap;
@@ -351,40 +435,105 @@ defineEmits<{
   opacity: 0.6;
 }
 
-.ir-keypad {
+.remote-control-pad {
   display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(520px, 100%);
+}
+
+.remote-row,
+.remote-main-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.remote-top-row {
   flex-wrap: wrap;
+}
+
+.remote-main-row {
+  justify-content: space-between;
+}
+
+.remote-side-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 92px;
+}
+
+.remote-dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 64px);
+  grid-template-rows: repeat(3, 54px);
+  gap: 8px;
+  justify-content: center;
+}
+
+.remote-number-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(44px, 58px));
   gap: 8px;
 }
 
-.ir-key-btn {
-  padding: 12px 18px;
+.remote-key {
+  min-width: 58px;
+  min-height: 42px;
+  padding: 8px 12px;
   border: 1px solid rgba(99, 102, 241, 0.2);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.7);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.76);
   color: var(--text-primary);
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 800;
   cursor: pointer;
   transition: all 0.15s;
-  min-width: 48px;
   text-align: center;
 }
 
-.ir-key-btn:hover:not(:disabled) {
+.remote-key:hover:not(:disabled) {
   background: rgba(99, 102, 241, 0.1);
   border-color: rgba(99, 102, 241, 0.4);
   transform: translateY(-1px);
 }
 
-.ir-key-btn:active:not(:disabled) {
+.remote-key:active:not(:disabled) {
   transform: translateY(0);
   background: rgba(99, 102, 241, 0.2);
 }
 
-.ir-key-btn:disabled {
+.remote-key:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.key-danger {
+  border-color: rgba(239, 68, 68, 0.24);
+  color: #dc2626;
+}
+
+.tall-key {
+  width: 100%;
+}
+
+.dpad-key,
+.ok-key {
+  width: 64px;
+  height: 54px;
+  padding: 0;
+}
+
+.ok-key {
+  border-color: rgba(16, 185, 129, 0.28);
+  background: rgba(16, 185, 129, 0.1);
+  color: #047857;
+}
+
+.number-key {
+  min-width: 0;
+  padding-inline: 8px;
 }
 
 .app-browser-btn {
