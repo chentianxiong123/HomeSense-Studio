@@ -20,8 +20,9 @@ type ManagedAdbScrcpySession = AdbScrcpySession & {
 
 const MAX_TAIL_LINES = 80
 const SESSION_ID_PREFIX = 'adb-scrcpy'
-const SERVER_VERSION = '3.3.1'
 const DEVICE_SERVER_PATH = '/data/local/tmp/homesense-scrcpy-server.jar'
+const RAW_STREAM_CONNECT_TIMEOUT_MS = 8_000
+const RAW_STREAM_RETRY_DELAY_MS = 160
 
 @Injectable()
 export class AdbScrcpySessionService implements OnModuleDestroy {
@@ -125,28 +126,58 @@ export class AdbScrcpySessionService implements OnModuleDestroy {
       return
     }
 
-    const socket = new net.Socket()
     session.bridgeClients ??= new Set()
-    session.bridgeClients.add(socket)
+    let connected = false
+    let closed = false
+    const startedAt = Date.now()
+    let activeSocket: net.Socket | null = null
 
-    socket.on('data', (chunk) => {
-      if (ws.readyState === ws.OPEN) ws.send(chunk, { binary: true })
+    const scheduleAttempt = () => {
+      if (closed || connected || ws.readyState !== ws.OPEN) return
+      if (Date.now() - startedAt >= RAW_STREAM_CONNECT_TIMEOUT_MS) {
+        safeCloseWs(ws, 1011, 'raw stream unavailable')
+        return
+      }
+      setTimeout(attemptConnect, RAW_STREAM_RETRY_DELAY_MS)
+    }
+
+    const attemptConnect = () => {
+      if (closed || connected || !session.stream || ws.readyState !== ws.OPEN) return
+      const socket = new net.Socket()
+      activeSocket = socket
+      session.bridgeClients?.add(socket)
+      socket.on('data', (chunk) => {
+        if (ws.readyState === ws.OPEN) ws.send(chunk, { binary: true })
+      })
+      socket.once('connect', () => {
+        connected = true
+        session.stream = session.stream ? { ...session.stream, ready: true } : session.stream
+        session.updated_at = new Date().toISOString()
+      })
+      socket.once('error', (error) => {
+        appendTail(session.stderr_tail, Buffer.from(`raw stream tcp error: ${error.message}`))
+        socket.destroy()
+        scheduleAttempt()
+      })
+      socket.once('close', () => {
+        session.bridgeClients?.delete(socket)
+        if (connected && !closed) {
+          closed = true
+          safeCloseWs(ws, 1000, 'stream closed')
+        }
+      })
+      socket.connect({ host: session.stream.local_host, port: session.stream.local_port })
+    }
+
+    ws.once('close', () => {
+      closed = true
+      activeSocket?.destroy()
     })
-    socket.once('connect', () => {
-      session.stream = session.stream ? { ...session.stream, ready: true } : session.stream
-      session.updated_at = new Date().toISOString()
+    ws.once('error', () => {
+      closed = true
+      activeSocket?.destroy()
     })
-    socket.once('error', (error) => {
-      appendTail(session.stderr_tail, Buffer.from(`raw stream tcp error: ${error.message}`))
-      safeCloseWs(ws, 1011, 'raw stream unavailable')
-    })
-    socket.once('close', () => {
-      session.bridgeClients?.delete(socket)
-      safeCloseWs(ws, 1000, 'stream closed')
-    })
-    ws.once('close', () => socket.destroy())
-    ws.once('error', () => socket.destroy())
-    socket.connect({ host: session.stream.local_host, port: session.stream.local_port })
+    attemptConnect()
   }
 
   private getManaged(id: string): ManagedAdbScrcpySession {
@@ -218,6 +249,7 @@ export class AdbScrcpySessionService implements OnModuleDestroy {
   private async createRawBridgePlan(session: ManagedAdbScrcpySession, input: AdbScrcpySessionInput): Promise<AdbScrcpyRawBridge> {
     const localPort = await allocateLocalPort()
     const scid = randomScid()
+    const serverVersion = resolveScrcpyServerVersion(session.command.executable)
     return {
       kind: 'raw_h264',
       ws_path: `/api/streaming-gateway/adb-scrcpy/sessions/${encodeURIComponent(session.id)}/stream.ws`,
@@ -226,7 +258,7 @@ export class AdbScrcpySessionService implements OnModuleDestroy {
       socket_name: `scrcpy_${scid}`,
       scid,
       device_server_path: DEVICE_SERVER_PATH,
-      server_version: SERVER_VERSION,
+      server_version: serverVersion,
       ready: false,
       mime: 'video/h264',
       notes: [
@@ -391,6 +423,15 @@ function resolveScrcpyServerPath(scrcpyExecutable: string): string {
     '/usr/share/scrcpy/scrcpy-server',
   ]
   return common.find((candidate) => fs.existsSync(candidate)) || ''
+}
+
+function resolveScrcpyServerVersion(scrcpyExecutable: string): string {
+  const configured = String(process.env.SCRCPY_SERVER_VERSION || '').trim()
+  if (configured) return configured
+  const result = runSync(scrcpyExecutable, ['--version'])
+  const text = `${result.stdout}\n${result.stderr}`
+  const match = text.match(/scrcpy\s+([0-9]+(?:\.[0-9]+){1,2})/i)
+  return match?.[1] || '4.0'
 }
 
 function runSync(executable: string, args: string[]): { code: number | null; stdout: string; stderr: string } {
