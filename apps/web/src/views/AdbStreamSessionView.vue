@@ -22,6 +22,7 @@ const session = ref<AdbScrcpySession | null>(null)
 const wsPath = ref('')
 const playerState = ref('')
 let startupTimer = 0
+let inspectTimer = 0
 
 const adbDevice = computed(() => {
   const value = route.query.device
@@ -72,6 +73,7 @@ async function startStream() {
     }
     session.value = result.data
     statusMessage.value = label('串流已启动，正在连接画面...', 'Stream started, connecting video...')
+    startInspectLoop(result.data.id)
     startupTimer = window.setTimeout(() => {
       wsPath.value = result.data.stream?.ws_path || ''
     }, 250)
@@ -83,6 +85,25 @@ async function startStream() {
   }
 }
 
+function startInspectLoop(id: string) {
+  if (inspectTimer) window.clearInterval(inspectTimer)
+  inspectTimer = window.setInterval(async () => {
+    try {
+      const result = await streamingGatewayApi.adbScrcpySession(id)
+      if (result.status === 'success') {
+        session.value = result.data
+        if (result.data.error) errorMessage.value = result.data.error
+        if (['failed', 'exited', 'stopped'].includes(result.data.state)) {
+          window.clearInterval(inspectTimer)
+          inspectTimer = 0
+        }
+      }
+    } catch {
+      // Keep the stream page alive; the websocket/player error is more useful here.
+    }
+  }, 1000)
+}
+
 async function stopStream() {
   if (stopping.value) return
   const id = session.value?.id
@@ -90,6 +111,10 @@ async function stopStream() {
   if (startupTimer) {
     window.clearTimeout(startupTimer)
     startupTimer = 0
+  }
+  if (inspectTimer) {
+    window.clearInterval(inspectTimer)
+    inspectTimer = 0
   }
   if (!id) return
   stopping.value = true
@@ -135,6 +160,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (startupTimer) window.clearTimeout(startupTimer)
+  if (inspectTimer) window.clearInterval(inspectTimer)
   void stopStream()
 })
 </script>
@@ -175,6 +201,7 @@ onBeforeUnmount(() => {
       <span>{{ label('状态', 'State') }}: {{ playerState || session?.state || '-' }}</span>
       <span v-if="session?.id">{{ session.id }}</span>
     </footer>
+    <pre v-if="session?.stderr_tail?.length || session?.error" class="stream-debug">{{ [session?.error, ...(session?.stderr_tail || [])].filter(Boolean).slice(-8).join('\n') }}</pre>
   </div>
 </template>
 
@@ -331,6 +358,25 @@ onBeforeUnmount(() => {
   gap: 14px;
   color: #94a3b8;
   font-size: 15px;
+}
+
+.stream-debug {
+  position: fixed;
+  left: 12px;
+  bottom: 38px;
+  z-index: 4;
+  max-width: min(760px, calc(100vw - 24px));
+  max-height: 180px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  border-radius: 8px;
+  background: rgba(69, 10, 10, 0.84);
+  color: #fecaca;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
 }
 
 @media (max-width: 700px) {

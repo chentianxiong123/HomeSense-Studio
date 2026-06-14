@@ -175,6 +175,8 @@ export const streamingGatewayApi = {
   runtimeStatus: () => request<{ status: string; data: MoonlightWebRuntimeStatus }>('/api/streaming-gateway/runtime'),
   adbScrcpySessions: () =>
     request<{ status: string; data: AdbScrcpySession[] }>('/api/streaming-gateway/adb-scrcpy/sessions'),
+  adbScrcpySession: (id: string) =>
+    request<{ status: string; data: AdbScrcpySession }>(`/api/streaming-gateway/adb-scrcpy/sessions/${encodeURIComponent(id)}`),
   createAdbScrcpySession: (body: AdbScrcpySessionInput) =>
     request<{ status: string; data: AdbScrcpySession }>('/api/streaming-gateway/adb-scrcpy/sessions', {
       method: 'POST',
