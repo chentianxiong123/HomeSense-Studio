@@ -5,7 +5,13 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     headers: options?.body ? { 'Content-Type': 'application/json' } : undefined,
     ...options,
   })
-  return response.json()
+  const text = await response.text()
+  const body = text ? JSON.parse(text) : {}
+  if (!response.ok) {
+    const message = body?.message || body?.error || `Request failed: ${response.status} ${response.statusText}`
+    throw new Error(Array.isArray(message) ? message.join(', ') : String(message))
+  }
+  return body as T
 }
 
 export type StreamingNetworkPath = 'lan' | 'vpn' | 'tunnel' | 'public'
