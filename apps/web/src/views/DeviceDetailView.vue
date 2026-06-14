@@ -220,7 +220,8 @@ function cleanBindingProps(props: Record<string, unknown>) {
   if (selectedMiDid.value) next.mi_did = selectedMiDid.value
   else delete next.mi_did
 
-  const adbAuth = authorizations.value.find((auth) => String(auth.id) === selectedAdbAuthId.value)
+  const selectedAdbId = String(selectedAdbAuthId.value || '')
+  const adbAuth = authorizations.value.find((auth) => String(auth.id) === selectedAdbId)
   if (adbAuth) {
     next.adb_ip = adbAuth.endpoint
     next.adb_authorization_id = adbAuth.id
@@ -264,6 +265,9 @@ async function saveBindings() {
   bindingMessage.value = ''
   bindingError.value = ''
   try {
+    if (selectedAdbAuthId.value && !authorizations.value.some((auth) => auth.driver === 'adb' && String(auth.id) === String(selectedAdbAuthId.value))) {
+      throw new Error(label('选择的 ADB 来源不存在，请刷新来源后重试', 'Selected ADB source does not exist. Refresh sources and try again.'))
+    }
     const result = await api.userDevices.update(deviceId, {
       name: deviceNameDraft.value.trim() || device.value.name,
       props: cleanBindingProps(device.value.props ?? {}),
@@ -427,7 +431,7 @@ function hydrateDeviceSnapshot(d: UserDevice | null) {
               <span>{{ label('认证中心来源', 'Authorization Source') }}</span>
               <select v-model="selectedAdbAuthId">
                 <option value="">{{ label('不绑定来源', 'No source') }}</option>
-                <option v-for="auth in adbAuthOptions" :key="auth.id" :value="auth.id">
+                <option v-for="auth in adbAuthOptions" :key="auth.id" :value="String(auth.id)">
                   {{ auth.name }} · {{ auth.endpoint }}
                 </option>
               </select>

@@ -10,6 +10,7 @@ type LabelFn = (zh: string, en: string) => string
 
 type AdbScanData = {
   subnet: string
+  subnets?: string[]
   ports: number[]
   scanned: number
   candidates: AdbScanCandidate[]
@@ -32,9 +33,10 @@ const editingAdbSource = ref<AlistAuthorizationRecord | null>(null)
 const formName = ref('')
 const formAdbAddress = ref('')
 const adbScanSubnet = ref('')
+const adbScanSummary = ref('')
 const adbScanLoaded = ref(false)
 const adbScanResults = ref<AdbScanCandidate[]>([])
-const adbTestResults = ref<Record<string, { ok: boolean; message: string }>>({})
+const adbConnectionResults = ref<Record<string, { ok: boolean; message: string }>>({})
 const busy = ref<Record<string, boolean>>({})
 
 const adbRows = computed(() => {
@@ -149,7 +151,7 @@ async function scanAdbTargets() {
   setBusy('adb-scan', true)
   adbScanLoaded.value = false
   try {
-    const params: Record<string, unknown> = { ports: [5555], timeout_ms: 350 }
+    const params: Record<string, unknown> = { ports: [5555], timeout_ms: 350, verify_adb: true, include_offline: false }
     if (adbScanSubnet.value.trim()) params.subnet = adbScanSubnet.value.trim()
     const result = await cliApi.run<AdbScanData>('adb-cli', {
       action: 'scan_network',
@@ -161,7 +163,11 @@ async function scanAdbTargets() {
       throw new Error(result.message || result.error || 'Failed to scan ADB targets')
     }
     adbScanResults.value = result.data.candidates ?? []
-    if (!adbScanSubnet.value.trim()) adbScanSubnet.value = result.data.subnet
+    if (!adbScanSubnet.value.trim() && (result.data.subnets ?? []).length === 1) adbScanSubnet.value = result.data.subnet
+    adbScanSummary.value = label(
+      `已扫描 ${result.data.scanned} 个端口，发现 ${result.data.count} 个候选，网段：${(result.data.subnets ?? [result.data.subnet]).join('、')}`,
+      `Scanned ${result.data.scanned} ports, found ${result.data.count} candidates across ${(result.data.subnets ?? [result.data.subnet]).join(', ')}`,
+    )
     adbScanLoaded.value = true
   } catch (error) {
     emit('error', (error as Error).message || String(error))
@@ -197,11 +203,11 @@ async function saveAdbCandidate(candidate: AdbScanCandidate) {
   }
 }
 
-async function testAdbAddress(address: string) {
+async function connectAdbAddress(address: string) {
   const normalized = normalizeAdbAddress(address)
   if (!normalized) return
-  setBusy(`adb-test-${normalized}`, true)
-  adbTestResults.value = { ...adbTestResults.value, [normalized]: { ok: false, message: label('测试中', 'Testing') } }
+  setBusy(`adb-connect-${normalized}`, true)
+  adbConnectionResults.value = { ...adbConnectionResults.value, [normalized]: { ok: false, message: label('连接中', 'Connecting') } }
   try {
     const result = await cliApi.run<{ message?: string; address?: string }>('adb-cli', {
       action: 'connect',
@@ -209,17 +215,17 @@ async function testAdbAddress(address: string) {
       ttl_ms: 0,
       bypass_cache: true,
     })
-    adbTestResults.value = {
-      ...adbTestResults.value,
+    adbConnectionResults.value = {
+      ...adbConnectionResults.value,
       [normalized]: {
         ok: result.status === 'success',
         message: result.data?.message || result.message || result.error || result.status,
       },
     }
   } catch (error) {
-    adbTestResults.value = { ...adbTestResults.value, [normalized]: { ok: false, message: (error as Error).message || String(error) } }
+    adbConnectionResults.value = { ...adbConnectionResults.value, [normalized]: { ok: false, message: (error as Error).message || String(error) } }
   } finally {
-    setBusy(`adb-test-${normalized}`, false)
+    setBusy(`adb-connect-${normalized}`, false)
   }
 }
 
@@ -270,20 +276,21 @@ defineExpose({ refresh })
     <AdbScanCandidates
       :loaded="adbScanLoaded"
       :candidates="adbScanResults"
-      :test-results="adbTestResults"
+      :summary="adbScanSummary"
+      :connection-results="adbConnectionResults"
       :label="label"
       :is-busy="isBusy"
       :is-saved="isAdbAddressSaved"
-      @test="testAdbAddress"
+      @connect="connectAdbAddress"
       @save="saveAdbCandidate"
     />
 
     <AdbEndpointList
       :rows="adbRows"
-      :test-results="adbTestResults"
+      :connection-results="adbConnectionResults"
       :label="label"
       :is-busy="isBusy"
-      @test="testAdbAddress"
+      @connect="connectAdbAddress"
       @edit="openEditAdbDevice"
       @delete="deleteAdbDevice"
     />

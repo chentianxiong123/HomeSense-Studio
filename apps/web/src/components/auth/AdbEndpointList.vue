@@ -5,13 +5,13 @@ type LabelFn = (zh: string, en: string) => string
 
 defineProps<{
   rows: AlistAuthorizationRecord[]
-  testResults: Record<string, { ok: boolean; message: string }>
+  connectionResults: Record<string, { ok: boolean; message: string }>
   label: LabelFn
   isBusy: (key: string) => boolean
 }>()
 
 const emit = defineEmits<{
-  (event: 'test', address: string): void
+  (event: 'connect', address: string): void
   (event: 'edit', source: AlistAuthorizationRecord): void
   (event: 'delete', source: AlistAuthorizationRecord): void
 }>()
@@ -34,13 +34,13 @@ const emit = defineEmits<{
       </div>
       <div class="endpoint-cell">
         <code>{{ row.endpoint }}</code>
-        <small v-if="testResults[row.endpoint]" :class="['probe-result', testResults[row.endpoint].ok ? 'ok-text' : 'bad-text']">
-          {{ testResults[row.endpoint].message }}
+        <small v-if="connectionResults[row.endpoint]" :class="['probe-result', connectionResults[row.endpoint].ok ? 'ok-text' : 'bad-text']">
+          {{ connectionResults[row.endpoint].message }}
         </small>
       </div>
       <div class="row-actions">
-        <button class="plain-btn compact" :disabled="isBusy(`adb-test-${row.endpoint}`)" @click="emit('test', row.endpoint)">
-          {{ label('测试', 'Test') }}
+        <button class="plain-btn compact" :disabled="isBusy(`adb-connect-${row.endpoint}`)" @click="emit('connect', row.endpoint)">
+          {{ isBusy(`adb-connect-${row.endpoint}`) ? label('连接中', 'Connecting') : label('连接', 'Connect') }}
         </button>
         <button class="plain-btn compact" :disabled="isBusy(`adb-edit-${row.id}`)" @click="emit('edit', row)">
           {{ label('编辑', 'Edit') }}

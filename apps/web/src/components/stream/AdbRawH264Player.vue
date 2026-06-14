@@ -1,9 +1,17 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 const props = defineProps<{
   wsPath: string
   label: (zh: string, en: string) => string
+  interactive?: boolean
+  autoplay?: boolean
+  showToolbar?: boolean
+}>()
+
+const emit = defineEmits<{
+  tap: [point: { x: number; y: number; width: number; height: number }]
+  'state-change': [state: DecoderState]
 }>()
 
 type DecoderState = 'idle' | 'connecting' | 'connected' | 'decoding' | 'unsupported' | 'closed' | 'error'
@@ -14,6 +22,7 @@ const message = ref('')
 const bytesReceived = ref(0)
 const framesDecoded = ref(0)
 const codec = ref('')
+const frameSize = ref<{ width: number; height: number } | null>(null)
 
 let ws: WebSocket | null = null
 let decoder: VideoDecoder | null = null
@@ -53,6 +62,7 @@ function connect() {
   bytesReceived.value = 0
   framesDecoded.value = 0
   codec.value = ''
+  frameSize.value = null
   nalBuffer = new Uint8Array(0)
   pendingAccessUnit = []
   pendingHasVcl = false
@@ -176,12 +186,22 @@ function renderFrame(frame: VideoFrame) {
   if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
     canvas.width = frame.displayWidth
     canvas.height = frame.displayHeight
+    frameSize.value = { width: frame.displayWidth, height: frame.displayHeight }
   }
   const ctx = canvas.getContext('2d')
   if (ctx) ctx.drawImage(frame, 0, 0, canvas.width, canvas.height)
   frame.close()
   framesDecoded.value += 1
   state.value = 'decoding'
+}
+
+function handleCanvasPointerUp(event: PointerEvent) {
+  const canvas = canvasRef.value
+  if (!canvas || !props.interactive || canvas.width <= 0 || canvas.height <= 0) return
+  const rect = canvas.getBoundingClientRect()
+  const x = Math.round(((event.clientX - rect.left) / rect.width) * canvas.width)
+  const y = Math.round(((event.clientY - rect.top) / rect.height) * canvas.height)
+  emit('tap', { x, y, width: canvas.width, height: canvas.height })
 }
 
 function findStartCodes(bytes: Uint8Array): number[] {
@@ -238,11 +258,21 @@ function hex2(value: number): string {
 onBeforeUnmount(() => {
   disconnect()
 })
+
+watch(state, (value) => emit('state-change', value))
+
+watch(
+  () => [props.wsPath, props.autoplay] as const,
+  ([path, autoplay]) => {
+    if (autoplay && path) connect()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
   <div class="raw-player">
-    <div class="player-toolbar">
+    <div v-if="showToolbar !== false" class="player-toolbar">
       <div>
         <strong>{{ stateText }}</strong>
         <code v-if="codec">{{ codec }}</code>
@@ -256,7 +286,14 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </div>
-    <canvas ref="canvasRef" class="video-canvas" />
+    <div class="canvas-shell">
+      <canvas
+        ref="canvasRef"
+        :class="['video-canvas', { interactive }]"
+        :style="frameSize ? { aspectRatio: `${frameSize.width} / ${frameSize.height}` } : undefined"
+        @pointerup="handleCanvasPointerUp"
+      />
+    </div>
     <div class="player-stats">
       <span>{{ label('字节', 'Bytes') }} {{ bytesReceived.toLocaleString() }}</span>
       <span>{{ label('帧', 'Frames') }} {{ framesDecoded.toLocaleString() }}</span>
@@ -275,6 +312,17 @@ onBeforeUnmount(() => {
   border: 1px solid #bfdbfe;
   border-radius: 8px;
   background: #f8fbff;
+}
+
+.canvas-shell {
+  display: flex;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #020617;
 }
 
 .player-toolbar,
@@ -325,12 +373,19 @@ button:disabled {
 }
 
 .video-canvas {
-  width: 100%;
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: calc(100dvh - 180px);
   min-height: 180px;
-  aspect-ratio: 9 / 16;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
+  border: 0;
   background: #020617;
+}
+
+.video-canvas.interactive {
+  cursor: crosshair;
+  touch-action: manipulation;
 }
 
 .player-stats {

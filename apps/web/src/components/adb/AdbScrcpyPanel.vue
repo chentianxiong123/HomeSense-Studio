@@ -5,11 +5,6 @@ import AdbRawH264Player from '@/components/stream/AdbRawH264Player.vue'
 defineProps<{
   loading: boolean
   sessions: AdbScrcpySession[]
-  maxSize: string
-  bitRate: string
-  maxFps: string
-  v4l2Sink: string
-  recordPath: string
   rawStreamSessionId: string
   rawStreamStatus: string
   rawStreamBytes: number
@@ -18,56 +13,26 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'update:maxSize': [value: string]
-  'update:bitRate': [value: string]
-  'update:maxFps': [value: string]
-  'update:v4l2Sink': [value: string]
-  'update:recordPath': [value: string]
   refresh: []
   'create-bridge': []
-  'create-desktop': []
-  'create-record': []
   connect: [session: AdbScrcpySession]
   disconnect: []
   stop: [id: string]
   remove: [id: string]
+  tap: [point: { x: number; y: number; width: number; height: number }]
 }>()
 </script>
 
 <template>
   <div class="surface scrcpy-surface">
     <div class="surface-head">
-      <h3>scrcpy</h3>
+      <h3>{{ label('串流', 'Stream') }}</h3>
       <button class="ghost-btn" :disabled="loading" @click="emit('refresh')">{{ label('刷新', 'Refresh') }}</button>
     </div>
-    <div class="scrcpy-form">
-      <label>
-        <span>{{ label('尺寸', 'Size') }}</span>
-        <input :value="maxSize" placeholder="1280" @input="emit('update:maxSize', ($event.target as HTMLInputElement).value)" />
-      </label>
-      <label>
-        <span>{{ label('码率', 'Bitrate') }}</span>
-        <input :value="bitRate" placeholder="4M" @input="emit('update:bitRate', ($event.target as HTMLInputElement).value)" />
-      </label>
-      <label>
-        <span>FPS</span>
-        <input :value="maxFps" placeholder="30" @input="emit('update:maxFps', ($event.target as HTMLInputElement).value)" />
-      </label>
-      <label class="wide-field">
-        <span>V4L2</span>
-        <input :value="v4l2Sink" placeholder="/dev/video2" @input="emit('update:v4l2Sink', ($event.target as HTMLInputElement).value)" />
-      </label>
-      <label class="wide-field">
-        <span>{{ label('录制', 'Record') }}</span>
-        <input :value="recordPath" placeholder="D:\\captures\\phone.mp4" @input="emit('update:recordPath', ($event.target as HTMLInputElement).value)" />
-      </label>
-    </div>
     <div class="scrcpy-actions">
-      <button :disabled="loading" @click="emit('create-bridge')">{{ label('准备浏览器桥', 'Prepare Bridge') }}</button>
-      <button :disabled="loading" @click="emit('create-desktop')">{{ label('桌面启动', 'Desktop') }}</button>
-      <button :disabled="loading" @click="emit('create-record')">{{ label('开始录制', 'Record') }}</button>
+      <button :disabled="loading" @click="emit('create-bridge')">{{ label('启动浏览器串流', 'Start Browser Stream') }}</button>
     </div>
-    <div v-if="sessions.length === 0" class="empty-line compact">{{ label('暂无 scrcpy 会话。', 'No scrcpy sessions.') }}</div>
+    <div v-if="sessions.length === 0" class="empty-line compact">{{ label('暂无串流会话。', 'No stream sessions.') }}</div>
     <div v-else class="scrcpy-list">
       <div v-for="session in sessions" :key="session.id" class="scrcpy-row">
         <div>
@@ -84,14 +49,20 @@ const emit = defineEmits<{
           </p>
           <code class="command-line">{{ session.command.command_line }}</code>
           <p v-if="session.error" class="session-error">{{ session.error }}</p>
-          <AdbRawH264Player v-if="session.stream" :ws-path="session.stream.ws_path" :label="label" />
+          <AdbRawH264Player
+            v-if="session.stream"
+            :ws-path="session.stream.ws_path"
+            :label="label"
+            interactive
+            @tap="emit('tap', $event)"
+          />
         </div>
         <div class="session-actions">
           <button v-if="session.stream && rawStreamSessionId !== session.id" :disabled="loading" @click="emit('connect', session)">
-            {{ label('连接流', 'Connect') }}
+            {{ label('播放', 'Play') }}
           </button>
           <button v-if="session.stream && rawStreamSessionId === session.id" @click="emit('disconnect')">
-            {{ label('断开流', 'Disconnect') }}
+            {{ label('停止播放', 'Stop Playback') }}
           </button>
           <button :disabled="loading || ['exited', 'failed', 'stopped', 'prepared'].includes(session.state)" @click="emit('stop', session.id)">
             {{ label('停止', 'Stop') }}
@@ -145,45 +116,11 @@ button:disabled {
   opacity: 0.5;
 }
 
-.scrcpy-form {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.scrcpy-form label {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.scrcpy-form label span {
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.scrcpy-form input {
-  min-width: 0;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  background: #fff;
-  padding: 8px 10px;
-  color: #0f172a;
-  font: inherit;
-  font-size: 13px;
-}
-
-.wide-field {
-  grid-column: span 3;
-}
-
 .scrcpy-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 12px 0;
+  margin: 0 0 12px;
 }
 
 .scrcpy-actions button,
@@ -302,14 +239,6 @@ button:disabled {
   .surface-head {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .scrcpy-form {
-    grid-template-columns: 1fr;
-  }
-
-  .wide-field {
-    grid-column: auto;
   }
 
   .scrcpy-row {

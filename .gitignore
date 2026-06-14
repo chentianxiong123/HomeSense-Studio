@@ -4,6 +4,7 @@ data/
 .logs/
 .vite/
 apps/web/.vite/
+logs/
 .env
 .env.*
 !.env.example
@@ -12,6 +13,7 @@ apps/web/.vite/
 __pycache__/
 *.py[cod]
 *.egg-info/
+packages/adb-cli/src/adb_cli/cache/
 .venv/
 venv/
 
