@@ -8,21 +8,35 @@ export type AdbScanCandidate = {
   open?: boolean
   latency_ms?: number
   adb_status?: string
+  source?: string
 }
 
-defineProps<{
+const props = defineProps<{
   loaded: boolean
   candidates: AdbScanCandidate[]
-  testResults: Record<string, { ok: boolean; message: string }>
+  summary: string
+  connectionResults: Record<string, { ok: boolean; message: string }>
   label: LabelFn
   isBusy: (key: string) => boolean
   isSaved: (address: string) => boolean
 }>()
 
 const emit = defineEmits<{
-  (event: 'test', address: string): void
+  (event: 'connect', address: string): void
   (event: 'save', candidate: AdbScanCandidate): void
 }>()
+
+function label(zh: string, en: string) {
+  return props.label(zh, en)
+}
+
+function formatStatus(status?: string) {
+  if (status === 'device') return label('已连接', 'Connected')
+  if (status === 'unauthorized') return label('待授权', 'Unauthorized')
+  if (status === 'offline') return label('离线', 'Offline')
+  if (status === 'mdns') return 'mDNS'
+  return label('候选', 'Candidate')
+}
 </script>
 
 <template>
@@ -36,10 +50,11 @@ const emit = defineEmits<{
     <div v-if="!loaded" class="empty-line left">
       {{ label('输入网段或留空自动推断本机 /24 网段。', 'Enter a subnet or leave blank to infer the local /24 subnet.') }}
     </div>
-    <div v-else-if="candidates.length === 0" class="empty-line">
-      {{ label('没有发现开放 ADB 端口。', 'No open ADB ports found.') }}
+    <div v-if="loaded && summary" class="scan-summary">{{ summary }}</div>
+    <div v-if="loaded && candidates.length === 0" class="empty-line">
+      {{ label('没有发现可连接或待授权的 ADB 设备。', 'No connectable or unauthorized ADB devices found.') }}
     </div>
-    <div v-else class="target-table">
+    <div v-else-if="loaded" class="target-table">
       <div class="target-row header">
         <span>{{ label('地址', 'Address') }}</span>
         <span>{{ label('状态', 'Status') }}</span>
@@ -49,18 +64,19 @@ const emit = defineEmits<{
         <div class="endpoint-cell">
           <code>{{ candidate.address }}</code>
           <small v-if="candidate.latency_ms != null">{{ candidate.latency_ms }}ms</small>
+          <small v-if="candidate.source">{{ candidate.source }}</small>
         </div>
         <div class="endpoint-cell">
           <span class="pill" :class="isSaved(candidate.address) ? 'ok' : 'muted'">
-            {{ isSaved(candidate.address) ? label('已保存', 'Saved') : (candidate.adb_status || label('候选', 'Candidate')) }}
+            {{ isSaved(candidate.address) ? label('已保存', 'Saved') : formatStatus(candidate.adb_status) }}
           </span>
-          <small v-if="testResults[candidate.address]" :class="['probe-result', testResults[candidate.address].ok ? 'ok-text' : 'bad-text']">
-            {{ testResults[candidate.address].message }}
+          <small v-if="connectionResults[candidate.address]" :class="['probe-result', connectionResults[candidate.address].ok ? 'ok-text' : 'bad-text']">
+            {{ connectionResults[candidate.address].message }}
           </small>
         </div>
         <div class="row-actions">
-          <button class="plain-btn compact" :disabled="isBusy(`adb-test-${candidate.address}`)" @click="emit('test', candidate.address)">
-            {{ isBusy(`adb-test-${candidate.address}`) ? label('测试中', 'Testing') : label('测试', 'Test') }}
+          <button class="plain-btn compact" :disabled="isBusy(`adb-connect-${candidate.address}`)" @click="emit('connect', candidate.address)">
+            {{ isBusy(`adb-connect-${candidate.address}`) ? label('连接中', 'Connecting') : label('连接', 'Connect') }}
           </button>
           <button class="primary-btn compact" :disabled="isSaved(candidate.address) || isBusy(`adb-save-candidate-${candidate.address}`)" @click="emit('save', candidate)">
             {{ label('保存', 'Save') }}
@@ -103,11 +119,20 @@ const emit = defineEmits<{
 
 .subsection-head small,
 .endpoint-cell small,
+.scan-summary,
 .empty-line {
   color: var(--text-tertiary);
   font-size: 13px;
   font-weight: 700;
   line-height: 1.45;
+}
+
+.scan-summary {
+  padding: 10px 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1d4ed8;
 }
 
 .empty-line {

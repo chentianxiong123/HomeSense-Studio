@@ -22,7 +22,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ openConsole: [] }>()
 
-type PanelKey = 'control' | 'screen' | 'apps' | 'inspect' | 'shell' | 'files' | 'logs' | 'metrics'
+type PanelKey = 'control' | 'screen' | 'scrcpy' | 'apps' | 'inspect' | 'shell' | 'files' | 'logs' | 'metrics'
 
 const activePanel = ref<PanelKey>('control')
 const statusMessage = ref('')
@@ -53,6 +53,7 @@ const {
   launchApp,
   refreshUiTree,
   tapElement,
+  tapRawPoint,
 } = useAdbDeviceActions({
   adbIp: () => props.adbIp,
   label: props.label,
@@ -63,18 +64,11 @@ const {
 const {
   scrcpyLoading,
   scrcpySessions,
-  scrcpyMaxSize,
-  scrcpyBitRate,
-  scrcpyMaxFps,
-  scrcpyRecordPath,
-  scrcpyV4l2Sink,
   rawStreamSessionId,
   rawStreamStatus,
   rawStreamBytes,
   loadScrcpySessions,
   createScrcpyBridgeSession,
-  createScrcpyDesktopSession,
-  createScrcpyRecordSession,
   stopScrcpySession,
   removeScrcpySession,
   connectRawStream,
@@ -108,6 +102,7 @@ const {
 const panels = computed<Array<{ key: PanelKey; title: string; ready: boolean }>>(() => [
   { key: 'control', title: props.label('控制', 'Control'), ready: true },
   { key: 'screen', title: props.label('屏幕', 'Screen'), ready: true },
+  { key: 'scrcpy', title: props.label('串流', 'Stream'), ready: true },
   { key: 'apps', title: props.label('应用', 'Apps'), ready: true },
   { key: 'inspect', title: props.label('检查', 'Inspect'), ready: true },
   { key: 'shell', title: props.label('终端', 'Shell'), ready: props.canOpenConsole },
@@ -121,8 +116,8 @@ function selectPanel(panel: PanelKey) {
   if (panel === 'apps' && !appsLoaded.value) void loadApps(false)
   if (panel === 'screen') {
     if (!screenshot.value) void refreshScreenshot()
-    void loadScrcpySessions()
   }
+  if (panel === 'scrcpy') void loadScrcpySessions()
   if (panel === 'files' && files.value.length === 0) void loadFiles()
 }
 
@@ -207,29 +202,25 @@ onMounted(() => {
         @tap="tapScreenshot"
       />
 
-      <AdbScrcpyPanel
-        v-model:max-size="scrcpyMaxSize"
-        v-model:bit-rate="scrcpyBitRate"
-        v-model:max-fps="scrcpyMaxFps"
-        v-model:v4l2-sink="scrcpyV4l2Sink"
-        v-model:record-path="scrcpyRecordPath"
-        :loading="scrcpyLoading"
-        :sessions="scrcpySessions"
-        :raw-stream-session-id="rawStreamSessionId"
-        :raw-stream-status="rawStreamStatus"
-        :raw-stream-bytes="rawStreamBytes"
-        :label="label"
-        :format-bytes="formatBytes"
-        @refresh="loadScrcpySessions"
-        @create-bridge="createScrcpyBridgeSession"
-        @create-desktop="createScrcpyDesktopSession"
-        @create-record="createScrcpyRecordSession"
-        @connect="connectRawStream"
-        @disconnect="disconnectRawStream"
-        @stop="stopScrcpySession"
-        @remove="removeScrcpySession"
-      />
     </div>
+
+    <AdbScrcpyPanel
+      v-else-if="activePanel === 'scrcpy'"
+      :loading="scrcpyLoading"
+      :sessions="scrcpySessions"
+      :raw-stream-session-id="rawStreamSessionId"
+      :raw-stream-status="rawStreamStatus"
+      :raw-stream-bytes="rawStreamBytes"
+      :label="label"
+      :format-bytes="formatBytes"
+      @refresh="loadScrcpySessions"
+      @create-bridge="createScrcpyBridgeSession"
+      @connect="connectRawStream"
+      @disconnect="disconnectRawStream"
+      @stop="stopScrcpySession"
+      @remove="removeScrcpySession"
+      @tap="tapRawPoint"
+    />
 
     <AdbAppsPanel
       v-else-if="activePanel === 'apps'"

@@ -12,11 +12,6 @@ export function useAdbScrcpy(options: {
 }) {
   const scrcpyLoading = ref(false)
   const scrcpySessions = ref<AdbScrcpySession[]>([])
-  const scrcpyMaxSize = ref('1280')
-  const scrcpyBitRate = ref('4M')
-  const scrcpyMaxFps = ref('30')
-  const scrcpyRecordPath = ref('')
-  const scrcpyV4l2Sink = ref('')
   const rawStreamSessionId = ref('')
   const rawStreamStatus = ref('')
   const rawStreamBytes = ref(0)
@@ -39,9 +34,6 @@ export function useAdbScrcpy(options: {
     return {
       device: options.adbIp(),
       profile,
-      max_size: scrcpyMaxSize.value.trim() || undefined,
-      bit_rate: scrcpyBitRate.value.trim() || undefined,
-      max_fps: scrcpyMaxFps.value.trim() || undefined,
       label: `${options.deviceName()} scrcpy`,
     }
   }
@@ -57,7 +49,6 @@ export function useAdbScrcpy(options: {
         audio: false,
         window: false,
         playback: false,
-        v4l2_sink: scrcpyV4l2Sink.value.trim() || undefined,
       })
       if (result.status !== 'success') {
         options.errorMessage.value = options.label('scrcpy 会话创建失败', 'Failed to create scrcpy session')
@@ -100,11 +91,6 @@ export function useAdbScrcpy(options: {
   }
 
   async function createScrcpyRecordSession() {
-    const record = scrcpyRecordPath.value.trim()
-    if (!record) {
-      options.errorMessage.value = options.label('请输入录制文件路径', 'Enter a recording path')
-      return
-    }
     if (scrcpyLoading.value) return
     scrcpyLoading.value = true
     options.statusMessage.value = ''
@@ -115,7 +101,6 @@ export function useAdbScrcpy(options: {
         audio: false,
         window: false,
         playback: false,
-        record,
       })
       if (result.status !== 'success') {
         options.errorMessage.value = options.label('scrcpy 录制启动失败', 'Failed to start scrcpy recording')
@@ -204,11 +189,6 @@ export function useAdbScrcpy(options: {
   return {
     scrcpyLoading,
     scrcpySessions,
-    scrcpyMaxSize,
-    scrcpyBitRate,
-    scrcpyMaxFps,
-    scrcpyRecordPath,
-    scrcpyV4l2Sink,
     rawStreamSessionId,
     rawStreamStatus,
     rawStreamBytes,

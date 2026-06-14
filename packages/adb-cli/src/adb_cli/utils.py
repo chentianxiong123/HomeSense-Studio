@@ -1,5 +1,6 @@
 import re
 import socket
+import subprocess
 import time
 
 
@@ -148,6 +149,11 @@ def _normalize_ports(value: object) -> list[int]:
 
 
 def _default_ipv4_subnet() -> str:
+    subnets = _local_ipv4_subnets()
+    return subnets[0] if subnets else "192.168.1.0/24"
+
+
+def _local_ipv4_subnets() -> list[str]:
     candidates: list[str] = []
     try:
         probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -164,10 +170,57 @@ def _default_ipv4_subnet() -> str:
     except OSError:
         pass
 
+    candidates.extend(_platform_ipv4_addresses())
+
+    subnets: list[str] = []
     for addr in candidates:
-        if addr and not addr.startswith("127."):
-            return f"{addr.rsplit('.', 1)[0]}.0/24"
-    return "192.168.1.0/24"
+        if not _is_lan_ipv4(addr):
+            continue
+        subnet = f"{addr.rsplit('.', 1)[0]}.0/24"
+        if subnet not in subnets:
+            subnets.append(subnet)
+    return subnets
+
+
+def _platform_ipv4_addresses() -> list[str]:
+    commands = []
+    if socket.gethostname():
+        commands.append(["ipconfig"])
+        commands.append(["ifconfig"])
+        commands.append(["ip", "-o", "-4", "addr", "show"])
+
+    addresses: list[str] = []
+    for command in commands:
+        try:
+            result = subprocess.run(command, capture_output=True, timeout=2)
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            continue
+        text = (result.stdout or b"").decode("utf-8", errors="replace")
+        text += (result.stderr or b"").decode("utf-8", errors="replace")
+        for match in re.finditer(r"(?<![\d.])((?:\d{1,3}\.){3}\d{1,3})(?![\d.])", text):
+            addr = match.group(1)
+            if addr not in addresses:
+                addresses.append(addr)
+    return addresses
+
+
+def _is_lan_ipv4(addr: str) -> bool:
+    parts = addr.split(".")
+    if len(parts) != 4:
+        return False
+    try:
+        nums = [int(part) for part in parts]
+    except ValueError:
+        return False
+    if any(num < 0 or num > 255 for num in nums):
+        return False
+    if nums[0] in (0, 127, 169):
+        return False
+    return (
+        nums[0] == 10
+        or (nums[0] == 172 and 16 <= nums[1] <= 31)
+        or (nums[0] == 192 and nums[1] == 168)
+    )
 
 
 def _tcp_probe(host: str, port: int, timeout: float) -> dict | None:

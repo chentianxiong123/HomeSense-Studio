@@ -19,10 +19,18 @@ async function request<T>(url: string, init: RequestInit): Promise<T> {
     ...init,
     headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) },
   })
+  const text = await res.text()
   if (!res.ok) {
-    throw new Error(`Request failed: ${res.status} ${res.statusText}`)
+    let message = `Request failed: ${res.status} ${res.statusText}`
+    try {
+      const body = JSON.parse(text) as { message?: string; error?: string }
+      message = body.message || body.error || message
+    } catch {
+      if (text.trim()) message = text.trim()
+    }
+    throw new Error(message)
   }
-  return (await res.json()) as T
+  return (text ? JSON.parse(text) : {}) as T
 }
 
 export const cliApi = {

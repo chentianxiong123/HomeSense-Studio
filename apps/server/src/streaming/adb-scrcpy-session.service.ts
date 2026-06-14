@@ -36,6 +36,7 @@ export class AdbScrcpySessionService implements OnModuleDestroy {
   }
 
   async create(input: AdbScrcpySessionInput): Promise<AdbScrcpySession> {
+    this.stopExistingSessions()
     const commandResult = await cliBridge.run('adb-cli', 'scrcpy_command', input as Record<string, unknown>)
     if (commandResult.status !== 'success' || !isCommandSpec(commandResult.data)) {
       throw new BadRequestException({
@@ -152,6 +153,15 @@ export class AdbScrcpySessionService implements OnModuleDestroy {
     const session = this.sessions.get(id)
     if (!session) throw new NotFoundException(`scrcpy session not found: ${id}`)
     return session
+  }
+
+  private stopExistingSessions(): void {
+    for (const session of this.sessions.values()) {
+      this.killSessionProcess(session)
+      session.state = 'stopped'
+      session.updated_at = new Date().toISOString()
+    }
+    this.sessions.clear()
   }
 
   private spawnSession(session: ManagedAdbScrcpySession): void {

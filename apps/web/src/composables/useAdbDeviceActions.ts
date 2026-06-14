@@ -141,6 +141,10 @@ export function useAdbDeviceActions(options: {
     if (ok !== null) tapInput.value = ''
   }
 
+  async function tapRawPoint(point: { x: number; y: number }) {
+    await runAdb('tap-raw-stream', 'tap', { x: point.x, y: point.y }, options.label('点击已发送', 'Tap sent'))
+  }
+
   async function refreshScreenshot() {
     if (screenshotLoading.value) return
     screenshotLoading.value = true
@@ -242,6 +246,7 @@ export function useAdbDeviceActions(options: {
     quickKey,
     sendText,
     tapPoint,
+    tapRawPoint,
     refreshScreenshot,
     tapScreenshot,
     loadApps,
