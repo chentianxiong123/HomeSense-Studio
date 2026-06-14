@@ -11,6 +11,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   tap: [point: { x: number; y: number; width: number; height: number }]
+  swipe: [gesture: { start_x: number; start_y: number; end_x: number; end_y: number; duration: number; width: number; height: number }]
   'state-change': [state: DecoderState]
 }>()
 
@@ -23,6 +24,7 @@ const bytesReceived = ref(0)
 const framesDecoded = ref(0)
 const codec = ref('')
 const frameSize = ref<{ width: number; height: number } | null>(null)
+const dragging = ref(false)
 
 let ws: WebSocket | null = null
 let decoder: VideoDecoder | null = null
@@ -31,6 +33,8 @@ let pendingAccessUnit: Uint8Array[] = []
 let pendingHasVcl = false
 let configured = false
 let timestamp = 0
+let pointerStart: { id: number; x: number; y: number; time: number } | null = null
+let pointerLatest: { x: number; y: number } | null = null
 
 const stateText = computed(() => {
   if (state.value === 'idle') return props.label('未连接', 'Idle')
@@ -195,13 +199,69 @@ function renderFrame(frame: VideoFrame) {
   state.value = 'decoding'
 }
 
-function handleCanvasPointerUp(event: PointerEvent) {
+function canvasPoint(event: PointerEvent): { x: number; y: number; width: number; height: number } | null {
   const canvas = canvasRef.value
-  if (!canvas || !props.interactive || canvas.width <= 0 || canvas.height <= 0) return
+  if (!canvas || !props.interactive || canvas.width <= 0 || canvas.height <= 0) return null
   const rect = canvas.getBoundingClientRect()
   const x = Math.round(((event.clientX - rect.left) / rect.width) * canvas.width)
   const y = Math.round(((event.clientY - rect.top) / rect.height) * canvas.height)
-  emit('tap', { x, y, width: canvas.width, height: canvas.height })
+  return { x, y, width: canvas.width, height: canvas.height }
+}
+
+function handleCanvasPointerDown(event: PointerEvent) {
+  const point = canvasPoint(event)
+  const canvas = canvasRef.value
+  if (!point || !canvas) return
+  event.preventDefault()
+  canvas.setPointerCapture?.(event.pointerId)
+  pointerStart = { id: event.pointerId, x: point.x, y: point.y, time: performance.now() }
+  pointerLatest = { x: point.x, y: point.y }
+  dragging.value = false
+}
+
+function handleCanvasPointerMove(event: PointerEvent) {
+  if (!pointerStart || pointerStart.id !== event.pointerId) return
+  const point = canvasPoint(event)
+  if (!point) return
+  event.preventDefault()
+  pointerLatest = { x: point.x, y: point.y }
+  const dx = point.x - pointerStart.x
+  const dy = point.y - pointerStart.y
+  dragging.value = Math.hypot(dx, dy) >= 18
+}
+
+function handleCanvasPointerUp(event: PointerEvent) {
+  if (!pointerStart || pointerStart.id !== event.pointerId) return
+  const point = canvasPoint(event)
+  const start = pointerStart
+  pointerStart = null
+  pointerLatest = null
+  dragging.value = false
+  if (!point) return
+  event.preventDefault()
+  const duration = Math.max(80, Math.min(900, Math.round(performance.now() - start.time)))
+  const dx = point.x - start.x
+  const dy = point.y - start.y
+  if (Math.hypot(dx, dy) >= 18) {
+    emit('swipe', {
+      start_x: start.x,
+      start_y: start.y,
+      end_x: point.x,
+      end_y: point.y,
+      duration,
+      width: point.width,
+      height: point.height,
+    })
+    return
+  }
+  emit('tap', { x: point.x, y: point.y, width: point.width, height: point.height })
+}
+
+function handleCanvasPointerCancel(event: PointerEvent) {
+  if (pointerStart?.id !== event.pointerId) return
+  pointerStart = null
+  pointerLatest = null
+  dragging.value = false
 }
 
 function findStartCodes(bytes: Uint8Array): number[] {
@@ -289,9 +349,12 @@ watch(
     <div class="canvas-shell">
       <canvas
         ref="canvasRef"
-        :class="['video-canvas', { interactive }]"
+        :class="['video-canvas', { interactive, dragging }]"
         :style="frameSize ? { aspectRatio: `${frameSize.width} / ${frameSize.height}` } : undefined"
+        @pointerdown="handleCanvasPointerDown"
+        @pointermove="handleCanvasPointerMove"
         @pointerup="handleCanvasPointerUp"
+        @pointercancel="handleCanvasPointerCancel"
       />
     </div>
     <div class="player-stats">
@@ -385,7 +448,12 @@ button:disabled {
 
 .video-canvas.interactive {
   cursor: crosshair;
-  touch-action: manipulation;
+  touch-action: none;
+  user-select: none;
+}
+
+.video-canvas.dragging {
+  cursor: grabbing;
 }
 
 .player-stats {
