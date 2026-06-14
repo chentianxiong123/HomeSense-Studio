@@ -5,11 +5,9 @@ import AdbControlPanel from '@/components/adb/AdbControlPanel.vue'
 import AdbFilesPanel from '@/components/adb/AdbFilesPanel.vue'
 import AdbInspectPanel from '@/components/adb/AdbInspectPanel.vue'
 import AdbScreenCapturePanel from '@/components/adb/AdbScreenCapturePanel.vue'
-import AdbScrcpyPanel from '@/components/adb/AdbScrcpyPanel.vue'
 import AdbShellPanel from '@/components/adb/AdbShellPanel.vue'
 import { useAdbDeviceActions } from '@/composables/useAdbDeviceActions'
 import { useAdbFiles } from '@/composables/useAdbFiles'
-import { useAdbScrcpy } from '@/composables/useAdbScrcpy'
 
 const props = defineProps<{
   deviceId: number
@@ -22,7 +20,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ openConsole: [] }>()
 
-type PanelKey = 'control' | 'screen' | 'scrcpy' | 'apps' | 'inspect' | 'shell' | 'files' | 'logs' | 'metrics'
+type PanelKey = 'control' | 'screen' | 'apps' | 'inspect' | 'shell' | 'files' | 'logs' | 'metrics'
 
 const activePanel = ref<PanelKey>('control')
 const statusMessage = ref('')
@@ -53,29 +51,8 @@ const {
   launchApp,
   refreshUiTree,
   tapElement,
-  tapRawPoint,
 } = useAdbDeviceActions({
   adbIp: () => props.adbIp,
-  label: props.label,
-  statusMessage,
-  errorMessage,
-})
-
-const {
-  scrcpyLoading,
-  scrcpySessions,
-  rawStreamSessionId,
-  rawStreamStatus,
-  rawStreamBytes,
-  loadScrcpySessions,
-  createScrcpyBridgeSession,
-  stopScrcpySession,
-  removeScrcpySession,
-  connectRawStream,
-  disconnectRawStream,
-} = useAdbScrcpy({
-  adbIp: () => props.adbIp,
-  deviceName: () => props.deviceName,
   label: props.label,
   statusMessage,
   errorMessage,
@@ -102,7 +79,6 @@ const {
 const panels = computed<Array<{ key: PanelKey; title: string; ready: boolean }>>(() => [
   { key: 'control', title: props.label('控制', 'Control'), ready: true },
   { key: 'screen', title: props.label('屏幕', 'Screen'), ready: true },
-  { key: 'scrcpy', title: props.label('串流', 'Stream'), ready: true },
   { key: 'apps', title: props.label('应用', 'Apps'), ready: true },
   { key: 'inspect', title: props.label('检查', 'Inspect'), ready: true },
   { key: 'shell', title: props.label('终端', 'Shell'), ready: props.canOpenConsole },
@@ -117,7 +93,6 @@ function selectPanel(panel: PanelKey) {
   if (panel === 'screen') {
     if (!screenshot.value) void refreshScreenshot()
   }
-  if (panel === 'scrcpy') void loadScrcpySessions()
   if (panel === 'files' && files.value.length === 0) void loadFiles()
 }
 
@@ -203,24 +178,6 @@ onMounted(() => {
       />
 
     </div>
-
-    <AdbScrcpyPanel
-      v-else-if="activePanel === 'scrcpy'"
-      :loading="scrcpyLoading"
-      :sessions="scrcpySessions"
-      :raw-stream-session-id="rawStreamSessionId"
-      :raw-stream-status="rawStreamStatus"
-      :raw-stream-bytes="rawStreamBytes"
-      :label="label"
-      :format-bytes="formatBytes"
-      @refresh="loadScrcpySessions"
-      @create-bridge="createScrcpyBridgeSession"
-      @connect="connectRawStream"
-      @disconnect="disconnectRawStream"
-      @stop="stopScrcpySession"
-      @remove="removeScrcpySession"
-      @tap="tapRawPoint"
-    />
 
     <AdbAppsPanel
       v-else-if="activePanel === 'apps'"

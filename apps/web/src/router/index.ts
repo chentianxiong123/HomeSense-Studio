@@ -17,6 +17,7 @@ import AssetsView from '@/views/AssetsView.vue'
 import StudioHomeView from '@/views/StudioHomeView.vue'
 import WorkflowOverviewView from '@/views/WorkflowOverviewView.vue'
 import SessionView from '@/views/SessionView.vue'
+import AdbStreamSessionView from '@/views/AdbStreamSessionView.vue'
 import StreamingControllerView from '@/views/StreamingControllerView.vue'
 import StreamingControlMonitorView from '@/views/StreamingControlMonitorView.vue'
 import { APP_DEFAULT_ROUTE, LAST_ROUTE_STORAGE_KEY, normalizeRememberedRoute, shouldRememberRoute } from './navigation'
@@ -39,6 +40,7 @@ export const router = createRouter({
     { path: '/streaming/control/:sessionId', name: 'streaming-controller', component: StreamingControllerView, meta: { fullscreen: true } },
     { path: '/streaming/monitor/:sessionId', name: 'streaming-control-monitor', component: StreamingControlMonitorView, meta: { fullscreen: true } },
     { path: '/workspace', name: 'remote-workspace', component: RemoteWorkspaceView },
+    { path: '/sessions/adb-stream', name: 'adb-stream-session', component: AdbStreamSessionView, meta: { fullscreen: true } },
     { path: '/sessions/:id', name: 'session', component: SessionView, meta: { fullscreen: true } },
     { path: '/assets', name: 'assets-home', component: AssetsView },
     { path: '/devices', name: 'devices', component: DevicesView },

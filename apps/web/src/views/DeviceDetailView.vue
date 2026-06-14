@@ -145,6 +145,21 @@ function openConsole() {
   router.push({ path: '/sessions/terminal', query: { target_device_id: deviceId, from: route.fullPath } })
 }
 
+function openAdbStream() {
+  if (!device.value) return
+  const adb = propString(device.value, 'adb_ip') || propString(device.value, 'adb_serial')
+  if (!adb) return
+  router.push({
+    path: '/sessions/adb-stream',
+    query: {
+      target_device_id: String(deviceId),
+      device: adb,
+      name: device.value.name,
+      from: route.fullPath,
+    },
+  })
+}
+
 async function openBindingDialog() {
   syncBindingForm(device.value)
   showBindingDialog.value = true
@@ -313,6 +328,9 @@ function hydrateDeviceSnapshot(d: UserDevice | null) {
           <button v-if="canOpenConsole" class="console-btn" @click="openConsole">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
             {{ label('控制台', 'Console') }}
+          </button>
+          <button v-if="propString(device, 'adb_ip') || propString(device, 'adb_serial')" class="console-btn stream-btn" @click="openAdbStream">
+            {{ label('串流', 'Stream') }}
           </button>
           <button class="bind-btn" @click="openBindingDialog">
             {{ label('编辑设备', 'Edit Device') }}
@@ -829,6 +847,16 @@ h1 {
 }
 .console-btn:hover {
   background: #10b981;
+  color: #fff;
+}
+
+.stream-btn {
+  border-color: #6366f1;
+  color: #6366f1;
+}
+
+.stream-btn:hover {
+  background: #6366f1;
   color: #fff;
 }
 
