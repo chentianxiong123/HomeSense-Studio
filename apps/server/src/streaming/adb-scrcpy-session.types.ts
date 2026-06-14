@@ -7,6 +7,7 @@ export type AdbScrcpySessionInput = {
   bit_rate?: string
   max_fps?: number | string
   video_codec?: 'h264' | 'h265' | 'av1' | string
+  video_buffer?: number | string
   display_id?: number | string
   audio?: boolean
   control?: boolean

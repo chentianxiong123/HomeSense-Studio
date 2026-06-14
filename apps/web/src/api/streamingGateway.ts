@@ -83,6 +83,7 @@ export interface AdbScrcpySessionInput {
   bit_rate?: string
   max_fps?: number | string
   video_codec?: string
+  video_buffer?: number | string
   display_id?: number | string
   audio?: boolean
   control?: boolean

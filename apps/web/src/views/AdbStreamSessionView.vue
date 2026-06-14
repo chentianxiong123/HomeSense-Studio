@@ -20,6 +20,7 @@ const errorMessage = ref('')
 const statusMessage = ref('')
 const session = ref<AdbScrcpySession | null>(null)
 const wsPath = ref('')
+const playerKey = ref(0)
 const playerState = ref('')
 let startupTimer = 0
 let inspectTimer = 0
@@ -62,6 +63,10 @@ async function startStream() {
     const result = await streamingGatewayApi.createAdbScrcpySession({
       device,
       profile: 'browser_bridge',
+      max_size: 1024,
+      bit_rate: '2M',
+      max_fps: 30,
+      video_buffer: 0,
       audio: false,
       window: false,
       playback: false,
@@ -129,8 +134,15 @@ async function stopStream() {
 }
 
 async function restartStream() {
-  await stopStream()
-  session.value = null
+  if (session.value?.stream?.ws_path) {
+    wsPath.value = ''
+    playerState.value = ''
+    playerKey.value += 1
+    await new Promise((resolve) => window.setTimeout(resolve, 180))
+    wsPath.value = session.value.stream.ws_path
+    statusMessage.value = label('正在重连画面...', 'Reconnecting video...')
+    return
+  }
   await startStream()
 }
 
@@ -141,6 +153,21 @@ async function tapRawPoint(point: { x: number; y: number }) {
     await cliApi.run('adb-cli', {
       action: 'tap',
       params: { device, x: point.x, y: point.y },
+      ttl_ms: 0,
+      bypass_cache: true,
+    })
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
+async function swipeRawGesture(gesture: { start_x: number; start_y: number; end_x: number; end_y: number; duration: number }) {
+  const device = await resolveAdbDevice()
+  if (!device) return
+  try {
+    await cliApi.run('adb-cli', {
+      action: 'swipe',
+      params: { device, ...gesture },
       ttl_ms: 0,
       bypass_cache: true,
     })
@@ -182,6 +209,7 @@ onBeforeUnmount(() => {
     <main class="stream-stage">
       <AdbRawH264Player
         v-if="wsPath"
+        :key="playerKey"
         class="stream-player"
         :ws-path="wsPath"
         :label="label"
@@ -189,6 +217,7 @@ onBeforeUnmount(() => {
         interactive
         :show-toolbar="false"
         @tap="tapRawPoint"
+        @swipe="swipeRawGesture"
         @state-change="playerState = $event"
       />
       <div v-else class="stream-placeholder">

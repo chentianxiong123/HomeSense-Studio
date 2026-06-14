@@ -37,7 +37,6 @@ export class AdbScrcpySessionService implements OnModuleDestroy {
   }
 
   async create(input: AdbScrcpySessionInput): Promise<AdbScrcpySession> {
-    this.stopExistingSessions()
     const commandResult = await cliBridge.run('adb-cli', 'scrcpy_command', input as Record<string, unknown>)
     if (commandResult.status !== 'success' || !isCommandSpec(commandResult.data)) {
       throw new BadRequestException({
@@ -48,6 +47,9 @@ export class AdbScrcpySessionService implements OnModuleDestroy {
     }
 
     const command = commandResult.data
+    const reusable = this.findReusableSession(command.device)
+    if (reusable) return toPublicSession(reusable)
+
     const notes = [...command.notes]
     const dryRun = input.dry_run === true
     const bridgeable = needsRawBridge(command)
@@ -193,6 +195,16 @@ export class AdbScrcpySessionService implements OnModuleDestroy {
       session.updated_at = new Date().toISOString()
     }
     this.sessions.clear()
+  }
+
+  private findReusableSession(device: string): ManagedAdbScrcpySession | null {
+    for (const session of this.sessions.values()) {
+      if (session.device !== device) continue
+      if (!session.stream) continue
+      if (isTerminalState(session.state)) continue
+      return session
+    }
+    return null
   }
 
   private spawnSession(session: ManagedAdbScrcpySession): void {
@@ -472,6 +484,7 @@ function buildRawServerCommand(bridge: AdbScrcpyRawBridge, input: AdbScrcpySessi
   appendServerParam(params, 'video_bit_rate', normalizeBitRate(input.bit_rate))
   appendServerParam(params, 'max_fps', input.max_fps)
   appendServerParam(params, 'video_codec', input.video_codec)
+  appendServerParam(params, 'video_buffer', input.video_buffer)
   appendServerParam(params, 'display_id', input.display_id)
   return params.join(' ')
 }
