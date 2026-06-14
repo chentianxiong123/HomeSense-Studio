@@ -22,6 +22,7 @@ const session = ref<AdbScrcpySession | null>(null)
 const wsPath = ref('')
 const playerKey = ref(0)
 const playerState = ref('')
+const displaySize = ref<{ width: number; height: number } | null>(null)
 let startupTimer = 0
 let inspectTimer = 0
 
@@ -60,6 +61,7 @@ async function startStream() {
   try {
     const device = await resolveAdbDevice()
     if (!device) throw new Error(label('这个设备没有 ADB 来源。', 'This device has no ADB source.'))
+    await refreshDisplaySize(device)
     const result = await streamingGatewayApi.createAdbScrcpySession({
       device,
       profile: 'browser_bridge',
@@ -87,6 +89,23 @@ async function startStream() {
     statusMessage.value = ''
   } finally {
     loading.value = false
+  }
+}
+
+async function refreshDisplaySize(device: string) {
+  try {
+    const result = await cliApi.run<{ width: number; height: number }>('adb-cli', {
+      action: 'get_display_size',
+      params: { device },
+      ttl_ms: 60_000,
+    })
+    const width = Number(result.data?.width)
+    const height = Number(result.data?.height)
+    if (result.status === 'success' && Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+      displaySize.value = { width, height }
+    }
+  } catch {
+    displaySize.value = null
   }
 }
 
@@ -146,13 +165,36 @@ async function restartStream() {
   await startStream()
 }
 
-async function tapRawPoint(point: { x: number; y: number }) {
+type FramePoint = { x: number; y: number; width: number; height: number }
+type FrameGesture = { start_x: number; start_y: number; end_x: number; end_y: number; duration: number; width: number; height: number }
+
+function mapFramePoint(point: FramePoint): { x: number; y: number } {
+  const display = displaySize.value
+  if (!display || point.width <= 0 || point.height <= 0) return { x: point.x, y: point.y }
+
+  let targetWidth = display.width
+  let targetHeight = display.height
+  const framePortrait = point.height >= point.width
+  const displayPortrait = display.height >= display.width
+  if (framePortrait !== displayPortrait) {
+    targetWidth = display.height
+    targetHeight = display.width
+  }
+
+  return {
+    x: Math.max(0, Math.min(targetWidth, Math.round((point.x / point.width) * targetWidth))),
+    y: Math.max(0, Math.min(targetHeight, Math.round((point.y / point.height) * targetHeight))),
+  }
+}
+
+async function tapRawPoint(point: FramePoint) {
   const device = await resolveAdbDevice()
   if (!device) return
   try {
+    const mapped = mapFramePoint(point)
     await cliApi.run('adb-cli', {
       action: 'tap',
-      params: { device, x: point.x, y: point.y },
+      params: { device, x: mapped.x, y: mapped.y },
       ttl_ms: 0,
       bypass_cache: true,
     })
@@ -161,13 +203,30 @@ async function tapRawPoint(point: { x: number; y: number }) {
   }
 }
 
-async function swipeRawGesture(gesture: { start_x: number; start_y: number; end_x: number; end_y: number; duration: number }) {
+async function swipeRawGesture(gesture: FrameGesture) {
+  const device = await resolveAdbDevice()
+  if (!device) return
+  try {
+    const start = mapFramePoint({ x: gesture.start_x, y: gesture.start_y, width: gesture.width, height: gesture.height })
+    const end = mapFramePoint({ x: gesture.end_x, y: gesture.end_y, width: gesture.width, height: gesture.height })
+    await cliApi.run('adb-cli', {
+      action: 'swipe',
+      params: { device, start_x: start.x, start_y: start.y, end_x: end.x, end_y: end.y, duration: gesture.duration },
+      ttl_ms: 0,
+      bypass_cache: true,
+    })
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
+async function sendBackKey() {
   const device = await resolveAdbDevice()
   if (!device) return
   try {
     await cliApi.run('adb-cli', {
-      action: 'swipe',
-      params: { device, ...gesture },
+      action: 'back',
+      params: { device },
       ttl_ms: 0,
       bypass_cache: true,
     })
@@ -218,6 +277,7 @@ onBeforeUnmount(() => {
         :show-toolbar="false"
         @tap="tapRawPoint"
         @swipe="swipeRawGesture"
+        @back="sendBackKey"
         @state-change="playerState = $event"
       />
       <div v-else class="stream-placeholder">
@@ -228,6 +288,7 @@ onBeforeUnmount(() => {
 
     <footer class="stream-footer">
       <span>{{ label('状态', 'State') }}: {{ playerState || session?.state || '-' }}</span>
+      <span v-if="displaySize">{{ label('屏幕', 'Screen') }}: {{ displaySize.width }}x{{ displaySize.height }}</span>
       <span v-if="session?.id">{{ session.id }}</span>
     </footer>
     <pre v-if="session?.stderr_tail?.length || session?.error" class="stream-debug">{{ [session?.error, ...(session?.stderr_tail || [])].filter(Boolean).slice(-8).join('\n') }}</pre>

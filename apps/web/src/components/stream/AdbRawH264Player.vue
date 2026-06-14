@@ -12,6 +12,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   tap: [point: { x: number; y: number; width: number; height: number }]
   swipe: [gesture: { start_x: number; start_y: number; end_x: number; end_y: number; duration: number; width: number; height: number }]
+  back: []
   'state-change': [state: DecoderState]
 }>()
 
@@ -203,12 +204,20 @@ function canvasPoint(event: PointerEvent): { x: number; y: number; width: number
   const canvas = canvasRef.value
   if (!canvas || !props.interactive || canvas.width <= 0 || canvas.height <= 0) return null
   const rect = canvas.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return null
   const x = Math.round(((event.clientX - rect.left) / rect.width) * canvas.width)
   const y = Math.round(((event.clientY - rect.top) / rect.height) * canvas.height)
+  if (x < 0 || y < 0 || x > canvas.width || y > canvas.height) return null
   return { x, y, width: canvas.width, height: canvas.height }
 }
 
 function handleCanvasPointerDown(event: PointerEvent) {
+  if (event.pointerType === 'mouse' && event.button === 2) {
+    event.preventDefault()
+    emit('back')
+    return
+  }
+  if (event.pointerType === 'mouse' && event.button !== 0) return
   const point = canvasPoint(event)
   const canvas = canvasRef.value
   if (!point || !canvas) return
@@ -221,6 +230,7 @@ function handleCanvasPointerDown(event: PointerEvent) {
 
 function handleCanvasPointerMove(event: PointerEvent) {
   if (!pointerStart || pointerStart.id !== event.pointerId) return
+  if (event.pointerType === 'mouse' && event.buttons !== 1) return
   const point = canvasPoint(event)
   if (!point) return
   event.preventDefault()
@@ -262,6 +272,11 @@ function handleCanvasPointerCancel(event: PointerEvent) {
   pointerStart = null
   pointerLatest = null
   dragging.value = false
+}
+
+function handleContextMenu(event: MouseEvent) {
+  if (!props.interactive) return
+  event.preventDefault()
 }
 
 function findStartCodes(bytes: Uint8Array): number[] {
@@ -355,6 +370,7 @@ watch(
         @pointermove="handleCanvasPointerMove"
         @pointerup="handleCanvasPointerUp"
         @pointercancel="handleCanvasPointerCancel"
+        @contextmenu="handleContextMenu"
       />
     </div>
     <div class="player-stats">
