@@ -6,6 +6,7 @@ import { StorageService } from './storage.service'
 import { StorageTaskService } from './storage-task.service'
 import { StorageTransferService } from './storage-transfer.service'
 import type { CreateStorageMountInput, UpdateStorageMountInput } from './storage.types'
+import { DeviceService } from '../devices/device.service'
 
 @Controller('storage')
 export class StorageController {
@@ -14,11 +15,23 @@ export class StorageController {
     private readonly storage: StorageService,
     private readonly tasks: StorageTaskService,
     private readonly transfers: StorageTransferService,
+    private readonly devices: DeviceService,
   ) {}
 
   @Get('mounts')
   listMounts() {
     return this.mounts.list()
+  }
+
+  @Get('devices/:id/files-entry')
+  ensureDeviceFilesEntry(@Param('id', ParseIntPipe) id: number) {
+    const device = this.devices.get(id)
+    const { mount } = this.mounts.ensureDeviceSftpMount({
+      deviceId: id,
+      deviceName: device.name,
+      props: device.props ?? {},
+    })
+    return { mount, path: mount.virtual_path }
   }
 
   @Get('protocols')

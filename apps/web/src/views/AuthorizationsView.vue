@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/api'
-import { streamingGatewayApi, type MoonlightWebRuntimeStatus, type StreamingHost, type StreamingHostProbe } from '@/api/streamingGateway'
+import { streamingGatewayApi, type MoonlightWebRuntimeStatus, type StreamingHost, type StreamingHostPairTask, type StreamingHostProbe } from '@/api/streamingGateway'
 import AdbAuthPanel from '@/components/auth/AdbAuthPanel.vue'
 import AuthPageHeader from '@/components/auth/AuthPageHeader.vue'
 import AuthPendingPanel from '@/components/auth/AuthPendingPanel.vue'
@@ -22,6 +22,7 @@ type LocalProviderId = 'adb' | 'dlna' | 'streaming' | 'alist' | 'ssh' | 'frp' | 
 type MiStatusSummary = { loggedIn: boolean; boundCount: number }
 
 const router = useRouter()
+const route = useRoute()
 const { locale } = useLocale()
 const isZh = computed(() => locale.value === 'zh')
 
@@ -32,6 +33,8 @@ const selectedLocal = ref<LocalProviderId>('adb')
 const streamingHosts = ref<StreamingHost[]>([])
 const streamingHostProbes = ref<Record<string, StreamingHostProbe>>({})
 const streamingRuntimeStatus = ref<MoonlightWebRuntimeStatus | null>(null)
+const streamingPairingHost = ref<StreamingHost | null>(null)
+const streamingPairingTask = ref<StreamingHostPairTask | null>(null)
 const streamingError = ref('')
 const streamingMessage = ref('')
 const streamingHostFormOpen = ref(false)
@@ -57,6 +60,7 @@ const busy = ref<Record<string, boolean>>({})
 const errorMessage = ref('')
 const successMessage = ref('')
 let successTimer: ReturnType<typeof setTimeout> | null = null
+let streamingPairPollTimer: ReturnType<typeof setTimeout> | null = null
 
 function label(zh: string, en: string) {
   return isZh.value ? zh : en
@@ -88,15 +92,6 @@ function updateMiStatus(summary: MiStatusSummary) {
 
 const anyBusy = computed(() => Object.keys(busy.value).length > 0)
 const streamingHostCount = computed(() => streamingHosts.value.length)
-
-type StreamingGatewaySpec = {
-  key: string
-  title: string
-  subtitle: string
-  status: string
-  detail: string
-  capabilities: string[]
-}
 
 const externalProviders = computed<AuthProviderItem<ExternalProviderId>[]>(() => [
   {
@@ -145,7 +140,7 @@ const localProviders = computed<AuthProviderItem<LocalProviderId>[]>(() => [
   {
     id: 'alist' as const,
     name: label('文件源', 'Storage Sources'),
-    subtitle: label('WebDAV / SFTP / ADB / 本地文件', 'WebDAV / SFTP / ADB / local files'),
+    subtitle: label('WebDAV / SSH/SFTP / ADB / 本地文件', 'WebDAV / SSH/SFTP / ADB / local files'),
     status: storageCredentialCount.value > 0 ? label('已配置', 'Configured') : label('未配置', 'Not configured'),
     tone: storageCredentialCount.value > 0 ? 'ok' as const : 'muted' as const,
     meta: `${storageCredentialCount.value} ${label('个凭据', 'credentials')}`,
@@ -177,11 +172,16 @@ const localProviders = computed<AuthProviderItem<LocalProviderId>[]>(() => [
 ])
 
 onMounted(() => {
+  if (route.query.local === 'streaming') {
+    activeTab.value = 'local'
+    selectedLocal.value = 'streaming'
+  }
   void loadAll()
 })
 
 onUnmounted(() => {
   if (successTimer) clearTimeout(successTimer)
+  if (streamingPairPollTimer) clearTimeout(streamingPairPollTimer)
 })
 
 async function loadAll() {
@@ -205,33 +205,6 @@ async function loadSshTargetCount() {
     console.warn('failed to load ssh target count', error)
   }
 }
-
-const streamingGatewaySpecs = computed<StreamingGatewaySpec[]>(() => [
-  {
-    key: 'sunshine-hosts',
-    title: label('Sunshine 主机', 'Sunshine Hosts'),
-    subtitle: label('登记家里的高性能电脑、工作站或游戏主机。', 'Register gaming PCs, workstations, or high-performance hosts at home.'),
-    status: streamingHostCount.value > 0 ? label('已有主机', 'Hosts Ready') : label('待登记', 'Pending'),
-    detail: label('保存地址、端口、MAC 和网络路径；配对证书后续也归这里托管。', 'Save address, ports, MAC, and network path; pairing material will also be owned here later.'),
-    capabilities: ['streaming.host.sunshine', 'device.wake_on_lan', 'service.status.probe'],
-  },
-  {
-    key: 'pairing',
-    title: label('配对凭据', 'Pairing Credentials'),
-    subtitle: label('后续按 Moonlight/Sunshine PIN 流程保存证书。', 'Later store certificates through the Moonlight/Sunshine PIN flow.'),
-    status: label('下一步', 'Next'),
-    detail: label('参考 moonlight-web-stream 的 pair flow，私钥和证书只留在服务端。', 'Follow moonlight-web-stream pair flow; private keys and certificates stay server-side only.'),
-    capabilities: ['streaming.host.pair', 'streaming.credentials.store'],
-  },
-  {
-    key: 'web-runtime',
-    title: label('Web 串流运行时', 'Web Stream Runtime'),
-    subtitle: label('可选接入外部 Moonlight Web / WebRTC 桥。', 'Optionally connect an external Moonlight Web / WebRTC bridge.'),
-    status: streamingRuntimeStatus.value?.registered ? label('已登记', 'Registered') : label('预留', 'Reserved'),
-    detail: label('HomeSense 负责管理和打开，视频流内核不塞进主后端。', 'HomeSense manages and opens it; the media core does not live in the main backend.'),
-    capabilities: ['streaming.web_player.open', 'streaming.runtime.probe'],
-  },
-])
 
 async function loadStreamingHosts() {
   setBusy('streaming-hosts', true)
@@ -302,6 +275,64 @@ async function probeStreamingHost(host: StreamingHost) {
   }
 }
 
+async function pairStreamingHost(host: StreamingHost) {
+  setBusy(`streaming-pair-${host.id}`, true)
+  streamingError.value = ''
+  streamingMessage.value = ''
+  streamingPairingHost.value = host
+  streamingPairingTask.value = null
+  if (streamingPairPollTimer) clearTimeout(streamingPairPollTimer)
+  try {
+    const res = await streamingGatewayApi.pairHost(host.id)
+    streamingPairingTask.value = {
+      task_id: res.data.task_id || '',
+      host_id: host.id,
+      status: 'pin',
+      pin: res.data.pin,
+      started_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      pairing: res.data.pairing,
+    }
+    streamingMessage.value = label('在 Sunshine 上输入下方 PIN。', 'Enter the PIN below on Sunshine.')
+  } catch (error) {
+    streamingError.value = (error as Error).message || String(error)
+    streamingPairingTask.value = null
+  } finally {
+    setBusy(`streaming-pair-${host.id}`, false)
+  }
+}
+
+async function pollStreamingPairTask(taskId: string) {
+  try {
+    const res = await streamingGatewayApi.pairTask(taskId)
+    streamingPairingTask.value = res.data
+    if (res.data.status === 'paired') {
+      streamingMessage.value = label('配对完成。', 'Pairing complete.')
+      await loadStreamingHosts()
+      return
+    }
+    if (res.data.status === 'failed') {
+      streamingError.value = res.data.error || label('配对失败', 'Pairing failed')
+      return
+    }
+  } catch (error) {
+    streamingError.value = (error as Error).message || String(error)
+  }
+}
+
+async function checkStreamingPairTask() {
+  const taskId = streamingPairingTask.value?.task_id
+  if (!taskId) return
+  setBusy(`streaming-pair-check-${taskId}`, true)
+  streamingError.value = ''
+  streamingMessage.value = ''
+  try {
+    await pollStreamingPairTask(taskId)
+  } finally {
+    setBusy(`streaming-pair-check-${taskId}`, false)
+  }
+}
+
 async function wakeStreamingHost(host: StreamingHost) {
   setBusy(`streaming-wake-${host.id}`, true)
   streamingError.value = ''
@@ -332,10 +363,10 @@ async function removeStreamingHost(host: StreamingHost) {
   }
 }
 
-function openStreamingRuntime() {
-  const endpoint = streamingRuntimeStatus.value?.endpoint || ''
-  if (!endpoint.startsWith('http')) return
-  window.open(endpoint, '_blank', 'noopener,noreferrer')
+function closeStreamingPairing() {
+  streamingPairingHost.value = null
+  streamingPairingTask.value = null
+  if (streamingPairPollTimer) clearTimeout(streamingPairPollTimer)
 }
 
 </script>
@@ -399,10 +430,11 @@ function openStreamingRuntime() {
         v-model:host-mac="streamingHostMac"
         v-model:host-room="streamingHostRoom"
         v-model:host-network-path="streamingHostNetworkPath"
-        :specs="streamingGatewaySpecs"
         :hosts="streamingHosts"
         :probes="streamingHostProbes"
         :runtime-status="streamingRuntimeStatus"
+        :pairing-host="streamingPairingHost"
+        :pairing-task="streamingPairingTask"
         :host-count="streamingHostCount"
         :loading="isBusy('streaming-hosts')"
         :action-loading="isBusy('streaming-register')"
@@ -410,15 +442,16 @@ function openStreamingRuntime() {
         :message="streamingMessage"
         :show-form="streamingHostFormOpen"
         :label="label"
-        @open-workbench="router.push('/streaming')"
         @refresh-hosts="loadStreamingHosts"
         @refresh-runtime="loadStreamingRuntimeStatus"
         @toggle-form="streamingHostFormOpen = !streamingHostFormOpen"
         @register-host="registerStreamingHost"
         @probe-host="probeStreamingHost"
+        @pair-host="pairStreamingHost"
+        @check-pairing="checkStreamingPairTask"
         @wake-host="wakeStreamingHost"
         @remove-host="removeStreamingHost"
-        @open-runtime="openStreamingRuntime"
+        @close-pairing="closeStreamingPairing"
       />
 
       <StorageCredentialsPanel

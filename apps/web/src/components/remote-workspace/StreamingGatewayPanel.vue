@@ -38,7 +38,7 @@ const emit = defineEmits<{
   probeHost: [host: StreamingHost]
   wakeHost: [host: StreamingHost]
   removeHost: [host: StreamingHost]
-  openRuntime: []
+  openAuthorizations: []
   'update:hostLabel': [value: string]
   'update:hostEndpoint': [value: string]
   'update:hostBasePort': [value: string]
@@ -69,6 +69,17 @@ const emit = defineEmits<{
     </div>
     <p v-if="error" class="error-line">{{ error }}</p>
     <p v-if="message" class="info-line">{{ message }}</p>
+    <div class="runtime-config">
+      <div>
+        <strong>{{ label('认证中心托管', 'Managed by Authorization Center') }}</strong>
+        <small>{{ runtimeStatus?.reachable ? label('配对组件就绪', 'Pairing ready') : label('配对组件未就绪', 'Pairing unavailable') }}</small>
+        <code>{{ label('主机认证、PIN 配对都在 HomeSense 授权中心完成', 'Host auth and PIN pairing stay inside HomeSense') }}</code>
+      </div>
+      <div class="runtime-actions">
+        <button class="secondary-btn" @click="emit('refreshRuntime')">{{ label('探测播放器', 'Probe Player') }}</button>
+        <button class="primary-btn" @click="emit('openAuthorizations')">{{ label('去认证中心', 'Auth Center') }}</button>
+      </div>
+    </div>
     <div v-if="showForm" class="target-form streaming-host-form">
       <label>
         <span>{{ label('名称', 'Label') }}</span>
@@ -117,7 +128,10 @@ const emit = defineEmits<{
           <strong>{{ host.status }}</strong>
         </div>
         <code>{{ host.endpoint }}</code>
-        <small>{{ host.room || label('未设置房间', 'No room') }} · {{ host.mac_address || label('无 MAC', 'No MAC') }}</small>
+        <small>
+          {{ host.source === 'authorization' ? label('认证中心来源', 'Authorization source') : label('旧设备来源', 'Legacy device source') }}
+          · {{ host.room || label('未设置房间', 'No room') }} · {{ host.mac_address || label('无 MAC', 'No MAC') }}
+        </small>
         <small>{{ label('端口族', 'Ports') }}: TCP {{ host.tcp_ports.join(', ') }} · UDP {{ host.udp_ports.join(', ') }} · Discovery {{ host.discovery_ports.join(', ') }}</small>
         <div class="target-actions">
           <button class="open-link-btn" :disabled="actionLoading" @click="emit('probeHost', host)">
@@ -161,16 +175,12 @@ const emit = defineEmits<{
           </span>
         </div>
         <div v-if="item.key === 'web-runtime' && runtimeStatus" class="target-probe">
-          <small>{{ runtimeStatus.reachable ? label('运行时可达', 'Runtime reachable') : label('运行时不可达', 'Runtime offline') }}</small>
-          <code>{{ runtimeStatus.endpoint }}</code>
+          <small>{{ runtimeStatus.reachable ? label('配对组件就绪', 'Pairing ready') : label('配对组件不可用', 'Pairing unavailable') }}</small>
+          <code>{{ label('内部组件，不单独打开', 'Internal component') }}</code>
           <small v-if="runtimeStatus.status_code != null">HTTP {{ runtimeStatus.status_code }}</small>
           <small v-if="runtimeStatus.error">{{ runtimeStatus.error }}</small>
-          <button
-            class="open-link-btn"
-            :disabled="!runtimeStatus.endpoint.startsWith('http')"
-            @click="emit('openRuntime')"
-          >
-            {{ label('打开播放器', 'Open Player') }}
+          <button class="open-link-btn" @click="emit('openAuthorizations')">
+            {{ label('打开认证中心', 'Open Auth Center') }}
           </button>
         </div>
       </article>
@@ -209,6 +219,25 @@ const emit = defineEmits<{
 
 .runtime-actions,
 .target-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.runtime-config {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid #ccfbf1;
+  border-radius: 8px;
+  padding: 14px;
+  background: #f0fdfa;
+}
+
+.runtime-config > div {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -283,6 +312,12 @@ h3 {
   color: #b91c1c;
 }
 
+.primary-inline {
+  border-color: #0f766e;
+  background: #ecfdf5;
+  color: #0f766e;
+}
+
 .error-line,
 .info-line {
   border-radius: 8px;
@@ -326,7 +361,8 @@ h3 {
 }
 
 .target-form input,
-.target-form select {
+.target-form select,
+.runtime-config input {
   width: 100%;
   min-height: 36px;
   border: 1px solid #cbd5e1;
@@ -334,6 +370,10 @@ h3 {
   padding: 0 10px;
   color: #1e293b;
   background: #fff;
+}
+
+.runtime-config input {
+  width: 220px;
 }
 
 .streaming-host-grid,
@@ -425,6 +465,14 @@ code {
 
   .target-form {
     grid-template-columns: 1fr;
+  }
+
+  .runtime-config {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-config input {
+    width: 100%;
   }
 }
 </style>

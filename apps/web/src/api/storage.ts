@@ -97,6 +97,9 @@ export const storageApi = {
   listMounts: () =>
     request<{ mounts: StorageMountRecord[] }>('/api/storage/mounts'),
 
+  deviceFilesEntry: (deviceId: number) =>
+    request<{ mount: StorageMountRecord; path: string }>(`/api/storage/devices/${deviceId}/files-entry`),
+
   createMount: (body: StorageMountInput) =>
     request<{ mount: StorageMountRecord }>('/api/storage/mounts', {
       method: 'POST',

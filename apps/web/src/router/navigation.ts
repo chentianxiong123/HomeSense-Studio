@@ -6,7 +6,6 @@ const ROUTE_PATTERNS = [
   /^\/studio$/,
   /^\/media$/,
   /^\/storage$/,
-  /^\/streaming$/,
   /^\/streaming\/control\/[^/]+$/,
   /^\/streaming\/monitor\/[^/]+$/,
   /^\/workspace$/,
@@ -29,6 +28,7 @@ export function normalizeRememberedRoute(value: string | null | undefined): stri
   if (!value) return APP_DEFAULT_ROUTE
   if (value === '/integrations' || value === '/integrations/sources') return '/authorizations'
   if (value === '/integrations/mi-cli') return '/authorizations/mi-cli'
+  if (value === '/streaming') return '/authorizations'
   return ROUTE_PATTERNS.some((pattern) => pattern.test(value)) ? value : APP_DEFAULT_ROUTE
 }
 

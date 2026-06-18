@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { api, type UserDevice } from '@/api'
 import type { MiDeviceCandidate } from '@/api'
 import { alistApi, type AlistAuthorizationRecord } from '@/api/alist'
+import { streamingGatewayApi, type StreamingHost } from '@/api/streamingGateway'
 import { useLocale } from '@/composables/useLocale'
 import { useDeviceDetailCapabilities } from '@/composables/useDeviceDetailCapabilities'
 import AppBrowserModal from '@/components/AppBrowserModal.vue'
@@ -39,18 +40,21 @@ const bindingMessage = ref('')
 const bindingError = ref('')
 const authorizations = ref<AlistAuthorizationRecord[]>([])
 const sshTargets = ref<Array<{ id: number; name: string; kind: 'local' | 'ssh' | 'adb'; target: Record<string, unknown> }>>([])
+const streamingHosts = ref<StreamingHost[]>([])
 const miCandidates = ref<MiDeviceCandidate[]>([])
 const bindingSourcesLoaded = ref(false)
 const deviceNameDraft = ref('')
 const selectedMiDid = ref('')
 const selectedAdbAuthId = ref('')
 const selectedSshTargetId = ref('')
+const selectedStreamingHostId = ref('')
 const bindingForm = ref({
   ip_address: '',
 })
 
 const adbAuthOptions = computed(() => authorizations.value.filter((auth) => auth.driver === 'adb'))
 const sshAuthOptions = computed(() => authorizations.value.filter((auth) => auth.driver === 'sftp' || auth.driver === 'ssh'))
+const pairedStreamingHosts = computed(() => streamingHosts.value.filter((host) => host.pairing?.status === 'paired' && !host.pairing.mock_pairing))
 
 function propString(d: UserDevice | null, key: string): string {
   if (!d) return ''
@@ -125,6 +129,7 @@ function sourceTags(d: UserDevice): string[] {
   const tags: string[] = []
   if (propString(d, 'mi_did')) tags.push('Mi')
   if (propString(d, 'adb_ip')) tags.push('ADB')
+  if (propString(d, 'streaming_host_id')) tags.push(label('串流', 'Stream'))
   return tags
 }
 
@@ -136,9 +141,26 @@ function miDisplayName(did: string): string {
 
 const canOpenConsole = computed(() => {
   if (!device.value) return false
+  if (propString(device.value, 'ssh_target_id') || propString(device.value, 'ssh_authorization_id')) return true
   if (propString(device.value, 'ssh_host') && propString(device.value, 'ssh_user')) return true
   if (propString(device.value, 'adb_serial') || propString(device.value, 'adb_ip')) return true
   return propString(device.value, 'device_type') === 'windows_pc'
+})
+
+const canOpenFiles = computed(() => {
+  if (!device.value) return false
+  if (propString(device.value, 'adb_serial') || propString(device.value, 'adb_ip')) return true
+  return Boolean(
+    propString(device.value, 'ssh_target_id') ||
+    propString(device.value, 'ssh_authorization_id') ||
+    (propString(device.value, 'ssh_host') && propString(device.value, 'ssh_user')),
+  )
+})
+
+const canOpenStreaming = computed(() => {
+  if (!device.value) return false
+  if (propString(device.value, 'streaming_host_id')) return true
+  return Boolean(propString(device.value, 'adb_ip') || propString(device.value, 'adb_serial'))
 })
 
 function openConsole() {
@@ -151,6 +173,50 @@ function openAdbStream() {
   if (!adb) return
   router.push({
     path: '/sessions/adb-stream',
+    query: {
+      target_device_id: String(deviceId),
+      device: adb,
+      name: device.value.name,
+      from: route.fullPath,
+    },
+  })
+}
+
+function openStreaming() {
+  if (!device.value) return
+  const streamingHostId = propString(device.value, 'streaming_host_id')
+  if (streamingHostId) {
+    router.push({
+      path: '/sessions/streaming',
+      query: {
+        target_device_id: String(deviceId),
+        host_id: streamingHostId,
+        name: device.value.name,
+        autostart: '1',
+        from: route.fullPath,
+      },
+    })
+    return
+  }
+  openAdbStream()
+}
+
+function openAdbFiles() {
+  if (!device.value) return
+  const adb = propString(device.value, 'adb_ip') || propString(device.value, 'adb_serial')
+  if (!adb) {
+    router.push({
+      path: '/sessions/device-files',
+      query: {
+        target_device_id: String(deviceId),
+        name: device.value.name,
+        from: route.fullPath,
+      },
+    })
+    return
+  }
+  router.push({
+    path: '/sessions/adb-files',
     query: {
       target_device_id: String(deviceId),
       device: adb,
@@ -175,10 +241,11 @@ async function openBindingDialog() {
 async function loadBindingSources(options?: { refresh?: boolean }) {
   bindingLoading.value = true
   try {
-    const [authResult, terminalResult, miResult] = await Promise.allSettled([
+    const [authResult, terminalResult, miResult, streamingResult] = await Promise.allSettled([
       alistApi.listAuthorizations(),
       api.terminal.listTargets(),
       api.userDevices.miCandidates({ refresh: Boolean(options?.refresh) }),
+      streamingGatewayApi.hosts(),
     ])
     if (authResult.status === 'fulfilled') {
       authorizations.value = authResult.value.authorizations ?? []
@@ -188,6 +255,9 @@ async function loadBindingSources(options?: { refresh?: boolean }) {
     }
     if (miResult.status === 'fulfilled') {
       miCandidates.value = miResult.value.devices ?? []
+    }
+    if (streamingResult.status === 'fulfilled') {
+      streamingHosts.value = streamingResult.value.data ?? []
     }
     bindingSourcesLoaded.value = true
     syncSelectedSources(device.value)
@@ -208,6 +278,7 @@ function syncSelectedSources(d: UserDevice | null) {
   selectedMiDid.value = propString(d, 'mi_did')
   selectedAdbAuthId.value = ''
   selectedSshTargetId.value = ''
+  selectedStreamingHostId.value = propString(d, 'streaming_host_id')
   const adbIp = propString(d, 'adb_ip')
   const sshHost = propString(d, 'ssh_host')
   const sshUser = propString(d, 'ssh_user')
@@ -271,6 +342,18 @@ function cleanBindingProps(props: Record<string, unknown>) {
     delete next.ssh_target_id
     delete next.ssh_authorization_id
   }
+
+  const selectedStreamingId = String(selectedStreamingHostId.value || '')
+  const streamingHost = pairedStreamingHosts.value.find((host) => host.id === selectedStreamingId)
+  if (streamingHost) {
+    next.streaming_host_id = streamingHost.id
+    next.streaming_host_label = streamingHost.label
+    next.streaming_host_endpoint = streamingHost.endpoint
+  } else {
+    delete next.streaming_host_id
+    delete next.streaming_host_label
+    delete next.streaming_host_endpoint
+  }
   return next
 }
 
@@ -282,6 +365,9 @@ async function saveBindings() {
   try {
     if (selectedAdbAuthId.value && !authorizations.value.some((auth) => auth.driver === 'adb' && String(auth.id) === String(selectedAdbAuthId.value))) {
       throw new Error(label('选择的 ADB 来源不存在，请刷新来源后重试', 'Selected ADB source does not exist. Refresh sources and try again.'))
+    }
+    if (selectedStreamingHostId.value && !pairedStreamingHosts.value.some((host) => host.id === selectedStreamingHostId.value)) {
+      throw new Error(label('选择的串流来源未配对，请先回授权中心完成配对', 'Selected streaming source is not paired. Pair it in Authorization Center first.'))
     }
     const result = await api.userDevices.update(deviceId, {
       name: deviceNameDraft.value.trim() || device.value.name,
@@ -329,8 +415,11 @@ function hydrateDeviceSnapshot(d: UserDevice | null) {
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
             {{ label('控制台', 'Console') }}
           </button>
-          <button v-if="propString(device, 'adb_ip') || propString(device, 'adb_serial')" class="console-btn stream-btn" @click="openAdbStream">
+          <button v-if="canOpenStreaming" class="console-btn stream-btn" @click="openStreaming">
             {{ label('串流', 'Stream') }}
+          </button>
+          <button v-if="canOpenFiles" class="console-btn" @click="openAdbFiles">
+            {{ label('文件', 'Files') }}
           </button>
           <button class="bind-btn" @click="openBindingDialog">
             {{ label('编辑设备', 'Edit Device') }}
@@ -339,6 +428,9 @@ function hydrateDeviceSnapshot(d: UserDevice | null) {
         <div class="head-meta">
           <span v-if="propString(device, 'mi_did')" class="meta-chip monospace">Mi: {{ miDisplayName(propString(device, 'mi_did')) }}</span>
           <span v-if="propString(device, 'adb_ip')" class="meta-chip monospace">ADB: {{ propString(device, 'adb_ip') }}</span>
+          <span v-if="propString(device, 'streaming_host_id')" class="meta-chip monospace">
+            {{ label('串流', 'Stream') }}: {{ propString(device, 'streaming_host_label') || propString(device, 'streaming_host_id') }}
+          </span>
           <span v-if="propString(device, 'ip_address')" class="meta-chip monospace">IP: {{ propString(device, 'ip_address') }}</span>
         </div>
       </div>
@@ -387,9 +479,7 @@ function hydrateDeviceSnapshot(d: UserDevice | null) {
         :device-name="device.name"
         :adb-ip="propString(device, 'adb_ip')"
         :device-type="typeLabel(propString(device, 'device_type') || 'other')"
-        :can-open-console="canOpenConsole"
         :label="label"
-        @open-console="openConsole"
       />
 
       <AppBrowserModal v-if="showAppBrowser" :device-id="deviceId" :adb-ip="propString(device, 'adb_ip')" @close="showAppBrowser = false" />
@@ -470,6 +560,22 @@ function hydrateDeviceSnapshot(d: UserDevice | null) {
                 </option>
                 <option v-for="auth in sshAuthOptions" :key="`auth-${auth.id}`" :value="`auth:${auth.id}`">
                   {{ auth.name }} · {{ auth.endpoint }}
+                </option>
+              </select>
+            </label>
+          </div>
+
+          <div class="source-section">
+            <div class="source-head">
+              <strong>{{ label('串流', 'Streaming') }}</strong>
+              <small>{{ label('从授权中心已配对的 Sunshine 主机中选择。', 'Select a paired Sunshine host from Authorization Center.') }}</small>
+            </div>
+            <label class="field">
+              <span>{{ label('串流来源', 'Streaming Source') }}</span>
+              <select v-model="selectedStreamingHostId">
+                <option value="">{{ label('不绑定串流', 'No streaming binding') }}</option>
+                <option v-for="host in pairedStreamingHosts" :key="host.id" :value="host.id">
+                  {{ host.label }} · {{ host.endpoint }}
                 </option>
               </select>
             </label>

@@ -30,9 +30,9 @@ export const STORAGE_PROTOCOLS: StorageProtocolSpec[] = [
   },
   {
     id: 'sftp',
-    name: 'SFTP',
+    name: 'SSH/SFTP',
     status: 'implemented',
-    summary: 'SSH file transfer for Linux, NAS and server filesystems.',
+    summary: 'One SSH host credential used by terminal shell and SFTP filesystem access.',
     default_root_path: '/',
     readonly_default: false,
     supports: { list: true, get: true, remove: true, copy: true, mkdir: true, upload: true, cross_mount_copy: true },
@@ -41,7 +41,7 @@ export const STORAGE_PROTOCOLS: StorageProtocolSpec[] = [
       { key: 'username', label: 'Username', required: true },
       { key: 'password', label: 'Password', required: false, secret: true },
       { key: 'key_name', label: 'SSH Key Name', required: false, placeholder: 'nas_root' },
-      { key: 'root_path', label: 'SFTP Root Path', required: false, placeholder: '/' },
+      { key: 'root_path', label: 'SSH/SFTP Root Path', required: false, placeholder: '/' },
     ],
   },
   {

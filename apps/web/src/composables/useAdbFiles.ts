@@ -52,15 +52,22 @@ export function useAdbFiles(options: {
     return { device: options.adbIp(), ...extra }
   }
 
+  function normalizePath(path: string) {
+    const value = (path || '/sdcard/').trim().replace(/\/+/g, '/')
+    if (value === '/sdcard/sdcard') return '/sdcard/'
+    return value.startsWith('/') ? value : `/${value}`
+  }
+
   async function loadFiles(path = fileInputPath.value) {
     if (fileLoading.value) return
+    const targetPath = normalizePath(path)
     fileLoading.value = true
     options.statusMessage.value = ''
     options.errorMessage.value = ''
     try {
       const result = await cliApi.run<{ path: string; parent: string; files: AdbFileEntry[]; count: number }>('adb-cli', {
         action: 'list_files',
-        params: params({ path }),
+        params: params({ path: targetPath }),
         ttl_ms: 0,
         bypass_cache: true,
       })

@@ -73,9 +73,19 @@ def _parse_battery(output: str) -> dict[str, int | str]:
 
 
 def _join_remote_path(base_path: str, name: str) -> str:
+    base_path = _normalize_remote_path(base_path)
     if base_path == "/":
         return f"/{name}"
     return base_path.rstrip("/") + "/" + name
+
+
+def _normalize_remote_path(path: str) -> str:
+    value = re.sub(r"/+", "/", (path or "/sdcard/").strip())
+    if not value.startswith("/"):
+        value = f"/{value}"
+    if value == "/sdcard/sdcard":
+        return "/sdcard/"
+    return value
 
 
 def _parse_ls_line(line: str, base_path: str) -> dict | None:
@@ -95,10 +105,15 @@ def _parse_ls_line(line: str, base_path: str) -> dict | None:
     if " -> " in name:
         name, link_target = name.split(" -> ", 1)
     file_type = mode[0]
+    symlink_directory = file_type == "l" and (
+        link_target.startswith("/")
+        or link_target.startswith("../")
+        or link_target in ("sdcard", "storage", "primary")
+    )
     return {
         "name": name,
         "path": _join_remote_path(base_path, name),
-        "directory": file_type == "d",
+        "directory": file_type == "d" or symlink_directory,
         "symlink": file_type == "l",
         "link_target": link_target,
         "mode": mode,

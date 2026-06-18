@@ -2,7 +2,7 @@ import os
 import shlex
 from typing import Any, Callable
 
-from .utils import _is_binary, _join_remote_path, _parse_ls_line, _safe_int
+from .utils import _is_binary, _join_remote_path, _normalize_remote_path, _parse_ls_line, _safe_int
 
 AdbDeps = dict[str, Callable[..., Any]]
 
@@ -16,12 +16,14 @@ def handle_list_files(params: dict, deps: AdbDeps) -> dict:
     if ensure.get("status") != "success":
         return ensure
 
-    remote_path = str(params.get("path") or "/sdcard/").strip() or "/sdcard/"
+    remote_path = _normalize_remote_path(str(params.get("path") or "/sdcard/").strip() or "/sdcard/")
     if not remote_path.startswith("/"):
         return {"status": "error", "error": "INVALID_PARAMS", "message": "path must be absolute"}
-    remote_path = remote_path.rstrip("/") or "/"
+    list_path = remote_path if remote_path == "/" else remote_path.rstrip("/")
+    if remote_path.endswith("/") and remote_path != "/":
+        list_path = f"{list_path}/"
 
-    quoted = shlex.quote(remote_path)
+    quoted = shlex.quote(list_path)
     out, stderr, code = deps["run_device_cmd"](
         params, ["shell", f"ls -la --time-style=long-iso {quoted}"], timeout=20,
     )
@@ -31,8 +33,9 @@ def handle_list_files(params: dict, deps: AdbDeps) -> dict:
         return {"status": "error", "error": "EXEC_FAILED", "message": stderr or out or "failed to list files"}
 
     files = []
+    base_path = list_path.rstrip("/") or "/"
     for line in out.splitlines():
-        item = _parse_ls_line(line, remote_path)
+        item = _parse_ls_line(line, base_path)
         if item:
             files.append(item)
     files.sort(key=lambda item: (not item["directory"], item["name"].lower()))
@@ -40,8 +43,8 @@ def handle_list_files(params: dict, deps: AdbDeps) -> dict:
     return {
         "status": "success",
         "data": {
-            "path": remote_path + ("" if remote_path == "/" else "/"),
-            "parent": "" if remote_path == "/" else "/".join(remote_path.rstrip("/").split("/")[:-1]) or "/",
+            "path": base_path + ("" if base_path == "/" else "/"),
+            "parent": "" if base_path == "/" else "/".join(base_path.rstrip("/").split("/")[:-1]) or "/",
             "files": files,
             "count": len(files),
         },

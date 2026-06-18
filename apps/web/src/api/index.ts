@@ -116,6 +116,7 @@ export interface DeviceCardProjection {
     mi_did: string | null
     adb_ip: string | null
     ip_address: string | null
+    streaming_host_id: string | null
   }
   network: {
     ping_target: string | null
