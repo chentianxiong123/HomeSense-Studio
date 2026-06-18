@@ -31,7 +31,7 @@ import {
   type RemoteWorkspaceTarget,
   type RemoteWorkspaceTargetProbe,
 } from '@/api/remoteWorkspace'
-import { streamingGatewayApi, type StreamingHost, type StreamingHostProbe } from '@/api/streamingGateway'
+import { streamingGatewayApi, type MoonlightWebRuntimeStatus, type StreamingHost, type StreamingHostProbe } from '@/api/streamingGateway'
 import { useLocale } from '@/composables/useLocale'
 
 const router = useRouter()
@@ -62,17 +62,7 @@ const filesystemLoading = ref(false)
 const filesystemError = ref('')
 const streamingHosts = ref<StreamingHost[]>([])
 const streamingHostProbes = ref<Record<string, StreamingHostProbe>>({})
-const streamingRuntimeStatus = ref<{
-  name: string
-  endpoint: string
-  enabled: boolean
-  registered: boolean
-  reachable: boolean
-  status_code: number | null
-  checked_at: string
-  error?: string
-  notes: string[]
-} | null>(null)
+const streamingRuntimeStatus = ref<MoonlightWebRuntimeStatus | null>(null)
 const streamingLoading = ref(false)
 const streamingActionLoading = ref(false)
 const streamingError = ref('')
@@ -120,12 +110,11 @@ const networkAccessSpecs = computed(() => buildNetworkAccessSpecs({
   targetCount: workspaceTargets.value.length,
 }))
 const streamingGatewayIntegration = computed(() => integrationByName.value.get('streaming-gateway'))
-const moonlightWebRuntimeIntegration = computed(() => integrationByName.value.get('moonlight-web-runtime'))
 const registeredStreamingHostCount = computed(() => streamingHosts.value.length)
 const streamingGatewaySpecs = computed(() => buildStreamingGatewaySpecs({
   label,
   registeredStreamingHostCount: registeredStreamingHostCount.value,
-  hasMoonlightWebRuntime: Boolean(moonlightWebRuntimeIntegration.value),
+  hasMoonlightWebRuntime: Boolean(streamingRuntimeStatus.value?.reachable),
 }))
 const terminalTargets = computed(() => [
   { id: 'local:shell', label: label('本地 Shell', 'Local Shell') },
@@ -450,12 +439,6 @@ function openWorkspace() {
   window.open(workspaceOpenUrl.value, '_blank', 'noopener,noreferrer')
 }
 
-function openStreamingRuntime() {
-  const endpoint = streamingRuntimeStatus.value?.endpoint
-  if (!endpoint || !endpoint.startsWith('http')) return
-  window.open(endpoint, '_blank', 'noopener,noreferrer')
-}
-
 function canOpenTarget(target: RemoteWorkspaceTarget): boolean {
   return target.endpoint.startsWith('http://') || target.endpoint.startsWith('https://')
 }
@@ -678,7 +661,7 @@ onMounted(() => loadFilesystem(''))
       @probe-host="probeStreamingHost"
       @wake-host="wakeStreamingHost"
       @remove-host="removeStreamingHost"
-      @open-runtime="openStreamingRuntime"
+      @open-authorizations="router.push('/authorizations?local=streaming')"
       @update:host-label="streamingHostLabel = $event"
       @update:host-endpoint="streamingHostEndpoint = $event"
       @update:host-base-port="streamingHostBasePort = $event"

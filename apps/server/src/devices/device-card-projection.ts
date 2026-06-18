@@ -27,12 +27,14 @@ export function buildDeviceCardProjection(
   const miDid = readString(device, 'mi_did') || null
   const adbIp = readString(device, 'adb_ip').trim() || null
   const ipAddress = readString(device, 'ip_address') || null
+  const streamingHostId = readString(device, 'streaming_host_id') || null
   const roomId = readNumber(device, 'room_id')
   const deviceType = readString(device, 'device_type') || 'other'
 
   const sources: string[] = []
   if (miDid) sources.push('mi')
   if (adbIp) sources.push('adb')
+  if (streamingHostId) sources.push('streaming')
 
   const pingTarget =
     (ipAddress || adbIp || '').split(':')[0].trim() || null
@@ -51,6 +53,7 @@ export function buildDeviceCardProjection(
       mi_did: miDid,
       adb_ip: adbIp,
       ip_address: ipAddress,
+      streaming_host_id: streamingHostId,
     },
     network: {
       ping_target: pingTarget,

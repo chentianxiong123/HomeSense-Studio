@@ -56,9 +56,9 @@ const fallbackProtocols: StorageProtocolSpec[] = [
   },
   {
     id: 'sftp',
-    name: 'SFTP',
+    name: 'SSH/SFTP',
     status: 'implemented',
-    summary: 'SSH file transfer',
+    summary: 'Shared SSH credential for terminal and file access',
     default_root_path: '/',
     readonly_default: false,
     supports: { list: true, get: true, remove: true, copy: true, mkdir: true, upload: true, cross_mount_copy: true },
@@ -67,7 +67,7 @@ const fallbackProtocols: StorageProtocolSpec[] = [
       { key: 'username', label: 'Username', required: true },
       { key: 'password', label: 'Password', required: false, secret: true },
       { key: 'key_name', label: 'SSH Key Name', required: false, placeholder: 'nas_root' },
-      { key: 'root_path', label: 'SFTP Root Path', required: false, placeholder: '/' },
+      { key: 'root_path', label: 'SSH/SFTP Root Path', required: false, placeholder: '/' },
     ],
   },
   {
@@ -290,7 +290,7 @@ function errorText(error: unknown): string {
     <div class="detail-head">
       <div>
         <span class="eyebrow">{{ label('局域网账号', 'Local Network') }}</span>
-        <h2>{{ label('文件源', 'Storage Sources') }}</h2>
+        <h2>{{ label('文件源 / SSH/SFTP', 'Storage / SSH/SFTP') }}</h2>
       </div>
       <span :class="['pill', count > 0 ? 'ok' : 'muted']">
         {{ count }} {{ label('个凭据', 'credentials') }}
@@ -300,7 +300,7 @@ function errorText(error: unknown): string {
     <div class="list-toolbar">
       <div>
         <strong>{{ label('协议凭据注册中心', 'Protocol Credential Registry') }}</strong>
-        <small>{{ label('授权中心只保存凭据；系统挂载和文件浏览在文件工作台完成。', 'The authorization center only stores credentials; system mounts and file browsing belong to the storage workbench.') }}</small>
+        <small>{{ label('授权中心只保存协议凭据；SSH/SFTP 同一来源可同时用于控制台和文件系统。', 'The authorization center stores protocol credentials; one SSH/SFTP source can power both terminal and files.') }}</small>
       </div>
       <div class="toolbar-actions">
         <button class="primary-btn" :disabled="isBusy('storage-auth-create')" @click="openCreate">
@@ -328,7 +328,7 @@ function errorText(error: unknown): string {
     </div>
 
     <div v-if="authorizations.length === 0" class="empty-line left">
-      {{ label('还没有文件源授权。先保存协议凭据，再到文件工作台创建系统挂载。', 'No storage source authorization yet. Save protocol credentials here, then create a system mount in the storage workbench.') }}
+      {{ label('还没有文件源授权。SSH/SFTP 来源保存后，可以在设备里绑定为控制台和文件系统入口。', 'No storage source authorization yet. Save an SSH/SFTP source, then bind it to a device for terminal and files.') }}
     </div>
 
     <div v-else class="target-table">
@@ -420,7 +420,7 @@ function errorText(error: unknown): string {
           </div>
 
           <div class="empty-line left">
-            {{ label('保存后到文件工作台创建系统挂载；密码不会出现在设备或前端 props 中。', 'After saving, create a system mount in the storage workbench; secrets will not be written to device or frontend props.') }}
+            {{ label('密码不会写进设备 props；SSH/SFTP 来源可被设备控制台和文件系统共同使用。', 'Secrets are not written to device props; SSH/SFTP sources are shared by terminal and files.') }}
           </div>
 
           <div class="dialog-actions">

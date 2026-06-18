@@ -142,6 +142,22 @@ const tables = [
       finished_at TEXT,
       PRIMARY KEY (id)
     )`,
+  `CREATE TABLE IF NOT EXISTS streaming_hosts (
+      id INTEGER NOT NULL,
+      label TEXT NOT NULL,
+      endpoint TEXT NOT NULL,
+      host TEXT NOT NULL,
+      base_port INTEGER NOT NULL DEFAULT 47989,
+      web_port INTEGER NOT NULL DEFAULT 47989,
+      mac_address TEXT,
+      room TEXT,
+      network_path TEXT NOT NULL DEFAULT 'lan',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      props_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (id AUTOINCREMENT)
+    )`,
   `CREATE TABLE IF NOT EXISTS runtime_snapshots (
       key TEXT NOT NULL,
       value_json TEXT NOT NULL DEFAULT '{}',
@@ -169,6 +185,8 @@ const indexes = [
   `CREATE INDEX IF NOT EXISTS idx_storage_mounts_driver ON storage_mounts(driver)`,
   `CREATE INDEX IF NOT EXISTS idx_storage_tasks_status ON storage_tasks(status)`,
   `CREATE INDEX IF NOT EXISTS idx_storage_tasks_created ON storage_tasks(created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_streaming_hosts_host ON streaming_hosts(host)`,
+  `CREATE INDEX IF NOT EXISTS idx_streaming_hosts_enabled ON streaming_hosts(enabled)`,
 ]
 
 export function initDb(): Database.Database {
@@ -201,10 +219,20 @@ function applyCompatibilityMigrations(target: Database.Database): void {
   ensureColumn(target, 'alist_authorizations', 'props_json', "TEXT DEFAULT '{}'")
   ensureColumn(target, 'alist_authorizations', 'created_at', 'TEXT')
   ensureColumn(target, 'alist_authorizations', 'updated_at', 'TEXT')
+  ensureColumn(target, 'streaming_hosts', 'props_json', "TEXT DEFAULT '{}'")
+  ensureColumn(target, 'streaming_hosts', 'created_at', 'TEXT')
+  ensureColumn(target, 'streaming_hosts', 'updated_at', 'TEXT')
   target.exec(`
     UPDATE alist_authorizations
     SET
       secret_json = COALESCE(secret_json, '{}'),
+      props_json = COALESCE(props_json, '{}'),
+      created_at = COALESCE(created_at, datetime('now')),
+      updated_at = COALESCE(updated_at, datetime('now'))
+  `)
+  target.exec(`
+    UPDATE streaming_hosts
+    SET
       props_json = COALESCE(props_json, '{}'),
       created_at = COALESCE(created_at, datetime('now')),
       updated_at = COALESCE(updated_at, datetime('now'))

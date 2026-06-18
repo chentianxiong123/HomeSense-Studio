@@ -3,6 +3,7 @@ import { getDb } from '../db/database'
 import { AlistAuthorizationService } from '../alist/alist-authorization.service'
 import { implementedStorageDrivers } from './storage-protocols'
 import type { CreateStorageMountInput, StorageMountRecord, UpdateStorageMountInput } from './storage.types'
+import { TerminalTargetService } from '../terminal/terminal-target.service'
 
 interface StorageMountRow {
   id: number
@@ -106,6 +107,54 @@ export class StorageMountService {
     return { status: 'deleted', id }
   }
 
+  ensureDeviceSftpMount(input: { deviceId: number; deviceName: string; props: Record<string, unknown> }): { mount: StorageMountRecord } {
+    const existing = this.findDeviceMount(input.deviceId, 'sftp')
+    if (existing) return { mount: existing }
+
+    const authorizationId = readPositiveInt(input.props.ssh_authorization_id)
+    if (authorizationId) {
+      const auth = this.authorizations.get(authorizationId)
+      const virtualPath = deviceVirtualPath(input.deviceId, input.deviceName)
+      const result = this.create({
+        name: `${input.deviceName} SSH/SFTP`,
+        virtual_path: virtualPath,
+        driver: 'sftp',
+        authorization_id: authorizationId,
+        readonly: false,
+        props: {
+          source: 'device',
+          device_id: input.deviceId,
+          root_path: readString(auth.props.root_path) || '/',
+        },
+      })
+      return result
+    }
+
+    const targetId = readPositiveInt(input.props.ssh_target_id)
+    if (targetId) {
+      const target = TerminalTargetService.get(targetId)
+      if (!target) throw new BadRequestException(`SSH terminal target not found: ${targetId}`)
+      if (target.kind !== 'ssh') throw new BadRequestException(`terminal target ${targetId} is not SSH`)
+      const authorization = this.ensureAuthorizationForSshTarget(targetId, target.name, target.target)
+      const virtualPath = deviceVirtualPath(input.deviceId, input.deviceName)
+      return this.create({
+        name: `${input.deviceName} SSH/SFTP`,
+        virtual_path: virtualPath,
+        driver: 'sftp',
+        authorization_id: authorization.id,
+        readonly: false,
+        props: {
+          source: 'device',
+          device_id: input.deviceId,
+          ssh_target_id: targetId,
+          root_path: '/',
+        },
+      })
+    }
+
+    throw new BadRequestException('device has no SSH/SFTP source bound')
+  }
+
   private getRow(id: number): StorageMountRow {
     const row = getDb()
       .prepare(
@@ -125,6 +174,51 @@ export class StorageMountService {
     if (row && row.id !== exceptId) {
       throw new BadRequestException(`storage mount path already exists: ${virtualPath}`)
     }
+  }
+
+  private findDeviceMount(deviceId: number, driver: string): StorageMountRecord | null {
+    const rows = this.list().mounts
+    return rows.find((mount) => (
+      normalizeDriver(mount.driver) === normalizeDriver(driver) &&
+      Number(mount.props.device_id) === deviceId
+    )) ?? null
+  }
+
+  private ensureAuthorizationForSshTarget(targetId: number, targetName: string, target: Record<string, unknown>): { id: number } {
+    const existing = getDb()
+      .prepare(
+        `SELECT id
+         FROM alist_authorizations
+         WHERE lower(driver) = 'sftp'
+           AND json_extract(props_json, '$.ssh_target_id') = ?
+         ORDER BY id DESC
+         LIMIT 1`,
+      )
+      .get(targetId) as { id: number } | undefined
+    if (existing) return existing
+
+    const host = readString(target.host)
+    const port = readPositiveInt(target.port) || 22
+    const username = readString(target.user)
+    if (!host || !username) throw new BadRequestException(`SSH terminal target ${targetId} missing host or user`)
+    const secret: Record<string, unknown> = {}
+    if (readString(target.password)) secret.password = readString(target.password)
+    if (readString(target.keyName)) secret.key_name = readString(target.keyName)
+    if (!secret.password && !secret.key_name) throw new BadRequestException(`SSH terminal target ${targetId} missing password or keyName`)
+
+    const result = getDb()
+      .prepare(
+        `INSERT INTO alist_authorizations (name, driver, endpoint, username, secret_json, props_json)
+         VALUES (?, 'sftp', ?, ?, ?, ?)`,
+      )
+      .run(
+        `${targetName || `SSH ${targetId}`} SSH/SFTP`,
+        `sftp://${host}:${port}`,
+        username,
+        JSON.stringify(secret),
+        JSON.stringify({ ssh_target_id: targetId, root_path: '/' }),
+      )
+    return { id: Number(result.lastInsertRowid) }
   }
 }
 
@@ -232,4 +326,18 @@ function safeParseRecord(raw: string): Record<string, unknown> {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function readString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function readPositiveInt(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+function deviceVirtualPath(deviceId: number, deviceName: string): string {
+  const safeName = deviceName.trim().replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '-')
+  return `/devices/${deviceId}-${safeName || 'device'}`
 }

@@ -35,8 +35,12 @@ let resolvedLabel = ''
 let sessionStorageKey: string | null = null
 let pendingAttachSessionId: string | null = null
 
-const apiBase = (import.meta.env.VITE_API_BASE ?? '') || 'http://localhost:3100'
-const wsBase = apiBase.replace(/^http/, 'ws')
+function buildWsUrl(path: string): string {
+  const base = import.meta.env.VITE_API_BASE || window.location.origin
+  const url = new URL(path, base || window.location.origin)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  return url.toString()
+}
 
 function buildSessionStorageKey(target: SessionTarget, label: string): string {
   if (props.targetId) return `homesense-terminal:v1:target:${props.targetId}`
@@ -102,6 +106,19 @@ function terminalSize() {
   }
 }
 
+function resolveTerminalPayload(res: unknown): { target: SessionTarget; label: string } {
+  const body = (res && typeof res === 'object') ? res as Record<string, any> : {}
+  const data = (body.data && typeof body.data === 'object') ? body.data as Record<string, any> : body
+  if (!data.target || typeof data.target !== 'object') {
+    const message = body.message || body.error || data.message || 'terminal target response missing target'
+    throw new Error(String(message))
+  }
+  return {
+    target: data.target as SessionTarget,
+    label: String(data.label || `${data.target.kind ?? 'terminal'} session`),
+  }
+}
+
 function sendStartFrame() {
   if (!ws || ws.readyState !== WebSocket.OPEN || !resolvedTarget) return
   pendingAttachSessionId = null
@@ -132,6 +149,7 @@ async function start() {
   fit = new FitAddon()
   term.loadAddon(fit)
   term.open(containerRef.value)
+  term.focus()
   // wait one frame for layout to settle before fitting
   requestAnimationFrame(() => {
     try { fit?.fit() } catch { /* ignore */ }
@@ -165,8 +183,9 @@ async function start() {
     state.value = 'connecting'
     try {
       const res = await api.terminal.resolveDeviceTarget(props.targetDeviceId)
-      target = res.data.target as SessionTarget
-      label = res.data.label
+      const payload = resolveTerminalPayload(res)
+      target = payload.target
+      label = payload.label
     } catch (e) {
       state.value = 'error'
       error.value = `failed to resolve device target: ${(e as Error).message}`
@@ -176,8 +195,9 @@ async function start() {
     state.value = 'connecting'
     try {
       const res = await api.terminal.resolveTarget(props.targetId)
-      target = res.data.target as SessionTarget
-      label = res.data.label
+      const payload = resolveTerminalPayload(res)
+      target = payload.target
+      label = payload.label
     } catch (e) {
       state.value = 'error'
       error.value = `failed to resolve target: ${(e as Error).message}`
@@ -194,7 +214,7 @@ async function start() {
   sessionStorageKey = buildSessionStorageKey(target, label)
   state.value = 'connecting'
 
-  ws = new WebSocket(`${wsBase}/api/terminal/ws`)
+  ws = new WebSocket(buildWsUrl('/api/terminal/ws'))
   ws.onopen = () => {
     const storedSessionId = readStoredSessionId()
     if (storedSessionId) {
@@ -272,6 +292,10 @@ function disconnect() {
   detach()
 }
 
+function focusTerminal() {
+  term?.focus()
+}
+
 onMounted(start)
 onBeforeUnmount(() => {
   detach()
@@ -292,7 +316,7 @@ defineExpose({ state, error, detach, terminate, disconnect })
       <button class="disconnect-btn terminate-btn" :disabled="!sessionId" @click="terminate">终止</button>
     </header>
     <div v-if="error" class="terminal-panel__error">{{ error }}</div>
-    <div ref="containerRef" class="terminal-panel__host" />
+    <div ref="containerRef" class="terminal-panel__host" @click="focusTerminal" />
   </div>
 </template>
 

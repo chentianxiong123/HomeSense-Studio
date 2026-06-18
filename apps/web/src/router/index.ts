@@ -11,15 +11,17 @@ import AuthorizationsView from '@/views/AuthorizationsView.vue'
 import RemoteWorkspaceView from '@/views/RemoteWorkspaceView.vue'
 import MediaWorkbenchView from '@/views/MediaWorkbenchView.vue'
 import StorageWorkbenchView from '@/views/StorageWorkbenchView.vue'
-import GameStreamWorkbenchView from '@/views/GameStreamWorkbenchView.vue'
 import MiCliDetailView from '@/views/MiCliDetailView.vue'
 import AssetsView from '@/views/AssetsView.vue'
 import StudioHomeView from '@/views/StudioHomeView.vue'
 import WorkflowOverviewView from '@/views/WorkflowOverviewView.vue'
 import SessionView from '@/views/SessionView.vue'
 import AdbStreamSessionView from '@/views/AdbStreamSessionView.vue'
+import AdbFilesSessionView from '@/views/AdbFilesSessionView.vue'
+import DeviceFilesSessionView from '@/views/DeviceFilesSessionView.vue'
 import StreamingControllerView from '@/views/StreamingControllerView.vue'
 import StreamingControlMonitorView from '@/views/StreamingControlMonitorView.vue'
+import StreamingSessionView from '@/views/StreamingSessionView.vue'
 import { APP_DEFAULT_ROUTE, LAST_ROUTE_STORAGE_KEY, normalizeRememberedRoute, shouldRememberRoute } from './navigation'
 
 export const router = createRouter({
@@ -36,11 +38,14 @@ export const router = createRouter({
     { path: '/studio', name: 'studio-home', component: StudioHomeView },
     { path: '/media', name: 'media-workbench', component: MediaWorkbenchView },
     { path: '/storage', name: 'storage-workbench', component: StorageWorkbenchView },
-    { path: '/streaming', name: 'game-stream-workbench', component: GameStreamWorkbenchView },
+    { path: '/streaming', redirect: '/authorizations?local=streaming' },
+    { path: '/sessions/streaming', name: 'streaming-session', component: StreamingSessionView, meta: { fullscreen: true } },
     { path: '/streaming/control/:sessionId', name: 'streaming-controller', component: StreamingControllerView, meta: { fullscreen: true } },
     { path: '/streaming/monitor/:sessionId', name: 'streaming-control-monitor', component: StreamingControlMonitorView, meta: { fullscreen: true } },
     { path: '/workspace', name: 'remote-workspace', component: RemoteWorkspaceView },
     { path: '/sessions/adb-stream', name: 'adb-stream-session', component: AdbStreamSessionView, meta: { fullscreen: true } },
+    { path: '/sessions/adb-files', name: 'adb-files-session', component: AdbFilesSessionView, meta: { fullscreen: true } },
+    { path: '/sessions/device-files', name: 'device-files-session', component: DeviceFilesSessionView, meta: { fullscreen: true } },
     { path: '/sessions/:id', name: 'session', component: SessionView, meta: { fullscreen: true } },
     { path: '/assets', name: 'assets-home', component: AssetsView },
     { path: '/devices', name: 'devices', component: DevicesView },

@@ -3,7 +3,7 @@ import { spawn } from 'child_process'
 import type { ProtocolTarget, SessionMeta, TerminalProtocol } from './protocol.interface'
 
 /**
- * ADB protocol: spawns `adb shell` against a serial, pipes bytes both ways.
+ * ADB protocol: spawns an interactive `adb shell -tt` against a serial, pipes bytes both ways.
  * - stdin ← frontend input
  * - stdout/stderr → outputSubject
  * - process exit → exitSubject
@@ -28,9 +28,10 @@ export class AdbProtocol implements TerminalProtocol {
     if (looksLikeTcpAdbTarget(target.serial)) {
       await adbConnect(target.serial)
     }
-    const args = ['-s', target.serial, 'shell']
+    const args = ['-s', target.serial, 'shell', '-tt']
     if (target.command) args.push(target.command)
     this.proc = spawn('adb', args, { env: process.env })
+    this.outputSubject.next(`ADB shell · ${target.serial}\r\n`)
     this.proc.stdout?.on('data', (d) => this.outputSubject.next(d.toString('utf-8')))
     this.proc.stderr?.on('data', (d) => this.outputSubject.next(d.toString('utf-8')))
     this.proc.on('exit', (code, signal) => {
@@ -42,7 +43,7 @@ export class AdbProtocol implements TerminalProtocol {
   }
 
   write(data: string): void {
-    this.proc?.stdin?.write(data)
+    this.proc?.stdin?.write(data.replace(/\r/g, '\n'))
   }
 
   resize(_cols: number, _rows: number): void {
@@ -79,7 +80,7 @@ function adbConnect(serial: string): Promise<void> {
     proc.stderr?.on('data', (d) => { output += d.toString('utf-8') })
     proc.on('error', (err) => finish(() => reject(err)))
     proc.on('exit', (code) => {
-      if (code === 0 && /connected|already connected/i.test(output)) {
+      if (/connected|already connected/i.test(output)) {
         finish(resolve)
         return
       }

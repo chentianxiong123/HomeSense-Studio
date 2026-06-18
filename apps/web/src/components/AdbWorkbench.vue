@@ -2,25 +2,19 @@
 import { computed, onMounted, ref } from 'vue'
 import AdbAppsPanel from '@/components/adb/AdbAppsPanel.vue'
 import AdbControlPanel from '@/components/adb/AdbControlPanel.vue'
-import AdbFilesPanel from '@/components/adb/AdbFilesPanel.vue'
 import AdbInspectPanel from '@/components/adb/AdbInspectPanel.vue'
 import AdbScreenCapturePanel from '@/components/adb/AdbScreenCapturePanel.vue'
-import AdbShellPanel from '@/components/adb/AdbShellPanel.vue'
 import { useAdbDeviceActions } from '@/composables/useAdbDeviceActions'
-import { useAdbFiles } from '@/composables/useAdbFiles'
 
 const props = defineProps<{
   deviceId: number
   deviceName: string
   adbIp: string
   deviceType: string
-  canOpenConsole: boolean
   label: (zh: string, en: string) => string
 }>()
 
-const emit = defineEmits<{ openConsole: [] }>()
-
-type PanelKey = 'control' | 'screen' | 'apps' | 'inspect' | 'shell' | 'files' | 'logs' | 'metrics'
+type PanelKey = 'control' | 'screen' | 'apps' | 'inspect'
 
 const activePanel = ref<PanelKey>('control')
 const statusMessage = ref('')
@@ -58,33 +52,11 @@ const {
   errorMessage,
 })
 
-const {
-  fileLoading,
-  filePath,
-  fileInputPath,
-  fileParent,
-  files,
-  filePreview,
-  adbFileList,
-  loadFiles,
-  openFile,
-} = useAdbFiles({
-  adbIp: () => props.adbIp,
-  deviceName: () => props.deviceName,
-  label: props.label,
-  statusMessage,
-  errorMessage,
-})
-
 const panels = computed<Array<{ key: PanelKey; title: string; ready: boolean }>>(() => [
   { key: 'control', title: props.label('控制', 'Control'), ready: true },
   { key: 'screen', title: props.label('屏幕', 'Screen'), ready: true },
   { key: 'apps', title: props.label('应用', 'Apps'), ready: true },
   { key: 'inspect', title: props.label('检查', 'Inspect'), ready: true },
-  { key: 'shell', title: props.label('终端', 'Shell'), ready: props.canOpenConsole },
-  { key: 'files', title: props.label('文件', 'Files'), ready: true },
-  { key: 'logs', title: 'Logcat', ready: false },
-  { key: 'metrics', title: props.label('性能', 'Metrics'), ready: false },
 ])
 
 function selectPanel(panel: PanelKey) {
@@ -93,7 +65,6 @@ function selectPanel(panel: PanelKey) {
   if (panel === 'screen') {
     if (!screenshot.value) void refreshScreenshot()
   }
-  if (panel === 'files' && files.value.length === 0) void loadFiles()
 }
 
 function formatBytes(value?: number): string {
@@ -199,40 +170,6 @@ onMounted(() => {
       @tap="tapElement"
     />
 
-    <AdbShellPanel
-      v-else-if="activePanel === 'shell'"
-      :device-id="deviceId"
-      :can-open-console="canOpenConsole"
-      :label="label"
-      @open-console="emit('openConsole')"
-    />
-
-    <AdbFilesPanel
-      v-else-if="activePanel === 'files'"
-      v-model:path-input="fileInputPath"
-      :adb-ip="adbIp"
-      :current-path="filePath"
-      :parent-path="fileParent"
-      :list="adbFileList"
-      :preview="filePreview"
-      :loading="fileLoading"
-      :error="errorMessage"
-      :label="label"
-      :format-bytes="formatBytes"
-      @refresh="loadFiles"
-      @parent="loadFiles"
-      @open-entry="openFile"
-      @open-path="loadFiles"
-    />
-
-    <div v-else class="surface full-surface pending-surface">
-      <h3>{{ panels.find((panel) => panel.key === activePanel)?.title }}</h3>
-      <p>{{ label('AYA 中对应的是完整高级面板；HomeSense 需要先补后端 ADB 服务接口后再启用。', 'This maps to a full advanced AYA panel; HomeSense needs backend ADB service endpoints before enabling it.') }}</p>
-      <ul>
-        <li>{{ label('Logcat: WebSocket 流、暂停、过滤、保存', 'Logcat: WebSocket stream, pause, filters, save') }}</li>
-        <li>{{ label('性能: CPU/内存/电池/FPS 周期采样', 'Metrics: CPU, memory, battery, FPS sampling') }}</li>
-      </ul>
-    </div>
   </section>
 </template>
 
@@ -359,8 +296,6 @@ button:disabled {
   opacity: 0.5;
 }
 
-.full-surface { min-height: 320px; }
-
 .screen-grid {
   display: grid;
   grid-template-columns: minmax(320px, 1fr) minmax(320px, 0.95fr);
@@ -378,13 +313,6 @@ button:disabled {
   color: #64748b;
   font-size: 14px;
   font-weight: 700;
-}
-
-.pending-surface p,
-.pending-surface li {
-  color: #475569;
-  font-size: 14px;
-  line-height: 1.7;
 }
 
 @media (max-width: 900px) {
