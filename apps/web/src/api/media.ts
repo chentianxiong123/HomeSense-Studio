@@ -120,7 +120,23 @@ export interface MediaBookmarkQuery {
   tag?: string
 }
 
+export interface MediaCacheStatus {
+  root: string
+  max_items: number
+  file_count: number
+  total_bytes: number
+  updated_at: string
+}
+
 export const mediaApi = {
+  cacheStatus: () =>
+    request<{ cache: MediaCacheStatus }>('/api/media/cache'),
+
+  clearCache: () =>
+    request<{ status: string; removed_files: number; removed_bytes: number; cache: MediaCacheStatus }>('/api/media/cache', {
+      method: 'DELETE',
+    }),
+
   listBookmarks: (query: MediaBookmarkQuery = {}) => {
     const params = new URLSearchParams()
     if (query.q) params.set('q', query.q)
@@ -308,10 +324,22 @@ export const mediaApi = {
       bypass_cache: true,
     }),
 
-  searchBilibili: (keyword: string, page = 1, pageSize = 20) =>
+  searchBilibili: (keyword: string, page = 1, pageSize = 20, options: { preferSingleTrack?: boolean } = {}) =>
     cliApi.run<MediaSearchResult>('media-cli', {
       action: 'search_bilibili',
-      params: { keyword, page, page_size: pageSize },
+      params: {
+        keyword,
+        page,
+        page_size: pageSize,
+        ...(options.preferSingleTrack
+          ? {
+              prefer_single_track: true,
+              min_duration_sec: 90,
+              ideal_duration_sec: 240,
+              max_duration_sec: 540,
+            }
+          : {}),
+      },
       ttl_ms: 60_000,
     }),
 

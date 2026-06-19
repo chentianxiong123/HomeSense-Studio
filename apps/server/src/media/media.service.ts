@@ -1,5 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
+import fs from 'node:fs'
+import path from 'node:path'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { getDb } from '../db/database'
 import {
   inferMimeType,
@@ -51,10 +55,113 @@ export type {
 } from './media.types'
 
 const PREPARED_STREAM_TTL_MS = 2 * 60 * 60 * 1000
+const MEDIA_CACHE_ROOT = path.resolve(process.cwd(), '../../data/media/cache')
+const MEDIA_CACHE_MAX_ITEMS = normalizeCacheMaxItems(process.env.MEDIA_CACHE_MAX_ITEMS)
+
+type BilibiliAudioCacheEntry = {
+  key: string
+  source: 'bilibili'
+  bvid: string
+  file_path: string
+  mime_type: string
+  title?: string
+  play_count: number
+  last_played_at: string
+  created_at: string
+  updated_at: string
+  size: number
+}
 
 @Injectable()
 export class MediaService {
   private readonly preparedStreams = new Map<string, PreparedStreamRecord>()
+  private readonly activeCacheDownloads = new Set<string>()
+
+  cacheStatus() {
+    const entries = listCacheFiles()
+    return {
+      root: MEDIA_CACHE_ROOT,
+      max_items: MEDIA_CACHE_MAX_ITEMS,
+      file_count: entries.length,
+      total_bytes: entries.reduce((sum, entry) => sum + entry.size, 0),
+      updated_at: new Date().toISOString(),
+    }
+  }
+
+  clearCache() {
+    const entries = listCacheFiles()
+    let removedFiles = 0
+    let removedBytes = 0
+    for (const entry of entries) {
+      try {
+        fs.rmSync(entry.path, { force: true })
+        removedFiles += 1
+        removedBytes += entry.size
+      } catch {
+        // Best-effort cleanup; status below reflects what was actually removed.
+      }
+    }
+    pruneEmptyCacheDirs(MEDIA_CACHE_ROOT)
+    return {
+      status: 'success',
+      removed_files: removedFiles,
+      removed_bytes: removedBytes,
+      cache: this.cacheStatus(),
+    }
+  }
+
+  getBilibiliAudioCache(bvid: string): { path: string; mimeType: string; size: number } | null {
+    const cleanBvid = normalizeBvid(bvid)
+    if (!cleanBvid) return null
+    const filePath = bilibiliAudioCachePath(cleanBvid)
+    if (!fs.existsSync(filePath)) return null
+    const stat = fs.statSync(filePath)
+    if (!stat.isFile() || stat.size <= 0) return null
+    const meta = readBilibiliCacheEntry(cleanBvid)
+    return {
+      path: filePath,
+      mimeType: meta?.mime_type || 'audio/mp4',
+      size: stat.size,
+    }
+  }
+
+  recordBilibiliAudioPlayback(bvid: string, title?: string) {
+    const cleanBvid = normalizeBvid(bvid)
+    if (!cleanBvid) return
+    const now = new Date().toISOString()
+    const existing = readBilibiliCacheEntry(cleanBvid)
+    const filePath = bilibiliAudioCachePath(cleanBvid)
+    const size = fs.existsSync(filePath) ? fs.statSync(filePath).size : existing?.size ?? 0
+    writeBilibiliCacheEntry({
+      key: `bilibili:${cleanBvid}`,
+      source: 'bilibili',
+      bvid: cleanBvid,
+      file_path: filePath,
+      mime_type: existing?.mime_type || 'audio/mp4',
+      title: title || existing?.title,
+      play_count: (existing?.play_count ?? 0) + 1,
+      last_played_at: now,
+      created_at: existing?.created_at || now,
+      updated_at: now,
+      size,
+    })
+  }
+
+  cacheBilibiliAudio(input: { bvid: string; upstreamUrl: string; mimeType?: string; title?: string; headers?: Record<string, string> }) {
+    const bvid = normalizeBvid(input.bvid)
+    const upstreamUrl = optionalString(input.upstreamUrl)
+    if (!bvid || !upstreamUrl) return
+    const filePath = bilibiliAudioCachePath(bvid)
+    if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) return
+    if (this.activeCacheDownloads.has(bvid)) return
+
+    this.activeCacheDownloads.add(bvid)
+    void this.downloadBilibiliAudioCache({ ...input, bvid, upstreamUrl })
+      .catch(() => {})
+      .finally(() => {
+        this.activeCacheDownloads.delete(bvid)
+      })
+  }
 
   listBookmarks(input: MediaBookmarkQueryInput = {}) {
     const clauses: string[] = []
@@ -437,5 +544,142 @@ export class MediaService {
     for (const [token, record] of this.preparedStreams.entries()) {
       if (record.expiresAtMs <= now) this.preparedStreams.delete(token)
     }
+  }
+
+  private async downloadBilibiliAudioCache(input: { bvid: string; upstreamUrl: string; mimeType?: string; title?: string; headers?: Record<string, string> }) {
+    const filePath = bilibiliAudioCachePath(input.bvid)
+    const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`
+    fs.mkdirSync(path.dirname(filePath), { recursive: true })
+    const response = await fetch(input.upstreamUrl, { headers: input.headers })
+    if (!response.ok || !response.body) throw new Error(`Bilibili audio cache download failed: ${response.status}`)
+    await pipeline(Readable.fromWeb(response.body as any), fs.createWriteStream(tempPath))
+    const stat = fs.statSync(tempPath)
+    if (stat.size <= 0) {
+      fs.rmSync(tempPath, { force: true })
+      throw new Error('Bilibili audio cache download is empty')
+    }
+    fs.renameSync(tempPath, filePath)
+    const now = new Date().toISOString()
+    const existing = readBilibiliCacheEntry(input.bvid)
+    writeBilibiliCacheEntry({
+      key: `bilibili:${input.bvid}`,
+      source: 'bilibili',
+      bvid: input.bvid,
+      file_path: filePath,
+      mime_type: input.mimeType || existing?.mime_type || response.headers.get('content-type') || 'audio/mp4',
+      title: input.title || existing?.title,
+      play_count: existing?.play_count ?? 0,
+      last_played_at: existing?.last_played_at || now,
+      created_at: existing?.created_at || now,
+      updated_at: now,
+      size: stat.size,
+    })
+    enforceCacheLimit()
+  }
+}
+
+function normalizeCacheMaxItems(value: unknown): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return 500
+  return Math.min(5000, Math.max(1, Math.floor(parsed)))
+}
+
+function listCacheFiles(): Array<{ path: string; size: number; mtimeMs: number }> {
+  fs.mkdirSync(MEDIA_CACHE_ROOT, { recursive: true })
+  const root = fs.realpathSync(MEDIA_CACHE_ROOT)
+  const files: Array<{ path: string; size: number; mtimeMs: number }> = []
+  walkCacheDir(root, files)
+  return files.sort((a, b) => b.mtimeMs - a.mtimeMs)
+}
+
+function walkCacheDir(dir: string, files: Array<{ path: string; size: number; mtimeMs: number }>): void {
+  const root = fs.realpathSync(MEDIA_CACHE_ROOT)
+  const current = fs.realpathSync(dir)
+  if (!isWithinPath(current, root)) return
+  for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+    const fullPath = path.join(current, entry.name)
+    if (entry.isDirectory()) {
+      walkCacheDir(fullPath, files)
+      continue
+    }
+    if (!entry.isFile()) continue
+    const stat = fs.statSync(fullPath)
+    files.push({ path: fullPath, size: stat.size, mtimeMs: stat.mtimeMs })
+  }
+}
+
+function pruneEmptyCacheDirs(dir: string): void {
+  if (!fs.existsSync(dir)) return
+  const root = fs.realpathSync(MEDIA_CACHE_ROOT)
+  const current = fs.realpathSync(dir)
+  if (!isWithinPath(current, root)) return
+  for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+    if (entry.isDirectory()) pruneEmptyCacheDirs(path.join(current, entry.name))
+  }
+  if (current === root) return
+  try {
+    fs.rmdirSync(current)
+  } catch {
+    // Directory is not empty or cannot be removed.
+  }
+}
+
+function isWithinPath(candidate: string, root: string): boolean {
+  const relative = path.relative(root, candidate)
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
+}
+
+function normalizeBvid(value: string): string {
+  const bvid = String(value || '').trim()
+  return /^BV[0-9A-Za-z]+$/.test(bvid) ? bvid : ''
+}
+
+function bilibiliAudioCacheDir(): string {
+  return path.join(MEDIA_CACHE_ROOT, 'bilibili')
+}
+
+function bilibiliAudioCachePath(bvid: string): string {
+  return path.join(bilibiliAudioCacheDir(), `${bvid}.m4s`)
+}
+
+function bilibiliAudioMetaPath(bvid: string): string {
+  return path.join(bilibiliAudioCacheDir(), `${bvid}.json`)
+}
+
+function readBilibiliCacheEntry(bvid: string): BilibiliAudioCacheEntry | null {
+  try {
+    return JSON.parse(fs.readFileSync(bilibiliAudioMetaPath(bvid), 'utf8')) as BilibiliAudioCacheEntry
+  } catch {
+    return null
+  }
+}
+
+function writeBilibiliCacheEntry(entry: BilibiliAudioCacheEntry): void {
+  fs.mkdirSync(bilibiliAudioCacheDir(), { recursive: true })
+  fs.writeFileSync(bilibiliAudioMetaPath(entry.bvid), `${JSON.stringify(entry, null, 2)}\n`, 'utf8')
+}
+
+function listBilibiliCacheEntries(): BilibiliAudioCacheEntry[] {
+  const dir = bilibiliAudioCacheDir()
+  if (!fs.existsSync(dir)) return []
+  return fs.readdirSync(dir)
+    .filter((name) => name.endsWith('.json'))
+    .map((name) => readBilibiliCacheEntry(name.replace(/\.json$/, '')))
+    .filter((entry): entry is BilibiliAudioCacheEntry => Boolean(entry && fs.existsSync(entry.file_path)))
+}
+
+function enforceCacheLimit(): void {
+  const entries = listBilibiliCacheEntries()
+  if (entries.length <= MEDIA_CACHE_MAX_ITEMS) return
+  const removable = entries
+    .sort((a, b) => {
+      if (a.play_count !== b.play_count) return a.play_count - b.play_count
+      return Date.parse(a.last_played_at || a.updated_at) - Date.parse(b.last_played_at || b.updated_at)
+    })
+    .slice(0, entries.length - MEDIA_CACHE_MAX_ITEMS)
+
+  for (const entry of removable) {
+    fs.rmSync(entry.file_path, { force: true })
+    fs.rmSync(bilibiliAudioMetaPath(entry.bvid), { force: true })
   }
 }

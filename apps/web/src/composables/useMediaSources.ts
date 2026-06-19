@@ -243,7 +243,7 @@ export function useMediaSources(options: {
     }
     biliLoading.value = true
     try {
-      const result = await mediaApi.searchBilibili(keyword, 1, 12)
+      const result = await mediaApi.searchBilibili(keyword, 1, 12, { preferSingleTrack: true })
       if (result.status === 'success' && result.data) {
         biliResults.value = result.data.items
       } else {
@@ -289,6 +289,8 @@ export function useMediaSources(options: {
     return {
       ...item,
       stream_url: mediaApi.bilibiliAudioProxyUrl(bvid),
+      mime_type: item.mime_type || 'audio/mp4',
+      stream_kind: 'audio',
     }
   }
 

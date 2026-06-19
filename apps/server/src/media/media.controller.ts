@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, Res } from '@nestjs/common'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import fs from 'node:fs'
 import os from 'node:os'
 import { Readable } from 'node:stream'
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web'
@@ -18,6 +19,8 @@ import {
 interface BilibiliAudioResult {
   stream_url?: string
   mime_type?: string
+  title?: string
+  item?: { title?: string }
 }
 
 interface XiaoAiPlayBody {
@@ -98,6 +101,16 @@ export class MediaController {
   @Get('source-sites')
   listSourceSites() {
     return this.media.listSourceSites()
+  }
+
+  @Get('cache')
+  cacheStatus() {
+    return { cache: this.media.cacheStatus() }
+  }
+
+  @Delete('cache')
+  clearCache() {
+    return this.media.clearCache()
   }
 
   @Post('source-sites')
@@ -238,9 +251,26 @@ export class MediaController {
     @Req() req: IncomingMessage,
     @Res() res: ServerResponse,
   ) {
+    const cleanBvid = String(bvid || '').trim()
+    if (!/^BV[0-9A-Za-z]+$/.test(cleanBvid)) {
+      sendJson(res, 400, {
+        status: 'error',
+        error: 'INVALID_BVID',
+        message: 'bvid must match the BV[0-9A-Za-z]+ pattern',
+      })
+      return
+    }
+
+    const cached = this.media.getBilibiliAudioCache(cleanBvid)
+    if (cached) {
+      this.media.recordBilibiliAudioPlayback(cleanBvid)
+      streamLocalCache(res, cached.path, cached.mimeType, cached.size, req.headers.range)
+      return
+    }
+
     const parsedQuality = Number(quality || 64)
     const resolved = await cliBridge.run('media-cli', 'resolve_audio', {
-      bvid,
+      bvid: cleanBvid,
       quality: Number.isFinite(parsedQuality) ? parsedQuality : 64,
     })
 
@@ -267,6 +297,15 @@ export class MediaController {
     const range = req.headers.range
     if (range) headers.Range = range
 
+    this.media.recordBilibiliAudioPlayback(cleanBvid, data.title)
+    this.media.cacheBilibiliAudio({
+      bvid: cleanBvid,
+      upstreamUrl: data.stream_url,
+      mimeType: normalizeAudioContentType(data.mime_type, 'audio/mp4'),
+      title: data.title || data.item?.title,
+      headers,
+    })
+
     let upstream: globalThis.Response
     try {
       upstream = await fetch(data.stream_url, { headers })
@@ -280,7 +319,7 @@ export class MediaController {
     }
 
     res.statusCode = upstream.status
-    setPassthroughHeader(res, 'content-type', upstream.headers.get('content-type') || data.mime_type || 'audio/mpeg')
+    setPassthroughHeader(res, 'content-type', normalizeAudioContentType(data.mime_type, upstream.headers.get('content-type')))
     setPassthroughHeader(res, 'content-length', upstream.headers.get('content-length'))
     setPassthroughHeader(res, 'content-range', upstream.headers.get('content-range'))
     setPassthroughHeader(res, 'accept-ranges', upstream.headers.get('accept-ranges') || 'bytes')
@@ -404,6 +443,45 @@ function inferContentType(url: string): string {
   if (pathname.endsWith('.m3u8')) return 'application/vnd.apple.mpegurl'
   if (pathname.endsWith('.mpd')) return 'application/dash+xml'
   return 'video/mp4'
+}
+
+function normalizeAudioContentType(resolvedMimeType: string | undefined, upstreamMimeType: string | null): string {
+  const resolved = String(resolvedMimeType || '').trim()
+  if (resolved.startsWith('audio/')) return resolved
+  const upstream = String(upstreamMimeType || '').trim()
+  if (upstream.startsWith('audio/')) return upstream
+  return 'audio/mp4'
+}
+
+function streamLocalCache(
+  res: ServerResponse,
+  filePath: string,
+  mimeType: string,
+  size: number,
+  rangeHeader: string | undefined,
+): void {
+  if (rangeHeader && /^bytes=\d*-\d*$/.test(rangeHeader)) {
+    const [startRaw, endRaw] = rangeHeader.replace(/^bytes=/, '').split('-')
+    const start = startRaw === '' ? Math.max(0, size - Number(endRaw || 0)) : Number(startRaw)
+    const end = endRaw === '' ? size - 1 : Number(endRaw)
+    if (Number.isFinite(start) && Number.isFinite(end) && start <= end && start < size) {
+      const chunkSize = Math.min(size - 1, end) - start + 1
+      res.statusCode = 206
+      res.setHeader('content-type', mimeType)
+      res.setHeader('content-length', String(chunkSize))
+      res.setHeader('content-range', `bytes ${start}-${start + chunkSize - 1}/${size}`)
+      res.setHeader('accept-ranges', 'bytes')
+      res.setHeader('cache-control', 'private, max-age=86400')
+      fs.createReadStream(filePath, { start, end: start + chunkSize - 1 }).pipe(res)
+      return
+    }
+  }
+  res.statusCode = 200
+  res.setHeader('content-type', mimeType)
+  res.setHeader('content-length', String(size))
+  res.setHeader('accept-ranges', 'bytes')
+  res.setHeader('cache-control', 'private, max-age=86400')
+  fs.createReadStream(filePath).pipe(res)
 }
 
 function findLanIpv4(): string | null {
