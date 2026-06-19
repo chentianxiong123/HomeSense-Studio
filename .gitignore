@@ -23,3 +23,7 @@ apps/server/runtime-keys/ssh/*
 !apps/server/runtime-keys/ssh/.gitkeep
 apps/server/runtime-keys/adb/*
 !apps/server/runtime-keys/adb/.gitkeep
+
+# Server runtime log files (startup output, error output). Local-only.
+apps/server/runtime-logs/
+!apps/server/runtime-logs/.gitkeep

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { MediaItem } from '@/features/media/types'
 
-defineProps<{
+withDefaults(defineProps<{
   keyword: string
   loading: boolean
   error: string
@@ -9,7 +9,14 @@ defineProps<{
   resolvingId: string
   label: (zh: string, en: string) => string
   formatTime: (seconds: number) => string
-}>()
+  eyebrow?: string
+  title?: string
+  placeholder?: string
+}>(), {
+  eyebrow: '',
+  title: '',
+  placeholder: '',
+})
 
 const emit = defineEmits<{
   'update:keyword': [value: string]
@@ -23,8 +30,8 @@ const emit = defineEmits<{
 <template>
   <div class="panel-head">
     <div>
-      <span class="eyebrow inline">{{ label('来源', 'Source') }}</span>
-      <h2>Bilibili</h2>
+      <span class="eyebrow inline">{{ eyebrow || label('来源', 'Source') }}</span>
+      <h2>{{ title || 'Bilibili' }}</h2>
     </div>
   </div>
 
@@ -32,7 +39,7 @@ const emit = defineEmits<{
     <input
       :value="keyword"
       type="search"
-      :placeholder="label('搜索音乐或视频', 'Search media')"
+      :placeholder="placeholder || label('搜索音乐或视频', 'Search media')"
       autocomplete="off"
       @input="emit('update:keyword', ($event.target as HTMLInputElement).value)"
     />
