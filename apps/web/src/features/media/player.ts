@@ -1,4 +1,5 @@
 import { computed, reactive, readonly } from 'vue'
+import { mediaApi } from '@/api/media'
 import type { MediaItem, MediaOutput, MediaPlayMode, MediaSession } from './types'
 
 const VOLUME_STORAGE_KEY = 'homesense.media.volume'
@@ -70,6 +71,7 @@ export function useMediaPlayer() {
     removeFromQueue,
     reorderQueue,
     seekToPercent,
+    selectOutput,
     setPlayMode,
     setVolume,
     stop,
@@ -102,7 +104,7 @@ export async function playItem(item: MediaItem) {
     state.queue.push(item)
     state.currentIndex = state.queue.length - 1
   }
-  await startBrowserPlayback(item)
+  await startPlayback(item)
 }
 
 export function addToQueue(item: MediaItem | MediaItem[]) {
@@ -132,7 +134,7 @@ export async function playAtIndex(index: number) {
   const item = state.queue[index]
   if (!item) return
   state.currentIndex = index
-  await startBrowserPlayback(item)
+  await startPlayback(item)
 }
 
 export function removeFromQueue(index: number) {
@@ -174,6 +176,19 @@ export function clearQueue() {
 }
 
 export async function toggle() {
+  if (state.session.output.kind !== 'browser') {
+    if (!state.session.item) return
+    if (state.session.state === 'playing') {
+      pause()
+      return
+    }
+    if (state.session.state === 'paused') {
+      await resumeRemote()
+      return
+    }
+    await startRemotePlayback(state.session.item, state.session.output)
+    return
+  }
   const audio = ensureAudioElement()
   if (!audio || !state.session.item) return
   if (state.session.state === 'playing') {
@@ -192,11 +207,22 @@ export async function toggle() {
 }
 
 export function pause() {
+  if (state.session.output.kind !== 'browser') {
+    void controlRemote('pause')
+    if (state.session.item) state.session.state = 'paused'
+    return
+  }
   if (audioElement) audioElement.pause()
   if (state.session.item) state.session.state = 'paused'
 }
 
 export function stop() {
+  if (state.session.output.kind !== 'browser') {
+    void controlRemote('stop')
+    state.session.state = 'stopped'
+    state.session.position_sec = 0
+    return
+  }
   if (audioElement) {
     audioElement.pause()
     audioElement.removeAttribute('src')
@@ -230,10 +256,18 @@ export function seekToPercent(value: number) {
 export function setVolume(volume: number) {
   const nextVolume = Math.min(100, Math.max(0, Math.round(volume)))
   state.session.volume = nextVolume
-  if (audioElement) audioElement.volume = nextVolume / 100
+  if (state.session.output.kind === 'browser') {
+    if (audioElement) audioElement.volume = nextVolume / 100
+  } else {
+    void controlRemote('volume', nextVolume)
+  }
   if (typeof window !== 'undefined') {
     window.localStorage.setItem(VOLUME_STORAGE_KEY, String(nextVolume))
   }
+}
+
+export function selectOutput(output: MediaOutput) {
+  state.session.output = output
 }
 
 export function setPlayMode(mode: MediaPlayMode) {
@@ -241,6 +275,14 @@ export function setPlayMode(mode: MediaPlayMode) {
   if (typeof window !== 'undefined') {
     window.localStorage.setItem(MODE_STORAGE_KEY, mode)
   }
+}
+
+async function startPlayback(item: MediaItem) {
+  if (state.session.output.kind !== 'browser') {
+    await startRemotePlayback(item, state.session.output)
+    return
+  }
+  await startBrowserPlayback(item)
 }
 
 async function startBrowserPlayback(item: MediaItem) {
@@ -273,6 +315,83 @@ async function startBrowserPlayback(item: MediaItem) {
     state.session.state = 'error'
     state.session.error = error instanceof Error ? error.message : String(error)
   }
+}
+
+async function startRemotePlayback(item: MediaItem, output: MediaOutput) {
+  if (audioElement) audioElement.pause()
+  state.session.item = item
+  state.session.position_sec = 0
+  state.session.duration_sec = item.duration_sec || 0
+  state.session.state = 'loading'
+  state.session.error = ''
+
+  try {
+    let result: { status: 'success' | 'error'; error?: string; message?: string }
+    if (output.kind === 'xiaoai') {
+      if (!output.endpoint || !item.upstream_id) {
+        throw new Error('XiaoAi output requires a Bilibili item')
+      }
+      result = await mediaApi.playBilibiliOnXiaoAi({
+        did: output.endpoint,
+        bvid: item.upstream_id,
+        title: item.title,
+      })
+    } else if (output.kind === 'dlna') {
+      if (!output.endpoint) throw new Error('DLNA output endpoint is missing')
+      const streamUrl = item.stream_url || item.upstream_url || ''
+      result = streamUrl
+        ? await mediaApi.playUrlOnDlna({
+          location: output.endpoint,
+          url: streamUrl,
+          title: item.title,
+          content_type: item.mime_type || contentTypeFromUrl(streamUrl),
+        })
+        : await mediaApi.playBilibiliOnDlna({
+          location: output.endpoint,
+          bvid: item.upstream_id || '',
+          title: item.title,
+        })
+    } else {
+      throw new Error(`Unsupported output: ${output.kind}`)
+    }
+
+    if (result.status !== 'success') {
+      throw new Error(result.message || result.error || 'MEDIA_OUTPUT_PUSH_FAILED')
+    }
+    state.session.state = 'playing'
+  } catch (error) {
+    state.session.state = 'error'
+    state.session.error = error instanceof Error ? error.message : String(error)
+  }
+}
+
+async function controlRemote(control: 'pause' | 'resume' | 'stop' | 'volume', volume?: number) {
+  const output = state.session.output
+  if (!output.endpoint) return
+  try {
+    const result = output.kind === 'xiaoai'
+      ? await mediaApi.controlXiaoAi(output.endpoint, control, volume)
+      : output.kind === 'dlna'
+        ? await mediaApi.controlDlna(output.endpoint, control, volume)
+        : null
+    if (result && result.status !== 'success') {
+      state.session.error = result.message || result.error || 'MEDIA_OUTPUT_CONTROL_FAILED'
+    }
+  } catch (error) {
+    state.session.error = error instanceof Error ? error.message : String(error)
+  }
+}
+
+async function resumeRemote() {
+  if (!state.session.item) return
+  state.session.state = 'loading'
+  state.session.error = ''
+  await controlRemote('resume')
+  if (state.session.error) {
+    await startRemotePlayback(state.session.item, state.session.output)
+    return
+  }
+  state.session.state = 'playing'
 }
 
 function ensureAudioElement(): HTMLAudioElement | null {
@@ -369,4 +488,23 @@ function titleFromUrl(url: string): string {
   } catch {
     return url
   }
+}
+
+function contentTypeFromUrl(url: string): string {
+  const pathname = url.split('?', 1)[0]?.toLowerCase() || ''
+  if (pathname.endsWith('.mp3')) return 'audio/mpeg'
+  if (pathname.endsWith('.m4a')) return 'audio/mp4'
+  if (pathname.endsWith('.aac')) return 'audio/aac'
+  if (pathname.endsWith('.flac')) return 'audio/flac'
+  if (pathname.endsWith('.wav')) return 'audio/wav'
+  if (pathname.endsWith('.ogg')) return 'audio/ogg'
+  if (pathname.endsWith('.webm')) return 'video/webm'
+  if (pathname.endsWith('.mkv')) return 'video/x-matroska'
+  if (pathname.endsWith('.mov')) return 'video/quicktime'
+  if (pathname.endsWith('.avi')) return 'video/x-msvideo'
+  if (pathname.endsWith('.flv')) return 'video/x-flv'
+  if (pathname.endsWith('.ts')) return 'video/mp2t'
+  if (pathname.endsWith('.m3u8')) return 'application/vnd.apple.mpegurl'
+  if (pathname.endsWith('.mpd')) return 'application/dash+xml'
+  return 'video/mp4'
 }

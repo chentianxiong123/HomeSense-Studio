@@ -8,6 +8,7 @@ import AuthPageHeader from '@/components/auth/AuthPageHeader.vue'
 import AuthPendingPanel from '@/components/auth/AuthPendingPanel.vue'
 import AuthProviderRail, { type AuthProviderItem } from '@/components/auth/AuthProviderRail.vue'
 import AuthScopeTabs from '@/components/auth/AuthScopeTabs.vue'
+import BilibiliAuthPanel from '@/components/auth/BilibiliAuthPanel.vue'
 import DlnaAuthPanel from '@/components/auth/DlnaAuthPanel.vue'
 import MiAuthPanel from '@/components/auth/MiAuthPanel.vue'
 import SshAuthPanel from '@/components/auth/SshAuthPanel.vue'
@@ -20,6 +21,7 @@ type ExternalProviderId = 'mi' | 'bilibili'
 type LocalProviderId = 'adb' | 'dlna' | 'streaming' | 'alist' | 'ssh' | 'frp' | 'smb'
 
 type MiStatusSummary = { loggedIn: boolean; boundCount: number }
+type BilibiliStatusSummary = { loggedIn: boolean; userName: string }
 
 const router = useRouter()
 const route = useRoute()
@@ -49,6 +51,9 @@ const storageCredentialsPanel = ref<InstanceType<typeof StorageCredentialsPanel>
 const miAuthPanel = ref<InstanceType<typeof MiAuthPanel> | null>(null)
 const miLoggedIn = ref(false)
 const miBoundCount = ref(0)
+const bilibiliAuthPanel = ref<InstanceType<typeof BilibiliAuthPanel> | null>(null)
+const bilibiliLoggedIn = ref(false)
+const bilibiliUserName = ref('')
 const adbAuthPanel = ref<InstanceType<typeof AdbAuthPanel> | null>(null)
 const adbBoundCount = ref(0)
 const dlnaAuthPanel = ref<InstanceType<typeof DlnaAuthPanel> | null>(null)
@@ -90,6 +95,11 @@ function updateMiStatus(summary: MiStatusSummary) {
   miBoundCount.value = summary.boundCount
 }
 
+function updateBilibiliStatus(summary: BilibiliStatusSummary) {
+  bilibiliLoggedIn.value = summary.loggedIn
+  bilibiliUserName.value = summary.userName
+}
+
 const anyBusy = computed(() => Object.keys(busy.value).length > 0)
 const streamingHostCount = computed(() => streamingHosts.value.length)
 
@@ -106,9 +116,9 @@ const externalProviders = computed<AuthProviderItem<ExternalProviderId>[]>(() =>
     id: 'bilibili' as const,
     name: 'Bilibili',
     subtitle: label('B 站账号', 'Bilibili account'),
-    status: label('待接入', 'Pending'),
-    tone: 'muted' as const,
-    meta: label('外部账号', 'External'),
+    status: bilibiliLoggedIn.value ? label('已登录', 'Logged in') : label('未登录', 'Logged out'),
+    tone: bilibiliLoggedIn.value ? 'ok' as const : 'muted' as const,
+    meta: bilibiliUserName.value || label('收藏夹', 'Favorites'),
   },
 ])
 
@@ -187,6 +197,7 @@ onUnmounted(() => {
 async function loadAll() {
   await Promise.allSettled([
     miAuthPanel.value?.refresh(),
+    bilibiliAuthPanel.value?.refresh(),
     adbAuthPanel.value?.refresh(),
     dlnaAuthPanel.value?.refresh(),
     loadSshTargetCount(),
@@ -392,12 +403,13 @@ function closeStreamingPairing() {
         @success="showSuccess"
       />
 
-      <AuthPendingPanel
-        v-else
-        :scope="label('外部账号', 'External')"
-        title="Bilibili"
-        :description="label('Bilibili cookie、token 和媒体解析授权归这里。', 'Bilibili cookies, tokens, and media auth belong here.')"
+      <BilibiliAuthPanel
+        v-else-if="selectedExternal === 'bilibili'"
+        ref="bilibiliAuthPanel"
         :label="label"
+        @status-change="updateBilibiliStatus"
+        @error="errorMessage = $event"
+        @success="showSuccess"
       />
     </section>
 

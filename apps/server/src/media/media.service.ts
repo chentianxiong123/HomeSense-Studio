@@ -78,7 +78,7 @@ export class MediaService {
   private readonly activeCacheDownloads = new Set<string>()
 
   cacheStatus() {
-    const entries = listCacheFiles()
+    const entries = listAudioCacheFiles()
     return {
       root: MEDIA_CACHE_ROOT,
       max_items: MEDIA_CACHE_MAX_ITEMS,
@@ -590,6 +590,14 @@ function listCacheFiles(): Array<{ path: string; size: number; mtimeMs: number }
   const files: Array<{ path: string; size: number; mtimeMs: number }> = []
   walkCacheDir(root, files)
   return files.sort((a, b) => b.mtimeMs - a.mtimeMs)
+}
+
+function listAudioCacheFiles(): Array<{ path: string; size: number; mtimeMs: number }> {
+  return listCacheFiles().filter((entry) => isAudioCacheFile(entry.path))
+}
+
+function isAudioCacheFile(filePath: string): boolean {
+  return ['.aac', '.flac', '.m4a', '.m4s', '.mp3', '.ogg', '.opus', '.wav'].includes(path.extname(filePath).toLowerCase())
 }
 
 function walkCacheDir(dir: string, files: Array<{ path: string; size: number; mtimeMs: number }>): void {

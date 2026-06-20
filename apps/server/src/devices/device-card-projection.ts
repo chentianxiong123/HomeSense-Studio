@@ -28,6 +28,7 @@ export function buildDeviceCardProjection(
   const adbIp = readString(device, 'adb_ip').trim() || null
   const ipAddress = readString(device, 'ip_address') || null
   const streamingHostId = readString(device, 'streaming_host_id') || null
+  const dlnaLocation = readString(device, 'dlna_location') || null
   const roomId = readNumber(device, 'room_id')
   const deviceType = readString(device, 'device_type') || 'other'
 
@@ -35,6 +36,7 @@ export function buildDeviceCardProjection(
   if (miDid) sources.push('mi')
   if (adbIp) sources.push('adb')
   if (streamingHostId) sources.push('streaming')
+  if (dlnaLocation || device.props?.dlan === true) sources.push('dlan')
 
   const pingTarget =
     (ipAddress || adbIp || '').split(':')[0].trim() || null
@@ -54,6 +56,7 @@ export function buildDeviceCardProjection(
       adb_ip: adbIp,
       ip_address: ipAddress,
       streaming_host_id: streamingHostId,
+      dlna_location: dlnaLocation,
     },
     network: {
       ping_target: pingTarget,

@@ -129,8 +129,15 @@ function sourceTags(d: UserDevice): string[] {
   const tags: string[] = []
   if (propString(d, 'mi_did')) tags.push('Mi')
   if (propString(d, 'adb_ip')) tags.push('ADB')
+  if (isDlanDevice(d)) tags.push('DLAN')
   if (propString(d, 'streaming_host_id')) tags.push(label('串流', 'Stream'))
   return tags
+}
+
+function isDlanDevice(d: UserDevice): boolean {
+  if (propString(d, 'dlna_location')) return true
+  if (propString(d, 'mi_did') && ['speaker', 'dlna_renderer'].includes(propString(d, 'device_type'))) return true
+  return d.props?.dlan === true
 }
 
 function miDisplayName(did: string): string {
@@ -430,6 +437,12 @@ function hydrateDeviceSnapshot(d: UserDevice | null) {
           <span v-if="propString(device, 'adb_ip')" class="meta-chip monospace">ADB: {{ propString(device, 'adb_ip') }}</span>
           <span v-if="propString(device, 'streaming_host_id')" class="meta-chip monospace">
             {{ label('串流', 'Stream') }}: {{ propString(device, 'streaming_host_label') || propString(device, 'streaming_host_id') }}
+          </span>
+          <span v-if="propString(device, 'dlna_location')" class="meta-chip monospace">
+            DLAN: {{ propString(device, 'ip_address') || propString(device, 'dlna_location') }}
+          </span>
+          <span v-if="isDlanDevice(device)" class="meta-chip">
+            DLAN
           </span>
           <span v-if="propString(device, 'ip_address')" class="meta-chip monospace">IP: {{ propString(device, 'ip_address') }}</span>
         </div>

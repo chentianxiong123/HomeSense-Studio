@@ -14,6 +14,7 @@ from mi_cli.api.speaker_mina import (
     _list_mina_speakers,
     _request_mina_api,
     _require_mina_auth,
+    _speaker_get_status,
     _speaker_play_music_url,
     _speaker_play_operation,
     _speaker_play_url,
@@ -153,6 +154,7 @@ def handle_speaker_mina_debug(command: dict) -> dict:
     raw = _request_mina_api(auth_data, "/admin/v2/device_list?master=0", None) if has_token else {}
     data = raw.get("data") if isinstance(raw, dict) else None
     devices = _coerce_mina_list(data)
+    speakers = _list_mina_speakers(auth_data)
     return {
         "status": "success",
         "data": {
@@ -163,6 +165,8 @@ def handle_speaker_mina_debug(command: dict) -> dict:
             "data_type": type(data).__name__,
             "data_preview": data[:120] if isinstance(data, str) else None,
             "device_count": len(devices),
+            "miservice_device_count": len(speakers),
+            "miservice_sample": speakers[:5],
             "keys": list(raw.keys()) if isinstance(raw, dict) else [],
         },
     }
@@ -272,13 +276,7 @@ def handle_speaker_status(command: dict) -> dict:
         if device_result.get("status") != "success":
             return device_result
         device_id = device_result["data"].get("deviceID", "")
-        play_data = {
-            "deviceId": device_id,
-            "method": "player_get_play_status",
-            "path": "mediaplayer",
-            "message": json.dumps({"media": "app_ios"}, ensure_ascii=False),
-        }
-        play_result = _request_mina_api(auth_data, "/remote/ubus", play_data)
+        play_result = _speaker_get_status(auth_data, device_id)
 
         play_data_payload = _coerce_mina_payload(play_result.get("data", {}))
         info = _coerce_mina_payload(play_data_payload.get("info", {}))
@@ -297,7 +295,7 @@ def handle_speaker_status(command: dict) -> dict:
                 "media_image_url": info.get("img", ""),
                 "media_duration": info.get("duration", 0),
                 "media_position": info.get("position", 0),
-                "volume": round(info.get("volume", 0) * 100),
+                "volume": _normalize_volume(info.get("volume", 0)),
                 "repeat_mode": loop_map.get(info.get("loop_type", 3), "off"),
             },
         }
@@ -372,3 +370,13 @@ def _is_xiaoai_device(device: dict) -> bool:
         "lx06",
     ]
     return any(marker in name or marker in model for marker in speaker_markers)
+
+
+def _normalize_volume(value) -> int:
+    try:
+        volume = float(value)
+    except Exception:
+        return 0
+    if volume <= 1:
+        return round(volume * 100)
+    return round(volume)

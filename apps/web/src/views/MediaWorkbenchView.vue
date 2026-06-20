@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { mediaApi, type MediaCacheStatus } from '@/api/media'
 import MediaBookmarksPanel from '@/components/media/MediaBookmarksPanel.vue'
 import BilibiliSearchPanel from '@/components/media/BilibiliSearchPanel.vue'
+import BilibiliFavoritesPanel from '@/components/media/BilibiliFavoritesPanel.vue'
 import MediaNowPlayingPanel from '@/components/media/MediaNowPlayingPanel.vue'
 import MediaOutputPanel from '@/components/media/MediaOutputPanel.vue'
 import MediaQueuePanel from '@/components/media/MediaQueuePanel.vue'
@@ -22,6 +23,12 @@ const cacheStatus = ref<MediaCacheStatus | null>(null)
 const cacheLoading = ref(false)
 const cacheClearing = ref(false)
 const cacheMessage = ref('')
+const musicSourceTab = ref<'search' | 'favorites'>('search')
+const activeMusicSource = computed(() => ({
+  id: 'bilibili',
+  name: 'Bilibili',
+  status: label('在线音乐', 'Online music'),
+}))
 
 const {
   urlInput,
@@ -283,8 +290,8 @@ function formatBytes(bytes: number): string {
         </div>
         <div class="music-copy">
           <span>{{ label('正在播放', 'Now Playing') }}</span>
-          <h2>{{ activeItem?.title || label('选择一首 B 站音乐开始播放', 'Choose Bilibili music to start') }}</h2>
-          <p>{{ activeItem?.artist || label('B 站音源会解析为音频流，可在浏览器、小爱或 DLNA 目标播放。', 'Bilibili sources are resolved as audio streams for browser, XiaoAi, or DLNA targets.') }}</p>
+          <h2>{{ activeItem?.title || label('选择一首音乐开始播放', 'Choose music to start') }}</h2>
+          <p>{{ activeItem?.artist || label('音乐会解析为可播放音频，可在浏览器、小爱或 DLAN 目标播放。', 'Music sources are resolved as playable audio for browser, XiaoAi, or DLAN targets.') }}</p>
         </div>
         <div class="music-meter">
           <div class="meter-track">
@@ -300,6 +307,11 @@ function formatBytes(bytes: number): string {
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
               <path d="m19 20-9-8 9-8v16Z" />
               <path d="M5 19V5" />
+            </svg>
+          </button>
+          <button class="round-btn" type="button" :disabled="!player.canControl.value" :title="label('停止', 'Stop')" @click="player.stop">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor">
+              <path d="M7 7h10v10H7z" />
             </svg>
           </button>
           <button class="main-play-btn" type="button" :disabled="!player.canControl.value" :title="session.state === 'playing' ? label('暂停', 'Pause') : label('播放', 'Play')" @click="player.toggle">
@@ -320,10 +332,41 @@ function formatBytes(bytes: number): string {
             {{ playModeLabel }}
           </button>
         </div>
+        <div class="volume-row">
+          <span>{{ label('音量', 'Volume') }}</span>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            :value="session.volume"
+            :title="label('音量', 'Volume')"
+            @input="player.setVolume(Number(($event.target as HTMLInputElement).value))"
+          />
+          <strong>{{ session.volume }}</strong>
+        </div>
       </section>
 
       <section class="panel music-source-panel">
+        <div class="source-toolbar">
+          <div>
+            <span class="eyebrow inline">{{ label('音乐来源', 'Music Sources') }}</span>
+            <h2>{{ label('选择音源', 'Choose Source') }}</h2>
+          </div>
+          <button class="source-pill active" type="button">
+            <span>{{ activeMusicSource.status }}</span>
+            <strong>{{ activeMusicSource.name }}</strong>
+          </button>
+        </div>
+        <div class="source-tabs" role="tablist" :aria-label="label('Bilibili 来源内容', 'Bilibili source content')">
+          <button type="button" :class="{ active: musicSourceTab === 'search' }" @click="musicSourceTab = 'search'">
+            {{ label('搜索', 'Search') }}
+          </button>
+          <button type="button" :class="{ active: musicSourceTab === 'favorites' }" @click="musicSourceTab = 'favorites'">
+            {{ label('收藏夹', 'Favorites') }}
+          </button>
+        </div>
         <BilibiliSearchPanel
+          v-if="musicSourceTab === 'search'"
           :keyword="biliKeyword"
           :loading="biliLoading"
           :error="biliError"
@@ -331,18 +374,44 @@ function formatBytes(bytes: number): string {
           :resolving-id="resolvingId"
           :label="label"
           :format-time="formatTime"
-          :eyebrow="label('音源', 'Source')"
-          :title="label('B 站音乐', 'Bilibili Music')"
+          :eyebrow="activeMusicSource.name"
+          :title="label('搜索音乐', 'Search Music')"
           :placeholder="label('搜索歌曲、歌手、现场、MV', 'Search songs, artists, live, MV')"
+          :provider-name="activeMusicSource.name"
           @update:keyword="biliKeyword = $event"
           @search="searchBilibili"
           @play="playBilibili"
           @queue="queueBilibili"
           @bookmark="bookmarkBilibili"
         />
+        <BilibiliFavoritesPanel
+          v-else
+          :resolving-id="resolvingId"
+          :label="label"
+          :format-time="formatTime"
+          :provider-name="activeMusicSource.name"
+          @play="playBilibili"
+          @queue="queueBilibili"
+          @bookmark="bookmarkBilibili"
+        />
+      </section>
+
+      <MediaOutputPanel :session-output-id="session.output.id" />
+
+      <MediaQueuePanel
+        :queue="queue"
+        :current-index="player.state.currentIndex"
+        :loading="playlistLoading"
+        :label="label"
+        :source-label="sourceLabel"
+        @clear="clearQueue"
+        @play="player.playAtIndex"
+        @move="moveQueued"
+        @remove="removeQueued"
+      >
         <div class="cache-strip">
           <div>
-            <span>{{ label('缓存', 'Cache') }}</span>
+            <span>{{ label('音频缓存', 'Audio Cache') }}</span>
             <strong>
               {{ cacheStatus?.file_count ?? 0 }} / {{ cacheStatus?.max_items ?? 500 }}
               · {{ formatBytes(cacheStatus?.total_bytes ?? 0) }}
@@ -358,21 +427,7 @@ function formatBytes(bytes: number): string {
           </div>
         </div>
         <p v-if="cacheMessage" class="cache-message">{{ cacheMessage }}</p>
-      </section>
-
-      <MediaOutputPanel :active-item="activeItem" :session-output-id="session.output.id" />
-
-      <MediaQueuePanel
-        :queue="queue"
-        :current-index="player.state.currentIndex"
-        :loading="playlistLoading"
-        :label="label"
-        :source-label="sourceLabel"
-        @clear="clearQueue"
-        @play="player.playAtIndex"
-        @move="moveQueued"
-        @remove="removeQueued"
-      />
+      </MediaQueuePanel>
 
       <section class="panel bookmarks-shell">
         <MediaBookmarksPanel
@@ -439,6 +494,7 @@ function formatBytes(bytes: number): string {
         @previous="player.previous"
         @toggle="player.toggle"
         @next="player.next"
+        @volume="player.setVolume"
         @toggle-play-mode="togglePlayMode"
       />
 
@@ -461,7 +517,7 @@ function formatBytes(bytes: number): string {
         @move="moveQueued"
         @remove="removeQueued"
       />
-      <MediaOutputPanel :active-item="activeItem" :session-output-id="session.output.id" />
+      <MediaOutputPanel :session-output-id="session.output.id" />
     </main>
   </div>
 </template>
@@ -720,6 +776,30 @@ h2 {
   flex-wrap: wrap;
 }
 
+.volume-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 36px;
+  align-items: center;
+  gap: 10px;
+}
+
+.volume-row span,
+.volume-row strong {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.volume-row strong {
+  text-align: right;
+}
+
+.volume-row input {
+  width: 100%;
+  accent-color: #0f766e;
+}
+
 .round-btn,
 .main-play-btn,
 .mode-btn {
@@ -760,6 +840,74 @@ button:disabled {
 
 .music-source-panel {
   min-height: 520px;
+}
+
+.source-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.source-pill {
+  min-width: 128px;
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 1px solid #dbe3ec;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text-secondary);
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+}
+
+.source-pill span {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.source-pill strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.source-pill.active {
+  border-color: #0f766e;
+  background: #f0fdfa;
+}
+
+.source-tabs {
+  padding: 4px;
+  border: 1px solid #dbe3ec;
+  border-radius: 8px;
+  background: #f8fafc;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.source-tabs button {
+  height: 36px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.source-tabs button.active {
+  background: #0f766e;
+  color: #fff;
 }
 
 .cache-strip {
@@ -892,6 +1040,15 @@ button:disabled {
 
   .music-copy h2 {
     font-size: 20px;
+  }
+
+  .source-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .source-pill {
+    width: 100%;
   }
 
 }

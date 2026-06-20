@@ -20,6 +20,7 @@ const emit = defineEmits<{
   previous: []
   toggle: []
   next: []
+  volume: [value: number]
   'toggle-play-mode': []
 }>()
 </script>
@@ -110,6 +111,18 @@ const emit = defineEmits<{
       </button>
     </div>
     <div class="mode-line">{{ playModeLabel }}</div>
+    <div class="volume-row">
+      <span>{{ label('音量', 'Volume') }}</span>
+      <input
+        type="range"
+        min="0"
+        max="100"
+        :value="session.volume"
+        :title="label('音量', 'Volume')"
+        @input="emit('volume', Number(($event.target as HTMLInputElement).value))"
+      />
+      <strong>{{ session.volume }}</strong>
+    </div>
   </section>
 </template>
 
@@ -282,6 +295,29 @@ button:disabled {
   font-size: 12px;
   font-weight: 900;
   text-align: center;
+}
+
+.volume-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 36px;
+  align-items: center;
+  gap: 10px;
+}
+
+.volume-row span,
+.volume-row strong {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.volume-row strong {
+  text-align: right;
+}
+
+.volume-row input {
+  width: 100%;
+  accent-color: #0f766e;
 }
 
 .icon-btn,

@@ -128,6 +128,52 @@ export interface MediaCacheStatus {
   updated_at: string
 }
 
+export interface BilibiliAuthStatus {
+  authenticated: boolean
+  has_saved_login?: boolean
+  source?: string
+  saved_at?: number
+  message?: string
+  user?: {
+    mid?: number | string
+    uname?: string
+    face?: string
+    vip_type?: number
+  } | null
+}
+
+export interface BilibiliQrStartResult {
+  url: string
+  qr_svg?: string
+  qrcode_key: string
+}
+
+export interface BilibiliQrPollResult extends BilibiliAuthStatus {
+  qr_status?: 'waiting_scan' | 'waiting_confirm' | 'expired' | 'confirmed' | 'pending'
+  code?: number
+}
+
+export interface BilibiliFavoriteFolder {
+  id: number
+  title: string
+  media_count: number
+  fav_state?: unknown
+}
+
+export interface BilibiliFavoriteFoldersResult {
+  folders: BilibiliFavoriteFolder[]
+  user?: BilibiliAuthStatus['user']
+}
+
+export interface BilibiliFavoriteMediasResult {
+  media_id: number
+  page: number
+  page_size: number
+  total: number
+  has_more: boolean
+  items: MediaItem[]
+}
+
 export const mediaApi = {
   cacheStatus: () =>
     request<{ cache: MediaCacheStatus }>('/api/media/cache'),
@@ -217,6 +263,70 @@ export const mediaApi = {
   clearPlaylist: () =>
     request<{ status: string }>('/api/media/playlist', {
       method: 'DELETE',
+    }),
+
+  bilibiliStatus: () =>
+    cliApi.run<BilibiliAuthStatus>('media-cli', {
+      action: 'bilibili_status',
+      params: {},
+      ttl_ms: 0,
+      bypass_cache: true,
+    }),
+
+  bilibiliImportCookie: (cookie: string) =>
+    cliApi.run<BilibiliAuthStatus>('media-cli', {
+      action: 'bilibili_import_cookie',
+      params: { cookie },
+      ttl_ms: 0,
+      bypass_cache: true,
+    }),
+
+  bilibiliBrowserImport: () =>
+    cliApi.run<BilibiliAuthStatus>('media-cli', {
+      action: 'bilibili_browser_import',
+      params: {},
+      ttl_ms: 0,
+      bypass_cache: true,
+    }),
+
+  bilibiliLogout: () =>
+    cliApi.run<BilibiliAuthStatus>('media-cli', {
+      action: 'bilibili_logout',
+      params: {},
+      ttl_ms: 0,
+      bypass_cache: true,
+    }),
+
+  bilibiliQrStart: () =>
+    cliApi.run<BilibiliQrStartResult>('media-cli', {
+      action: 'bilibili_qr_start',
+      params: {},
+      ttl_ms: 0,
+      bypass_cache: true,
+    }),
+
+  bilibiliQrPoll: (qrcodeKey: string) =>
+    cliApi.run<BilibiliQrPollResult>('media-cli', {
+      action: 'bilibili_qr_poll',
+      params: { qrcode_key: qrcodeKey },
+      ttl_ms: 0,
+      bypass_cache: true,
+    }),
+
+  bilibiliFavoriteFolders: () =>
+    cliApi.run<BilibiliFavoriteFoldersResult>('media-cli', {
+      action: 'bilibili_favorite_folders',
+      params: {},
+      ttl_ms: 0,
+      bypass_cache: true,
+    }),
+
+  bilibiliFavoriteMedias: (mediaId: number, page = 1, pageSize = 20) =>
+    cliApi.run<BilibiliFavoriteMediasResult>('media-cli', {
+      action: 'bilibili_favorite_medias',
+      params: { media_id: mediaId, page, page_size: pageSize },
+      ttl_ms: 0,
+      bypass_cache: true,
     }),
 
   listXiaoAiOutputs: async (): Promise<MediaOutput[]> => {
