@@ -2,6 +2,15 @@ import json
 import sys
 
 from media_cli.bilibili import get_media_info, resolve_audio, search_bilibili
+from media_cli.bilibili_auth import (
+    bilibili_browser_import,
+    bilibili_import_cookie,
+    bilibili_logout,
+    bilibili_qr_poll,
+    bilibili_qr_start,
+    bilibili_status,
+)
+from media_cli.bilibili_favorites import list_favorite_folders, list_favorite_medias
 from media_cli.dlna import control as control_dlna
 from media_cli.dlna import discover_dlna
 from media_cli.dlna import play_url as play_dlna_url
@@ -30,6 +39,14 @@ ACTION_MAP = {
     "bilibili_info": get_media_info,
     "resolve_audio": resolve_audio,
     "resolve_bilibili_audio": resolve_audio,
+    "bilibili_status": bilibili_status,
+    "bilibili_import_cookie": bilibili_import_cookie,
+    "bilibili_logout": bilibili_logout,
+    "bilibili_qr_start": bilibili_qr_start,
+    "bilibili_qr_poll": bilibili_qr_poll,
+    "bilibili_browser_import": bilibili_browser_import,
+    "bilibili_favorite_folders": list_favorite_folders,
+    "bilibili_favorite_medias": list_favorite_medias,
     "dlna_discover": discover_dlna,
     "discover_dlna": discover_dlna,
     "dlna_play_url": play_dlna_url,

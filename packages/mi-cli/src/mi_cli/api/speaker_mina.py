@@ -1,14 +1,46 @@
 import json
+import asyncio
 import random
 import string
+from typing import Awaitable, Callable, TypeVar
 
 import httpx
 
 from mi_cli.api.auth import _get_service_token
+from mi_cli.api.auth_store import AUTH_DIR
 
 
 MINA_API_BASE = "https://api2.mina.mi.com"
 NEED_USE_PLAY_MUSIC_API = {"X08C", "X08E", "X8F", "X4B", "LX05", "OH2", "OH2P", "X6A"}
+T = TypeVar("T")
+
+
+def _run_miservice(auth_data: dict, runner: Callable[[object], Awaitable[T]]) -> T:
+    return asyncio.run(_run_miservice_async(auth_data, runner))
+
+
+async def _run_miservice_async(auth_data: dict, runner: Callable[[object], Awaitable[T]]) -> T:
+    from aiohttp import ClientSession
+    from miservice import MiAccount, MiNAService
+
+    async with ClientSession() as session:
+        account = MiAccount(session, "", "", f"{AUTH_DIR}/.mi.token")
+        account.token = {
+            "passToken": auth_data.get("passToken", ""),
+            "userId": str(auth_data.get("userId", "")),
+            "deviceId": auth_data.get("deviceId", ""),
+        }
+        await account.login("micoapi")
+        mina = MiNAService(account)
+        return await runner(mina)
+
+
+def _miservice_error(error: Exception) -> dict:
+    return {
+        "code": -1,
+        "message": f"miservice Mina failed: {error}",
+        "exception": type(error).__name__,
+    }
 
 
 def _request_mina_api(auth_data: dict, uri: str, data: dict) -> dict:
@@ -36,13 +68,32 @@ def _request_mina_api(auth_data: dict, uri: str, data: dict) -> dict:
         separator = "&" if "?" in url else "?"
         url = f"{url}{separator}requestId={_mina_request_id()}"
         resp = httpx.get(url, headers=headers, timeout=10)
-        return resp.json()
+        return _decode_mina_response(resp)
 
     data = {**data, "requestId": data.get("requestId") or _mina_request_id()}
     form_data = {k: json.dumps(v) if isinstance(v, (dict, list)) else str(v) for k, v in data.items()}
 
     resp = httpx.post(url, data=form_data, headers=headers, timeout=10)
-    return resp.json()
+    return _decode_mina_response(resp)
+
+
+def _decode_mina_response(resp: httpx.Response) -> dict:
+    text = resp.text.strip()
+    if not text:
+        return {
+            "code": -1,
+            "message": f"Mina API returned empty response: HTTP {resp.status_code}",
+            "http_status": resp.status_code,
+        }
+    try:
+        return resp.json()
+    except Exception as e:
+        return {
+            "code": -1,
+            "message": f"Mina API returned invalid JSON: {e}",
+            "http_status": resp.status_code,
+            "preview": text[:200],
+        }
 
 
 def _require_mina_auth(auth_data: dict) -> dict | None:
@@ -86,6 +137,12 @@ def _find_mina_device(auth_data: dict, did: str) -> dict:
 
 
 def _get_mina_devices(auth_data: dict) -> list:
+    try:
+        devices = _run_miservice(auth_data, lambda mina: mina.device_list())
+        if isinstance(devices, list):
+            return devices
+    except Exception:
+        pass
     result = _request_mina_api(auth_data, "/admin/v2/device_list?master=0", None)
     return _coerce_mina_list(result.get("data", []))
 
@@ -117,6 +174,23 @@ def _list_mina_speakers(auth_data: dict) -> list:
 
 
 def _speaker_play_url(auth_data: dict, device_id: str, url: str) -> dict:
+    try:
+        result = _run_miservice(auth_data, lambda mina: mina.play_by_url(device_id, url))
+        return result if isinstance(result, dict) else {"code": 0, "data": result}
+    except Exception as e:
+        fallback_error = _miservice_error(e)
+        result = _request_mina_api(auth_data, "/remote/ubus", {
+            "deviceId": device_id,
+            "method": "player_play_url",
+            "path": "mediaplayer",
+            "message": json.dumps({"url": url, "type": 1, "media": "app_ios"}, ensure_ascii=False),
+        })
+        if isinstance(result, dict) and result.get("code") not in (0, None):
+            result["miservice_error"] = fallback_error
+        return result
+
+
+def _speaker_play_url_raw(auth_data: dict, device_id: str, url: str) -> dict:
     return _request_mina_api(auth_data, "/remote/ubus", {
         "deviceId": device_id,
         "method": "player_play_url",
@@ -126,6 +200,18 @@ def _speaker_play_url(auth_data: dict, device_id: str, url: str) -> dict:
 
 
 def _speaker_play_music_url(auth_data: dict, device_id: str, url: str, title: str, audio_id: str) -> dict:
+    try:
+        result = _run_miservice(auth_data, lambda mina: mina.play_by_url(device_id, url))
+        return result if isinstance(result, dict) else {"code": 0, "data": result}
+    except Exception as e:
+        fallback_error = _miservice_error(e)
+        result = _speaker_play_music_url_raw(auth_data, device_id, url, title, audio_id)
+        if isinstance(result, dict) and result.get("code") not in (0, None):
+            result["miservice_error"] = fallback_error
+        return result
+
+
+def _speaker_play_music_url_raw(auth_data: dict, device_id: str, url: str, title: str, audio_id: str) -> dict:
     payload = {
         "url": url,
         "type": 2,
@@ -143,6 +229,32 @@ def _speaker_play_music_url(auth_data: dict, device_id: str, url: str, title: st
 
 
 def _speaker_play_operation(auth_data: dict, device_id: str, action: str) -> dict:
+    try:
+        async def run(mina):
+            if action == "pause":
+                return await mina.player_pause(device_id)
+            if action == "stop":
+                return await mina.player_stop(device_id)
+            if action == "play":
+                return await mina.player_play(device_id)
+            return await mina.player_pause(device_id)
+
+        result = _run_miservice(auth_data, run)
+        return result if isinstance(result, dict) else {"code": 0, "data": result}
+    except Exception as e:
+        fallback_error = _miservice_error(e)
+        result = _request_mina_api(auth_data, "/remote/ubus", {
+            "deviceId": device_id,
+            "method": "player_play_operation",
+            "path": "mediaplayer",
+            "message": json.dumps({"action": action, "media": "app_ios"}, ensure_ascii=False),
+        })
+        if isinstance(result, dict) and result.get("code") not in (0, None):
+            result["miservice_error"] = fallback_error
+        return result
+
+
+def _speaker_play_operation_raw(auth_data: dict, device_id: str, action: str) -> dict:
     return _request_mina_api(auth_data, "/remote/ubus", {
         "deviceId": device_id,
         "method": "player_play_operation",
@@ -152,12 +264,46 @@ def _speaker_play_operation(auth_data: dict, device_id: str, action: str) -> dic
 
 
 def _speaker_set_volume(auth_data: dict, device_id: str, volume: int) -> dict:
+    try:
+        result = _run_miservice(auth_data, lambda mina: mina.player_set_volume(device_id, volume))
+        return result if isinstance(result, dict) else {"code": 0, "data": result}
+    except Exception as e:
+        fallback_error = _miservice_error(e)
+        result = _request_mina_api(auth_data, "/remote/ubus", {
+            "deviceId": device_id,
+            "method": "player_set_volume",
+            "path": "mediaplayer",
+            "message": json.dumps({"volume": volume, "media": "app_ios"}, ensure_ascii=False),
+        })
+        if isinstance(result, dict) and result.get("code") not in (0, None):
+            result["miservice_error"] = fallback_error
+        return result
+
+
+def _speaker_set_volume_raw(auth_data: dict, device_id: str, volume: int) -> dict:
     return _request_mina_api(auth_data, "/remote/ubus", {
         "deviceId": device_id,
         "method": "player_set_volume",
         "path": "mediaplayer",
         "message": json.dumps({"volume": volume, "media": "app_ios"}, ensure_ascii=False),
     })
+
+
+def _speaker_get_status(auth_data: dict, device_id: str) -> dict:
+    try:
+        result = _run_miservice(auth_data, lambda mina: mina.player_get_status(device_id))
+        return result if isinstance(result, dict) else {"code": 0, "data": result}
+    except Exception as e:
+        fallback_error = _miservice_error(e)
+        result = _request_mina_api(auth_data, "/remote/ubus", {
+            "deviceId": device_id,
+            "method": "player_get_play_status",
+            "path": "mediaplayer",
+            "message": json.dumps({"media": "app_ios"}, ensure_ascii=False),
+        })
+        if isinstance(result, dict) and result.get("code") not in (0, None):
+            result["miservice_error"] = fallback_error
+        return result
 
 
 def _mina_request_id() -> str:

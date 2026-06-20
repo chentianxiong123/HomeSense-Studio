@@ -1,24 +1,22 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api, type UserDevice } from '@/api'
-import { mediaApi } from '@/api/media'
 import { useLocale } from '@/composables/useLocale'
-import type { MediaItem, MediaOutput } from '@/features/media/types'
+import { useMediaPlayer } from '@/features/media/player'
+import type { MediaOutput } from '@/features/media/types'
 
-const props = defineProps<{
-  activeItem: MediaItem | null
+defineProps<{
   sessionOutputId?: string
 }>()
 
 const { locale } = useLocale()
 const isZh = computed(() => locale.value === 'zh')
 const outputLoading = ref(false)
-const discoveringOutputs = ref(false)
 const outputError = ref('')
 const dynamicOutputs = ref<MediaOutput[]>([])
 const outputStatus = ref<Record<string, string>>({})
-const pushingOutputId = ref('')
-const controllingOutputId = ref('')
+const selectingOutputId = ref('')
+const player = useMediaPlayer()
 
 const browserOutput = computed<MediaOutput>(() => ({
   id: 'browser:local',
@@ -26,10 +24,7 @@ const browserOutput = computed<MediaOutput>(() => ({
   name: label('浏览器', 'Browser'),
   online: true,
 }))
-const pendingOutputs = computed<MediaOutput[]>(() => [
-  { id: 'adb:pending', kind: 'adb', name: 'ADB Media', online: false, meta: { status: label('待接入控制', 'Control pending') } },
-])
-const outputs = computed<MediaOutput[]>(() => [browserOutput.value, ...dynamicOutputs.value, ...pendingOutputs.value])
+const outputs = computed<MediaOutput[]>(() => [browserOutput.value, ...dynamicOutputs.value])
 
 onMounted(() => {
   void loadOutputs()
@@ -49,31 +44,6 @@ async function loadOutputs() {
     outputError.value = error instanceof Error ? error.message : String(error)
   } finally {
     outputLoading.value = false
-  }
-}
-
-async function discoverOutputs() {
-  discoveringOutputs.value = true
-  outputError.value = ''
-  try {
-    const savedOutputs = await listSavedOutputs()
-    const [xiaoaiResult, dlnaResult] = await Promise.allSettled([
-      mediaApi.listXiaoAiOutputs(),
-      mediaApi.listDlnaOutputs(),
-    ])
-    const nextOutputs: MediaOutput[] = [...savedOutputs]
-    const errors: string[] = []
-    if (xiaoaiResult.status === 'fulfilled') mergeOutputs(nextOutputs, xiaoaiResult.value)
-    else errors.push(`${label('小爱', 'XiaoAi')}: ${errorText(xiaoaiResult.reason)}`)
-    if (dlnaResult.status === 'fulfilled') mergeOutputs(nextOutputs, dlnaResult.value)
-    else errors.push(`DLNA: ${errorText(dlnaResult.reason)}`)
-    dynamicOutputs.value = nextOutputs
-    outputError.value = errors.join(' | ')
-  } catch (error) {
-    dynamicOutputs.value = []
-    outputError.value = error instanceof Error ? error.message : String(error)
-  } finally {
-    discoveringOutputs.value = false
   }
 }
 
@@ -106,7 +76,7 @@ function savedDeviceToOutput(device: UserDevice): MediaOutput[] {
   }
 
   const miDid = getString(device.props?.mi_did)
-  if (miDid && looksLikeXiaoAiSpeaker(device)) {
+  if (miDid && looksLikeXiaoAiSpeaker(device) && !isBlockedXiaoAiOutput(device)) {
     outputs.push({
       id: `xiaoai:saved:${device.id}`,
       kind: 'xiaoai',
@@ -136,153 +106,39 @@ function looksLikeXiaoAiSpeaker(device: UserDevice): boolean {
   return /小爱|音箱|speaker|xiaoai|xiaomi\.wifispeaker|miot\.speaker/.test(haystack)
 }
 
-function mergeOutputs(target: MediaOutput[], incoming: MediaOutput[]) {
-  for (const output of incoming) {
-    const endpoint = output.endpoint || ''
-    const exists = target.some((item) => item.kind === output.kind && item.endpoint === endpoint)
-    if (!exists) target.push(output)
-  }
-}
-
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+function isBlockedXiaoAiOutput(device: UserDevice): boolean {
+  const explicitDlan = device.props?.dlan
+  if (explicitDlan === false) return true
+  const haystack = [
+    device.name,
+    getString(device.props?.name),
+    getString(device.props?.model),
+  ].join(' ').toLowerCase()
+  return /红米|redmi/.test(haystack)
 }
 
 function getString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-async function refreshOutputStatus(output: MediaOutput) {
-  if (!output.endpoint) return
-  outputStatus.value = { ...outputStatus.value, [output.id]: label('读取中', 'Loading') }
-  if (output.kind === 'dlna') {
-    const result = await mediaApi.getDlnaStatus(output.endpoint)
-    if (result.status === 'success' && result.data) {
-      const state = result.data.state ? stateText(result.data.state) : label('未知状态', 'Unknown')
-      const position = result.data.position && result.data.position !== '00:00:00' ? ` · ${result.data.position}` : ''
-      const volume = result.data.volume != null ? ` · ${label('音量', 'Vol')} ${result.data.volume}` : ''
-      outputStatus.value = { ...outputStatus.value, [output.id]: `${state}${position}${volume}` }
-      return
-    }
-    outputStatus.value = { ...outputStatus.value, [output.id]: result.message || result.error || label('状态读取失败', 'Status failed') }
-    return
-  }
-  if (output.kind !== 'xiaoai') return
-  const result = await mediaApi.getXiaoAiStatus(output.endpoint)
-  if (result.status === 'success' && result.data) {
-    const title = result.data.media_title || stateText(result.data.state)
-    const volume = typeof result.data.volume === 'number' ? ` · ${label('音量', 'Vol')} ${result.data.volume}` : ''
-    outputStatus.value = { ...outputStatus.value, [output.id]: `${title}${volume}` }
-    return
-  }
-  outputStatus.value = { ...outputStatus.value, [output.id]: result.message || result.error || label('状态读取失败', 'Status failed') }
-}
-
-async function pushCurrentToDlna(output: MediaOutput) {
-  const item = props.activeItem
-  const location = output.endpoint || ''
-  const title = item?.title || 'HomeSense Media'
-  if (!location || !item) return
-  pushingOutputId.value = output.id
+async function selectOutput(output: MediaOutput) {
+  selectingOutputId.value = output.id
   outputError.value = ''
   try {
-    const streamUrl = item.stream_url || item.upstream_url || ''
-    const result = streamUrl
-      ? await mediaApi.playUrlOnDlna({
-        location,
-        url: streamUrl,
-        title,
-        content_type: item.mime_type || contentTypeFromUrl(streamUrl),
-      })
-      : await mediaApi.playBilibiliOnDlna({ location, bvid: item.upstream_id || '', title })
-    if (result.status !== 'success') {
-      outputError.value = result.message || result.error || label('推送失败', 'Push failed')
-      return
-    }
-    outputStatus.value = { ...outputStatus.value, [output.id]: label('已推送当前媒体', 'Pushed current media') }
+    player.selectOutput(output)
+    outputStatus.value = { ...outputStatus.value, [output.id]: label('已设为输出', 'Selected output') }
   } catch (error) {
     outputError.value = error instanceof Error ? error.message : String(error)
   } finally {
-    pushingOutputId.value = ''
+    selectingOutputId.value = ''
   }
 }
 
-async function pushCurrentToXiaoAi(output: MediaOutput) {
-  const item = props.activeItem
-  const did = output.endpoint || ''
-  const bvid = item?.upstream_id || ''
-  const title = item?.title || 'HomeSense Media'
-  if (!did || !bvid) return
-  pushingOutputId.value = output.id
-  outputError.value = ''
-  try {
-    const result = await mediaApi.playBilibiliOnXiaoAi({ did, bvid, title })
-    if (result.status !== 'success') {
-      outputError.value = result.message || result.error || label('推送失败', 'Push failed')
-      return
-    }
-    outputStatus.value = { ...outputStatus.value, [output.id]: label('已推送当前媒体', 'Pushed current media') }
-  } catch (error) {
-    outputError.value = error instanceof Error ? error.message : String(error)
-  } finally {
-    pushingOutputId.value = ''
-  }
-}
-
-async function controlDlna(output: MediaOutput, control: 'pause' | 'resume' | 'stop') {
-  const location = output.endpoint || ''
-  if (!location) return
-  controllingOutputId.value = `${output.id}:${control}`
-  outputError.value = ''
-  try {
-    const result = await mediaApi.controlDlna(location, control)
-    if (result.status !== 'success') {
-      outputError.value = result.message || result.error || label('控制失败', 'Control failed')
-      return
-    }
-    outputStatus.value = { ...outputStatus.value, [output.id]: controlText(control) }
-  } catch (error) {
-    outputError.value = error instanceof Error ? error.message : String(error)
-  } finally {
-    controllingOutputId.value = ''
-  }
-}
-
-async function controlXiaoAi(output: MediaOutput, control: 'pause' | 'resume' | 'stop') {
-  const did = output.endpoint || ''
-  if (!did) return
-  controllingOutputId.value = `${output.id}:${control}`
-  outputError.value = ''
-  try {
-    const result = await mediaApi.controlXiaoAi(did, control)
-    if (result.status !== 'success') {
-      outputError.value = result.message || result.error || label('控制失败', 'Control failed')
-      return
-    }
-    outputStatus.value = { ...outputStatus.value, [output.id]: controlText(control) }
-  } catch (error) {
-    outputError.value = error instanceof Error ? error.message : String(error)
-  } finally {
-    controllingOutputId.value = ''
-  }
-}
-
-function controlText(control: 'pause' | 'resume' | 'stop'): string {
-  const map: Record<typeof control, string> = {
-    pause: label('已暂停', 'Paused'),
-    resume: label('已继续', 'Resumed'),
-    stop: label('已停止', 'Stopped'),
-  }
-  return map[control]
-}
-
-function canPushToXiaoAi(output: MediaOutput): boolean {
-  return output.kind === 'xiaoai' && Boolean(output.endpoint && props.activeItem?.upstream_id)
-}
-
-function canPushToDlna(output: MediaOutput): boolean {
-  const item = props.activeItem
-  return output.kind === 'dlna' && Boolean(output.endpoint && item && (item.stream_url || item.upstream_url || item.upstream_id))
+function canSelectOutput(output: MediaOutput): boolean {
+  if (output.kind === 'browser') return true
+  if (output.kind === 'xiaoai') return Boolean(output.endpoint)
+  if (output.kind === 'dlna') return Boolean(output.endpoint)
+  return false
 }
 
 function outputSubtitle(output: MediaOutput): string {
@@ -304,39 +160,18 @@ function outputSubtitle(output: MediaOutput): string {
     .join(' · ')
 }
 
-function stateText(state: string): string {
-  const normalized = state.toLowerCase()
-  const map: Record<string, string> = {
-    idle: label('待机', 'Idle'),
-    loading: label('载入中', 'Loading'),
-    playing: label('播放中', 'Playing'),
-    paused: label('已暂停', 'Paused'),
-    stopped: label('已停止', 'Stopped'),
-    stopped_pending: label('已停止', 'Stopped'),
-    no_media_present: label('无媒体', 'No media'),
-    transitioning: label('切换中', 'Transitioning'),
-    error: label('失败', 'Error'),
-  }
-  return map[normalized] ?? state
+function kindDisplay(output: MediaOutput): string {
+  if (output.kind === 'browser') return label('本机', 'Local')
+  if (output.kind === 'xiaoai') return label('小爱', 'XiaoAi')
+  if (output.kind === 'dlna') return 'DLNA'
+  if (output.kind === 'adb') return 'ADB'
+  return output.kind
 }
 
-function contentTypeFromUrl(url: string): string {
-  const pathname = url.split('?', 1)[0]?.toLowerCase() || ''
-  if (pathname.endsWith('.mp3')) return 'audio/mpeg'
-  if (pathname.endsWith('.m4a')) return 'audio/mp4'
-  if (pathname.endsWith('.aac')) return 'audio/aac'
-  if (pathname.endsWith('.flac')) return 'audio/flac'
-  if (pathname.endsWith('.wav')) return 'audio/wav'
-  if (pathname.endsWith('.ogg')) return 'audio/ogg'
-  if (pathname.endsWith('.webm')) return 'video/webm'
-  if (pathname.endsWith('.mkv')) return 'video/x-matroska'
-  if (pathname.endsWith('.mov')) return 'video/quicktime'
-  if (pathname.endsWith('.avi')) return 'video/x-msvideo'
-  if (pathname.endsWith('.flv')) return 'video/x-flv'
-  if (pathname.endsWith('.ts')) return 'video/mp2t'
-  if (pathname.endsWith('.m3u8')) return 'application/vnd.apple.mpegurl'
-  if (pathname.endsWith('.mpd')) return 'application/dash+xml'
-  return 'video/mp4'
+function outputSourceLabel(output: MediaOutput): string {
+  if (output.kind === 'browser') return label('内置输出', 'Built-in')
+  if (output.meta?.saved || output.device_id) return label('绑定设备', 'Bound device')
+  return label('临时目标', 'Temporary')
 }
 </script>
 
@@ -350,81 +185,25 @@ function contentTypeFromUrl(url: string): string {
       <button class="plain-btn" type="button" :disabled="outputLoading" @click="loadOutputs()">
         {{ outputLoading ? label('刷新中', 'Loading') : label('刷新', 'Refresh') }}
       </button>
-      <button class="plain-btn" type="button" :disabled="discoveringOutputs" @click="discoverOutputs()">
-        {{ discoveringOutputs ? label('发现中', 'Discovering') : label('发现', 'Discover') }}
-      </button>
     </div>
 
     <p v-if="outputError" class="notice warn">{{ outputError }}</p>
 
     <div class="output-list">
       <div v-for="output in outputs" :key="output.id" class="output-row" :class="{ active: output.id === sessionOutputId, pending: !output.online }">
-        <span class="output-kind">{{ output.kind }}</span>
+        <div class="output-tags">
+          <span class="output-kind">{{ kindDisplay(output) }}</span>
+          <span class="output-source">{{ outputSourceLabel(output) }}</span>
+        </div>
         <div class="output-main">
           <strong>{{ output.name }}</strong>
           <small>{{ outputSubtitle(output) }}</small>
         </div>
-        <div v-if="output.kind === 'xiaoai'" class="row-actions">
-          <button class="row-icon" type="button" :disabled="controllingOutputId === `${output.id}:pause`" :title="label('暂停', 'Pause')" @click="controlXiaoAi(output, 'pause')">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
-              <path d="M7 5h3v14H7zM14 5h3v14h-3z" />
-            </svg>
-          </button>
-          <button class="row-icon" type="button" :disabled="controllingOutputId === `${output.id}:resume`" :title="label('继续', 'Resume')" @click="controlXiaoAi(output, 'resume')">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
-              <path d="M8 5v14l11-7z" />
-            </svg>
-          </button>
-          <button class="row-icon" type="button" :disabled="controllingOutputId === `${output.id}:stop`" :title="label('停止', 'Stop')" @click="controlXiaoAi(output, 'stop')">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
-              <path d="M7 7h10v10H7z" />
-            </svg>
-          </button>
-          <button class="row-icon" type="button" :disabled="!canPushToXiaoAi(output) || pushingOutputId === output.id" :title="label('推送当前媒体', 'Push current media')" @click="pushCurrentToXiaoAi(output)">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M5 12h12" />
-              <path d="m13 6 6 6-6 6" />
-              <path d="M3 5v14" />
-            </svg>
-          </button>
-          <button class="row-icon" type="button" :title="label('读取状态', 'Read status')" @click="refreshOutputStatus(output)">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-              <path d="M21 3v6h-6" />
-            </svg>
+        <div class="row-actions">
+          <button class="select-btn" type="button" :disabled="!canSelectOutput(output) || selectingOutputId === output.id" @click="selectOutput(output)">
+            {{ output.id === sessionOutputId ? label('当前输出', 'Current') : label('设为输出', 'Use') }}
           </button>
         </div>
-        <div v-else-if="output.kind === 'dlna'" class="row-actions">
-          <button class="row-icon" type="button" :disabled="controllingOutputId === `${output.id}:pause`" :title="label('暂停', 'Pause')" @click="controlDlna(output, 'pause')">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
-              <path d="M7 5h3v14H7zM14 5h3v14h-3z" />
-            </svg>
-          </button>
-          <button class="row-icon" type="button" :disabled="controllingOutputId === `${output.id}:resume`" :title="label('继续', 'Resume')" @click="controlDlna(output, 'resume')">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
-              <path d="M8 5v14l11-7z" />
-            </svg>
-          </button>
-          <button class="row-icon" type="button" :disabled="controllingOutputId === `${output.id}:stop`" :title="label('停止', 'Stop')" @click="controlDlna(output, 'stop')">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
-              <path d="M7 7h10v10H7z" />
-            </svg>
-          </button>
-          <button class="row-icon" type="button" :disabled="!canPushToDlna(output) || pushingOutputId === output.id" :title="label('推送当前媒体', 'Push current media')" @click="pushCurrentToDlna(output)">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M5 12h12" />
-              <path d="m13 6 6 6-6 6" />
-              <path d="M3 5v14" />
-            </svg>
-          </button>
-          <button class="row-icon" type="button" :title="label('读取状态', 'Read status')" @click="refreshOutputStatus(output)">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-              <path d="M21 3v6h-6" />
-            </svg>
-          </button>
-        </div>
-        <small v-else>{{ output.online ? label('可用', 'Ready') : label('待接入', 'Pending') }}</small>
       </div>
     </div>
   </section>
@@ -473,7 +252,7 @@ h2 {
 }
 
 .plain-btn,
-.row-icon {
+.select-btn {
   border-radius: 8px;
   font-family: inherit;
   font-weight: 900;
@@ -529,7 +308,7 @@ button:disabled {
   border-radius: 8px;
   background: #fff;
   display: grid;
-  grid-template-columns: 70px minmax(0, 1fr) max-content;
+  grid-template-columns: 86px minmax(0, 1fr) max-content;
   align-items: center;
   gap: 10px;
 }
@@ -543,12 +322,38 @@ button:disabled {
   background: #f8fafc;
 }
 
+.output-tags {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.output-kind,
+.output-source {
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .output-kind {
+  min-height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #ecfeff;
   color: #0f766e;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 12px;
   font-weight: 900;
-  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+}
+
+.output-source {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 850;
 }
 
 .output-main {
@@ -585,15 +390,20 @@ button:disabled {
   gap: 6px;
 }
 
-.row-icon {
-  width: 32px;
+.select-btn {
+  min-width: 74px;
   height: 32px;
-  border: 1px solid #dbe3ec;
-  background: #fff;
-  color: #334155;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  padding: 0 10px;
+  border: 1px solid #0f766e;
+  background: #0f766e;
+  color: #fff;
+  font-size: 12px;
+}
+
+.output-row.active .select-btn {
+  border-color: #14b8a6;
+  background: #ccfbf1;
+  color: #0f766e;
 }
 
 @media (max-width: 700px) {

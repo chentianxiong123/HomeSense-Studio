@@ -57,6 +57,8 @@ const emit = defineEmits<{
       </div>
     </div>
     <div v-else class="empty-line">{{ label('队列为空', 'Queue is empty') }}</div>
+
+    <slot />
   </section>
 </template>
 

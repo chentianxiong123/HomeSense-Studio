@@ -6,6 +6,9 @@ defineProps<{
   editing: boolean
   name: string
   location: string
+  ip: string
+  manufacturer: string
+  model: string
   saving: boolean
   label: LabelFn
 }>()
@@ -15,6 +18,9 @@ const emit = defineEmits<{
   (event: 'submit'): void
   (event: 'update:name', value: string): void
   (event: 'update:location', value: string): void
+  (event: 'update:ip', value: string): void
+  (event: 'update:manufacturer', value: string): void
+  (event: 'update:model', value: string): void
 }>()
 </script>
 
@@ -39,6 +45,21 @@ const emit = defineEmits<{
           <label class="form-field full">
             <span>Location URL</span>
             <input :value="location" class="form-input" placeholder="http://192.168.31.20:8200/description.xml" @input="emit('update:location', ($event.target as HTMLInputElement).value)" />
+          </label>
+
+          <label class="form-field">
+            <span>IP</span>
+            <input :value="ip" class="form-input" placeholder="192.168.31.20" @input="emit('update:ip', ($event.target as HTMLInputElement).value)" />
+          </label>
+
+          <label class="form-field">
+            <span>{{ label('厂商', 'Manufacturer') }}</span>
+            <input :value="manufacturer" class="form-input" placeholder="Xiaomi" @input="emit('update:manufacturer', ($event.target as HTMLInputElement).value)" />
+          </label>
+
+          <label class="form-field full">
+            <span>{{ label('型号', 'Model') }}</span>
+            <input :value="model" class="form-input" placeholder="Renderer model" @input="emit('update:model', ($event.target as HTMLInputElement).value)" />
           </label>
         </div>
 

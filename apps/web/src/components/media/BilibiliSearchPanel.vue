@@ -12,10 +12,14 @@ withDefaults(defineProps<{
   eyebrow?: string
   title?: string
   placeholder?: string
+  providerName?: string
+  description?: string
 }>(), {
   eyebrow: '',
   title: '',
   placeholder: '',
+  providerName: '',
+  description: '',
 })
 
 const emit = defineEmits<{
@@ -31,7 +35,8 @@ const emit = defineEmits<{
   <div class="panel-head">
     <div>
       <span class="eyebrow inline">{{ eyebrow || label('来源', 'Source') }}</span>
-      <h2>{{ title || 'Bilibili' }}</h2>
+      <h2>{{ title || label('在线搜索', 'Online Search') }}</h2>
+      <p v-if="description" class="panel-description">{{ description }}</p>
     </div>
   </div>
 
@@ -66,7 +71,7 @@ const emit = defineEmits<{
       </span>
       <button class="result-main" type="button" @click="emit('play', result)">
         <strong>{{ result.title }}</strong>
-        <small>{{ result.artist || 'Bilibili' }} · {{ formatTime(result.duration_sec || 0) }}</small>
+        <small>{{ result.artist || providerName || label('在线来源', 'Online source') }} · {{ formatTime(result.duration_sec || 0) }}</small>
       </button>
       <div class="row-actions">
         <button class="row-icon" type="button" :title="label('收藏', 'Bookmark')" @click="emit('bookmark', result)">
@@ -115,6 +120,14 @@ h2 {
   font-size: 20px;
   font-weight: 900;
   letter-spacing: 0;
+}
+
+.panel-description {
+  margin: 7px 0 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.6;
 }
 
 .search-form {

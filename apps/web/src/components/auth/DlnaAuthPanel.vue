@@ -23,6 +23,9 @@ const dlnaFormOpen = ref(false)
 const editingDlnaDevice = ref<UserDevice | null>(null)
 const formDlnaName = ref('')
 const formDlnaLocation = ref('')
+const formDlnaIp = ref('')
+const formDlnaManufacturer = ref('')
+const formDlnaModel = ref('')
 const dlnaScanLoaded = ref(false)
 const dlnaScanResults = ref<DlnaCandidate[]>([])
 const dlnaTestResults = ref<Record<string, { ok: boolean; message: string }>>({})
@@ -74,6 +77,9 @@ function openCreateDlnaDevice() {
   editingDlnaDevice.value = null
   formDlnaName.value = ''
   formDlnaLocation.value = ''
+  formDlnaIp.value = ''
+  formDlnaManufacturer.value = ''
+  formDlnaModel.value = ''
   dlnaFormOpen.value = true
 }
 
@@ -81,6 +87,9 @@ function openEditDlnaDevice(device: UserDevice) {
   editingDlnaDevice.value = device
   formDlnaName.value = device.name
   formDlnaLocation.value = getString(device.props?.dlna_location)
+  formDlnaIp.value = getString(device.props?.ip_address)
+  formDlnaManufacturer.value = getString(device.props?.manufacturer)
+  formDlnaModel.value = getString(device.props?.model)
   dlnaFormOpen.value = true
 }
 
@@ -99,6 +108,10 @@ async function submitDlnaDevice() {
       ...(editingDlnaDevice.value?.props ?? {}),
       device_type: 'dlna_renderer',
       dlna_location: location,
+      dlan: true,
+      ...(formDlnaIp.value.trim() ? { ip_address: formDlnaIp.value.trim() } : {}),
+      ...(formDlnaManufacturer.value.trim() ? { manufacturer: formDlnaManufacturer.value.trim() } : {}),
+      ...(formDlnaModel.value.trim() ? { model: formDlnaModel.value.trim() } : {}),
     },
   }
   const key = editingDlnaDevice.value ? `dlna-edit-${editingDlnaDevice.value.id}` : 'dlna-create'
@@ -167,6 +180,7 @@ async function saveDlnaCandidate(candidate: DlnaCandidate) {
         dlna_udn: getString(meta.udn),
         dlna_kind: meta.virtual ? 'virtual' : 'real',
         dlna_device_type: getString(meta.device_type),
+        dlan: true,
         manufacturer: getString(meta.manufacturer),
         model: getString(meta.model),
         ...(ipAddress ? { ip_address: ipAddress } : {}),
@@ -269,12 +283,18 @@ defineExpose({ refresh })
       :editing="Boolean(editingDlnaDevice)"
       :name="formDlnaName"
       :location="formDlnaLocation"
+      :ip="formDlnaIp"
+      :manufacturer="formDlnaManufacturer"
+      :model="formDlnaModel"
       :saving="dlnaFormSaving"
       :label="label"
       @close="closeDlnaForm"
       @submit="submitDlnaDevice"
       @update:name="formDlnaName = $event"
       @update:location="formDlnaLocation = $event"
+      @update:ip="formDlnaIp = $event"
+      @update:manufacturer="formDlnaManufacturer = $event"
+      @update:model="formDlnaModel = $event"
     />
   </section>
 </template>
