@@ -26,11 +26,11 @@ export class StorageController {
   @Get('devices/:id/files-entry')
   ensureDeviceFilesEntry(@Param('id', ParseIntPipe) id: number) {
     const device = this.devices.get(id)
-    const { mount } = this.mounts.ensureDeviceSftpMount({
-      deviceId: id,
-      deviceName: device.name,
-      props: device.props ?? {},
-    })
+    const props = device.props ?? {}
+    const hasAdb = readString(props.adb_serial) || readString(props.adb_ip) || readPositiveInt(props.adb_authorization_id)
+    const { mount } = hasAdb
+      ? this.mounts.ensureDeviceAdbMount({ deviceId: id, deviceName: device.name, props })
+      : this.mounts.ensureDeviceSftpMount({ deviceId: id, deviceName: device.name, props })
     return { mount, path: mount.virtual_path }
   }
 
@@ -94,6 +94,11 @@ export class StorageController {
     return { task: this.storage.copyTask(body) }
   }
 
+  @Post('fs/move')
+  move(@Body() body: AlistCopyInput) {
+    return this.storage.move(body)
+  }
+
   @Post('fs/mkdir')
   mkdir(@Body() body: { path?: string }) {
     return this.storage.mkdir(body.path ?? '')
@@ -111,4 +116,13 @@ export class StorageController {
   upload(@Query('path') rawPath: string, @Req() req: any) {
     return this.transfers.upload(rawPath, req)
   }
+}
+
+function readString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function readPositiveInt(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
 }

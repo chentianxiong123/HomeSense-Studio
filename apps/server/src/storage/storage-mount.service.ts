@@ -155,6 +155,48 @@ export class StorageMountService {
     throw new BadRequestException('device has no SSH/SFTP source bound')
   }
 
+  ensureDeviceAdbMount(input: { deviceId: number; deviceName: string; props: Record<string, unknown> }): { mount: StorageMountRecord } {
+    const existing = this.findDeviceMount(input.deviceId, 'adb')
+    if (existing) return { mount: existing }
+
+    const authorizationId = readPositiveInt(input.props.adb_authorization_id)
+    if (authorizationId) {
+      const auth = this.authorizations.get(authorizationId)
+      const virtualPath = deviceVirtualPath(input.deviceId, input.deviceName)
+      return this.create({
+        name: `${input.deviceName} ADB`,
+        virtual_path: virtualPath,
+        driver: 'adb',
+        authorization_id: authorizationId,
+        readonly: false,
+        props: {
+          source: 'device',
+          device_id: input.deviceId,
+          device: readString(input.props.adb_serial) || readString(input.props.adb_ip) || auth.endpoint,
+          root_path: readString(auth.props.root_path) || '/sdcard/',
+        },
+      })
+    }
+
+    const endpoint = readString(input.props.adb_serial) || readString(input.props.adb_ip)
+    if (!endpoint) throw new BadRequestException('device has no ADB source bound')
+    const authorization = this.ensureAuthorizationForAdbDevice(input.deviceId, input.deviceName, endpoint)
+    const virtualPath = deviceVirtualPath(input.deviceId, input.deviceName)
+    return this.create({
+      name: `${input.deviceName} ADB`,
+      virtual_path: virtualPath,
+      driver: 'adb',
+      authorization_id: authorization.id,
+      readonly: false,
+      props: {
+        source: 'device',
+        device_id: input.deviceId,
+        device: endpoint,
+        root_path: '/sdcard/',
+      },
+    })
+  }
+
   private getRow(id: number): StorageMountRow {
     const row = getDb()
       .prepare(
@@ -217,6 +259,32 @@ export class StorageMountService {
         username,
         JSON.stringify(secret),
         JSON.stringify({ ssh_target_id: targetId, root_path: '/' }),
+      )
+    return { id: Number(result.lastInsertRowid) }
+  }
+
+  private ensureAuthorizationForAdbDevice(deviceId: number, deviceName: string, endpoint: string): { id: number } {
+    const existing = getDb()
+      .prepare(
+        `SELECT id
+         FROM alist_authorizations
+         WHERE lower(driver) = 'adb'
+           AND json_extract(props_json, '$.device_id') = ?
+         ORDER BY id DESC
+         LIMIT 1`,
+      )
+      .get(deviceId) as { id: number } | undefined
+    if (existing) return existing
+
+    const result = getDb()
+      .prepare(
+        `INSERT INTO alist_authorizations (name, driver, endpoint, username, secret_json, props_json)
+         VALUES (?, 'adb', ?, '', '{}', ?)`,
+      )
+      .run(
+        `${deviceName || `Device ${deviceId}`} ADB`,
+        endpoint,
+        JSON.stringify({ source: 'device', device_id: deviceId, root_path: '/sdcard/' }),
       )
     return { id: Number(result.lastInsertRowid) }
   }

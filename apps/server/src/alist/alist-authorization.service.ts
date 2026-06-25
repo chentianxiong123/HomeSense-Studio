@@ -188,6 +188,10 @@ function normalizeInput(
 
 function normalizeEndpoint(propsEndpoint: unknown, props: unknown, driver: string): string | undefined {
   const rawEndpoint = typeof propsEndpoint === 'string' ? propsEndpoint.trim() : ''
+  if (driver === 'baidu_netdisk') {
+    return rawEndpoint || 'baidu://netdisk'
+  }
+
   if (driver === 'local') {
     const rootPath = isRecord(props) && typeof props.root_path === 'string' ? props.root_path.trim() : ''
     const endpoint = rawEndpoint || rootPath

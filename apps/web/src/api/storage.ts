@@ -6,24 +6,38 @@ import type {
   AlistDriverMutationResult,
 } from './alist'
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+const DEFAULT_TIMEOUT_MS = 15000
+
+async function request<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
   const hasBody = options?.body != null
-  const response = await fetch(path, {
-    ...options,
-    headers: {
-      ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
-      ...(options?.headers ?? {}),
-    },
-  })
-  if (!response.ok) {
-    let message = `${response.status} ${response.statusText}`
-    try {
-      const body = await response.json() as { message?: string; error?: string }
-      message = body.message || body.error || message
-    } catch {}
-    throw new Error(message)
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), options?.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+  try {
+    const response = await fetch(path, {
+      ...options,
+      signal: options?.signal ?? controller.signal,
+      headers: {
+        ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+        ...(options?.headers ?? {}),
+      },
+    })
+    if (!response.ok) {
+      let message = `${response.status} ${response.statusText}`
+      try {
+        const body = await response.json() as { message?: string; error?: string }
+        message = body.message || body.error || message
+      } catch {}
+      throw new Error(message)
+    }
+    return await response.json() as T
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('请求超时，来源可能离线或不可达')
+    }
+    throw error
+  } finally {
+    window.clearTimeout(timeout)
   }
-  return await response.json() as T
 }
 
 export type StorageFileEntry = AlistDriverEntry
@@ -152,6 +166,12 @@ export const storageApi = {
 
   copyTask: (srcDir: string, dstDir: string, names: string[]) =>
     request<{ task: StorageTaskRecord }>('/api/storage/fs/copy-task', {
+      method: 'POST',
+      body: JSON.stringify({ src_dir: srcDir, dst_dir: dstDir, names }),
+    }),
+
+  move: (srcDir: string, dstDir: string, names: string[]) =>
+    request<AlistDriverMutationResult>('/api/storage/fs/move', {
       method: 'POST',
       body: JSON.stringify({ src_dir: srcDir, dst_dir: dstDir, names }),
     }),

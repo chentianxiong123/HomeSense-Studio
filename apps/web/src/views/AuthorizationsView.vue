@@ -13,12 +13,12 @@ import DlnaAuthPanel from '@/components/auth/DlnaAuthPanel.vue'
 import MiAuthPanel from '@/components/auth/MiAuthPanel.vue'
 import SshAuthPanel from '@/components/auth/SshAuthPanel.vue'
 import StreamingAuthPanel from '@/components/auth/StreamingAuthPanel.vue'
-import StorageCredentialsPanel from '@/components/storage/StorageCredentialsPanel.vue'
+import CloudAuthPanel from '@/components/auth/CloudAuthPanel.vue'
 import { useLocale } from '@/composables/useLocale'
 
 type AuthTab = 'external' | 'local'
-type ExternalProviderId = 'mi' | 'bilibili'
-type LocalProviderId = 'adb' | 'dlna' | 'streaming' | 'alist' | 'ssh' | 'frp' | 'smb'
+type ExternalProviderId = 'mi' | 'bilibili' | 'cloud'
+type LocalProviderId = 'adb' | 'dlna' | 'streaming' | 'ssh' | 'frp'
 
 type MiStatusSummary = { loggedIn: boolean; boundCount: number }
 type BilibiliStatusSummary = { loggedIn: boolean; userName: string }
@@ -46,8 +46,6 @@ const streamingHostBasePort = ref('47989')
 const streamingHostMac = ref('')
 const streamingHostRoom = ref('')
 const streamingHostNetworkPath = ref('lan')
-const storageCredentialCount = ref(0)
-const storageCredentialsPanel = ref<InstanceType<typeof StorageCredentialsPanel> | null>(null)
 const miAuthPanel = ref<InstanceType<typeof MiAuthPanel> | null>(null)
 const miLoggedIn = ref(false)
 const miBoundCount = ref(0)
@@ -60,6 +58,8 @@ const dlnaAuthPanel = ref<InstanceType<typeof DlnaAuthPanel> | null>(null)
 const dlnaBoundCount = ref(0)
 const sshAuthPanel = ref<InstanceType<typeof SshAuthPanel> | null>(null)
 const sshTargetCount = ref(0)
+const cloudAuthPanel = ref<InstanceType<typeof CloudAuthPanel> | null>(null)
+const cloudDriveCount = ref(0)
 
 const busy = ref<Record<string, boolean>>({})
 const errorMessage = ref('')
@@ -120,6 +120,14 @@ const externalProviders = computed<AuthProviderItem<ExternalProviderId>[]>(() =>
     tone: bilibiliLoggedIn.value ? 'ok' as const : 'muted' as const,
     meta: bilibiliUserName.value || label('收藏夹', 'Favorites'),
   },
+  {
+    id: 'cloud' as const,
+    name: label('网盘', 'Cloud Drives'),
+    subtitle: label('百度网盘 / WebDAV', 'Baidu Netdisk / WebDAV'),
+    status: cloudDriveCount.value > 0 ? label('已配置', 'Configured') : label('未配置', 'Not configured'),
+    tone: cloudDriveCount.value > 0 ? 'ok' as const : 'muted' as const,
+    meta: `${cloudDriveCount.value} ${label('个网盘', 'drives')}`,
+  },
 ])
 
 const localProviders = computed<AuthProviderItem<LocalProviderId>[]>(() => [
@@ -148,14 +156,6 @@ const localProviders = computed<AuthProviderItem<LocalProviderId>[]>(() => [
     meta: `${streamingHostCount.value} ${label('台主机', 'hosts')}`,
   },
   {
-    id: 'alist' as const,
-    name: label('文件源', 'Storage Sources'),
-    subtitle: label('WebDAV / SSH/SFTP / ADB / 本地文件', 'WebDAV / SSH/SFTP / ADB / local files'),
-    status: storageCredentialCount.value > 0 ? label('已配置', 'Configured') : label('未配置', 'Not configured'),
-    tone: storageCredentialCount.value > 0 ? 'ok' as const : 'muted' as const,
-    meta: `${storageCredentialCount.value} ${label('个凭据', 'credentials')}`,
-  },
-  {
     id: 'ssh' as const,
     name: 'SSH',
     subtitle: label('主机登录', 'Host login'),
@@ -171,20 +171,15 @@ const localProviders = computed<AuthProviderItem<LocalProviderId>[]>(() => [
     tone: 'muted' as const,
     meta: label('局域网', 'Local'),
   },
-  {
-    id: 'smb' as const,
-    name: 'SMB',
-    subtitle: label('共享目录', 'File shares'),
-    status: label('待接入', 'Pending'),
-    tone: 'muted' as const,
-    meta: label('局域网', 'Local'),
-  },
 ])
 
 onMounted(() => {
   if (route.query.local === 'streaming') {
     activeTab.value = 'local'
     selectedLocal.value = 'streaming'
+  } else if (route.query.external === 'cloud') {
+    activeTab.value = 'external'
+    selectedExternal.value = 'cloud'
   }
   void loadAll()
 })
@@ -204,7 +199,7 @@ async function loadAll() {
     sshAuthPanel.value?.refresh(),
     loadStreamingHosts(),
     loadStreamingRuntimeStatus(),
-    storageCredentialsPanel.value?.refresh(),
+    cloudAuthPanel.value?.refresh(),
   ])
 }
 
@@ -411,6 +406,15 @@ function closeStreamingPairing() {
         @error="errorMessage = $event"
         @success="showSuccess"
       />
+
+      <CloudAuthPanel
+        v-else-if="selectedExternal === 'cloud'"
+        ref="cloudAuthPanel"
+        :label="label"
+        @count-change="cloudDriveCount = $event"
+        @error="errorMessage = $event"
+        @success="showSuccess"
+      />
     </section>
 
     <section v-else class="workspace">
@@ -466,15 +470,6 @@ function closeStreamingPairing() {
         @close-pairing="closeStreamingPairing"
       />
 
-      <StorageCredentialsPanel
-        v-else-if="selectedLocal === 'alist'"
-        ref="storageCredentialsPanel"
-        :label="label"
-        @count-change="storageCredentialCount = $event"
-        @error="errorMessage = $event"
-        @success="showSuccess"
-      />
-
       <SshAuthPanel
         v-else-if="selectedLocal === 'ssh'"
         ref="sshAuthPanel"
@@ -489,14 +484,6 @@ function closeStreamingPairing() {
         :scope="label('局域网账号', 'Local Network')"
         title="FRP"
         :description="label('FRP 内网穿透凭据和节点授权归这里。', 'FRP tunnel credentials and node authorization belong here.')"
-        :label="label"
-      />
-
-      <AuthPendingPanel
-        v-else-if="selectedLocal === 'smb'"
-        :scope="label('局域网账号', 'Local Network')"
-        title="SMB"
-        :description="label('SMB 共享目录账号和访问凭据归这里。', 'SMB share accounts and access credentials belong here.')"
         :label="label"
       />
     </section>
