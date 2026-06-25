@@ -10,6 +10,7 @@ defineProps<{
 const emit = defineEmits<{
   (event: 'refresh'): void
   (event: 'open-authorizations'): void
+  (event: 'toggle-sources'): void
   (event: 'create-mount'): void
 }>()
 </script>
@@ -17,13 +18,14 @@ const emit = defineEmits<{
 <template>
   <header class="page-head">
     <div>
-      <span class="eyebrow">{{ label('中枢文件层', 'Hub Storage') }}</span>
-      <h1>{{ label('文件工作台', 'Storage Workbench') }}</h1>
+      <span class="eyebrow">{{ label('文件系统中枢', 'Filesystem Hub') }}</span>
+      <h1>{{ label('文件中枢', 'File Hub') }}</h1>
     </div>
     <div class="head-actions">
       <button class="plain-btn" :disabled="disabled" @click="emit('refresh')">{{ label('刷新', 'Refresh') }}</button>
       <button class="plain-btn" @click="emit('open-authorizations')">{{ label('授权中心', 'Authorizations') }}</button>
-      <button class="primary-btn" :disabled="!canCreateMount" @click="emit('create-mount')">{{ label('新增挂载', 'Add Mount') }}</button>
+      <button class="plain-btn" @click="emit('toggle-sources')">{{ label('管理来源', 'Manage Sources') }}</button>
+      <button class="primary-btn" :disabled="!canCreateMount" @click="emit('create-mount')">{{ label('新增来源', 'Add Source') }}</button>
     </div>
   </header>
 </template>

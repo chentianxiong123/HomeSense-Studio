@@ -16,11 +16,11 @@ const emit = defineEmits<{
   <nav class="scope-tabs" :aria-label="label('授权分类', 'Authorization scope')">
     <button :class="['scope-tab', { active: activeTab === 'external' }]" @click="emit('update:activeTab', 'external')">
       <strong>{{ label('外部账号', 'External Accounts') }}</strong>
-      <span>Mi / Bilibili</span>
+      <span>Mi / Bilibili / {{ label('网盘', 'Cloud Drives') }}</span>
     </button>
     <button :class="['scope-tab', { active: activeTab === 'local' }]" @click="emit('update:activeTab', 'local')">
       <strong>{{ label('局域网账号', 'Local Network') }}</strong>
-      <span>ADB / DLNA / {{ label('串流', 'Streaming') }} / AList / SSH / FRP / SMB</span>
+      <span>ADB / DLNA / {{ label('串流', 'Streaming') }} / SSH / FRP</span>
     </button>
   </nav>
 </template>

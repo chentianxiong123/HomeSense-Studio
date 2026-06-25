@@ -38,8 +38,8 @@ function updateAuthorization(value: string) {
       <form class="dialog-panel" @submit.prevent="emit('submit')">
         <div class="dialog-head">
           <div>
-            <span class="eyebrow">{{ label('系统挂载', 'System Mount') }}</span>
-            <h2>{{ editing ? label('编辑挂载', 'Edit Mount') : label('新增挂载', 'Add Mount') }}</h2>
+            <span class="eyebrow">{{ label('文件来源', 'File Source') }}</span>
+            <h2>{{ editing ? label('编辑来源', 'Edit Source') : label('新增来源', 'Add Source') }}</h2>
           </div>
           <button type="button" class="plain-btn compact" @click="emit('close')">{{ label('关闭', 'Close') }}</button>
         </div>
@@ -56,18 +56,18 @@ function updateAuthorization(value: string) {
           </label>
 
           <label class="form-field">
-            <span>{{ label('显示名称', 'Name') }}</span>
+            <span>{{ label('来源名称', 'Source Name') }}</span>
             <input :value="name" class="form-input" :placeholder="label('家庭资料', 'Home Files')" @input="emit('update:name', ($event.target as HTMLInputElement).value)" />
           </label>
 
           <label class="form-field">
-            <span>{{ label('虚拟路径', 'Virtual Path') }}</span>
+            <span>{{ label('入口路径', 'Entry Path') }}</span>
             <input :value="path" class="form-input" placeholder="/资料" @input="emit('update:path', ($event.target as HTMLInputElement).value)" />
           </label>
 
           <label class="check-field full">
             <input :checked="readonly" type="checkbox" @change="emit('update:readonly', ($event.target as HTMLInputElement).checked)" />
-            <span>{{ label('只读挂载', 'Readonly mount') }}</span>
+            <span>{{ label('只读来源', 'Readonly source') }}</span>
           </label>
         </div>
 

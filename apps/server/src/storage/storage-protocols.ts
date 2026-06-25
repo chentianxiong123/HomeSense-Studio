@@ -2,6 +2,19 @@ import type { StorageProtocolSpec } from './storage.types'
 
 export const STORAGE_PROTOCOLS: StorageProtocolSpec[] = [
   {
+    id: 'baidu_netdisk',
+    name: '百度网盘',
+    status: 'implemented',
+    summary: 'Baidu Netdisk through the hidden AList sidecar. First slice supports account binding and browsing.',
+    default_root_path: '/',
+    readonly_default: false,
+    supports: { list: true, get: true, remove: false, copy: false, mkdir: false, upload: false, cross_mount_copy: false },
+    fields: [
+      { key: 'password', label: 'Refresh Token', required: true, secret: true },
+      { key: 'root_path', label: 'Remote Root Path', required: false, placeholder: '/' },
+    ],
+  },
+  {
     id: 'webdav',
     name: 'WebDAV',
     status: 'implemented',

@@ -7,7 +7,7 @@ import { pipeline } from 'node:stream/promises'
 import { PassThrough, Readable } from 'node:stream'
 import path from 'node:path'
 import { AlistAuthorizationService } from '../alist/alist-authorization.service'
-import type { AlistCopyInput, AlistDriverEntry, AlistDriverListResult, AlistDriverMutationResult } from '../alist/alist.types'
+import type { AlistCopyInput, AlistDriverEntry, AlistDriverListResult, AlistDriverMutationResult, AlistRemoveInput } from '../alist/alist.types'
 import { cliBridge } from '../cli/cli-bridge'
 import { KeyStore } from '../terminal/keystore'
 import { StorageMountService } from './storage-mount.service'
@@ -29,6 +29,7 @@ export class StorageTransferService {
     const driver = normalizeDriver(mount.driver)
     if (driver === 'adb') return this.downloadAdb(mount, rawPath, output)
     if (driver === 'sftp') return this.downloadSftp(mount, rawPath, output)
+    if (driver === 'baidu_netdisk') throw new BadRequestException('百度网盘下载还没有接入，当前先支持绑定和浏览')
     if (driver === 'webdav') return this.downloadWebdav(mount, rawPath, output)
     if (driver === 'local' || driver === 'smb' || driver === 'nfs') return this.downloadLocal(mount, rawPath, output)
     throw new BadRequestException(`Download is not implemented for driver: ${driver}`)
@@ -41,6 +42,7 @@ export class StorageTransferService {
     const driver = normalizeDriver(mount.driver)
     if (driver === 'adb') return this.uploadAdb(mount, rawPath, input)
     if (driver === 'sftp') return this.uploadSftp(mount, rawPath, input)
+    if (driver === 'baidu_netdisk') throw new BadRequestException('百度网盘写入还没有接入，当前先支持绑定和浏览')
     if (driver === 'webdav') return this.uploadWebdav(mount, rawPath, input)
     if (driver === 'local' || driver === 'smb' || driver === 'nfs') return this.uploadLocal(mount, rawPath, input)
     throw new BadRequestException(`Upload is not implemented for driver: ${driver}`)
@@ -53,6 +55,7 @@ export class StorageTransferService {
     const driver = normalizeDriver(mount.driver)
     if (driver === 'adb') return this.mkdirAdb(mount, rawPath)
     if (driver === 'sftp') return this.mkdirSftpPath(mount, rawPath)
+    if (driver === 'baidu_netdisk') throw new BadRequestException('百度网盘新建文件夹还没有接入，当前先支持绑定和浏览')
     if (driver === 'webdav') return this.mkdirWebdav(mount, rawPath)
     if (driver === 'local' || driver === 'smb' || driver === 'nfs') return this.mkdirLocal(mount, rawPath)
     throw new BadRequestException(`Mkdir is not implemented for driver: ${driver}`)
@@ -115,6 +118,31 @@ export class StorageTransferService {
       report?.({ progress: progressFor(copied, Math.max(files.length, 1)), message: `copied ${copied}/${files.length}` })
     }
     return { copied }
+  }
+
+  async removeTree(
+    input: AlistRemoveInput,
+    list: (path: string) => Promise<AlistDriverListResult>,
+    remove: (input: AlistRemoveInput) => Promise<AlistDriverMutationResult>,
+    report?: TransferProgressReporter,
+  ): Promise<AlistDriverMutationResult> {
+    const dir = requiredVirtualPath(input.dir, 'dir')
+    const names = requiredNames(input.names)
+    const plan: Array<{ dir: string; name: string; path: string; isDir: boolean }> = []
+
+    for (const name of names) {
+      const targetPath = cleanVirtualPath(path.posix.join(dir, name))
+      await this.collectRemovePlan(targetPath, list, plan)
+    }
+
+    let removed = 0
+    for (const item of plan) {
+      report?.({ progress: progressFor(removed, Math.max(plan.length, 1)), message: `removing ${item.name}` })
+      await remove({ dir: item.dir, names: [item.name] })
+      removed += 1
+      report?.({ progress: progressFor(removed, Math.max(plan.length, 1)), message: `removed ${removed}/${plan.length}` })
+    }
+    return { removed: names.length }
   }
 
   private async downloadLocal(mount: StorageMountRecord, rawPath: string, output: NodeJS.WritableStream): Promise<{ name: string }> {
@@ -331,6 +359,26 @@ export class StorageTransferService {
     for (const child of children.entries) {
       await this.collectCopyPlan(child.path, cleanVirtualPath(path.posix.join(dstPath, child.name)), list, plan)
     }
+  }
+
+  private async collectRemovePlan(
+    targetPath: string,
+    list: (path: string) => Promise<AlistDriverListResult>,
+    plan: Array<{ dir: string; name: string; path: string; isDir: boolean }>,
+  ): Promise<void> {
+    const detail = await this.entryDetail(targetPath, list)
+    if (detail.is_dir) {
+      const children = await list(targetPath)
+      for (const child of children.entries) {
+        await this.collectRemovePlan(child.path, list, plan)
+      }
+    }
+    plan.push({
+      dir: cleanVirtualPath(path.posix.dirname(targetPath)),
+      name: path.posix.basename(targetPath),
+      path: targetPath,
+      isDir: detail.is_dir,
+    })
   }
 
   private async entryDetail(srcPath: string, list: (path: string) => Promise<AlistDriverListResult>): Promise<Pick<AlistDriverEntry, 'is_dir'>> {

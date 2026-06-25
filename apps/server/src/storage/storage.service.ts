@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common'
+import { AlistSidecarService } from '../alist/alist-sidecar.service'
 import { AlistService } from '../alist/alist.service'
 import type {
   AlistCopyInput,
@@ -25,6 +26,7 @@ export class StorageService {
   constructor(
     private readonly mounts: StorageMountService,
     private readonly alist: AlistService,
+    private readonly alistSidecar: AlistSidecarService,
     private readonly sftp: SftpStorageService,
     private readonly adb: AdbStorageService,
     private readonly tasks: StorageTaskService,
@@ -36,7 +38,7 @@ export class StorageService {
     const extraDrivers = new Set<string>()
     for (const mount of this.mounts.list().mounts) {
       const driver = normalizeDriver(mount.driver)
-      if (driver === 'sftp' || driver === 'adb' || driver === 'smb' || driver === 'nfs') extraDrivers.add(driver)
+      if (driver === 'sftp' || driver === 'adb' || driver === 'smb' || driver === 'nfs' || driver === 'baidu_netdisk') extraDrivers.add(driver)
     }
     return { ...health, drivers: Array.from(new Set([...health.drivers, ...extraDrivers])).sort() }
   }
@@ -50,6 +52,9 @@ export class StorageService {
     if (mount && normalizeDriver(mount.driver) === 'adb') {
       return this.adb.list(mount, input)
     }
+    if (mount && normalizeDriver(mount.driver) === 'baidu_netdisk') {
+      return this.alistSidecar.list(mount, input.path ?? mount.virtual_path)
+    }
     return this.alist.listForProps(this.buildDriverProps(), input)
   }
 
@@ -62,6 +67,9 @@ export class StorageService {
     if (mount && normalizeDriver(mount.driver) === 'adb') {
       return this.adb.get(mount, input)
     }
+    if (mount && normalizeDriver(mount.driver) === 'baidu_netdisk') {
+      return this.alistSidecar.get(mount, input.path ?? mount.virtual_path)
+    }
     return this.alist.getForProps(this.buildDriverProps(), input)
   }
 
@@ -73,6 +81,9 @@ export class StorageService {
     }
     if (mount && normalizeDriver(mount.driver) === 'adb') {
       return this.adb.remove(mount, input)
+    }
+    if (mount && normalizeDriver(mount.driver) === 'baidu_netdisk') {
+      throw new BadRequestException('百度网盘删除还没有接入，当前先支持绑定和浏览')
     }
     return this.alist.removeForProps(this.buildDriverProps(), input)
   }
@@ -99,11 +110,17 @@ export class StorageService {
       report?.({ progress: 20, message: 'copying in ADB mount' })
       return this.adb.copy(srcMount, input)
     }
+    if (srcMount && normalizeDriver(srcMount.driver) === 'baidu_netdisk') {
+      throw new BadRequestException('百度网盘复制还没有接入，当前先支持绑定和浏览')
+    }
     if (dstMount && normalizeDriver(dstMount.driver) === 'sftp') {
       throw new BadRequestException('SFTP cross-mount copy is not implemented yet')
     }
     if (dstMount && normalizeDriver(dstMount.driver) === 'adb') {
       throw new BadRequestException('ADB cross-mount copy is not implemented yet')
+    }
+    if (dstMount && normalizeDriver(dstMount.driver) === 'baidu_netdisk') {
+      throw new BadRequestException('百度网盘写入还没有接入，当前先支持绑定和浏览')
     }
     report?.({ progress: 20, message: 'copying in storage driver' })
     return this.alist.copyForProps(this.buildDriverProps(), input)
@@ -114,6 +131,18 @@ export class StorageService {
     return this.tasks.createCopyTask(input, (report) => this.transfers.copyTree(input, (targetPath) => this.list({ path: targetPath }), report))
   }
 
+  async move(input: AlistCopyInput, report?: StorageProgressReporter): Promise<AlistDriverMutationResult> {
+    this.ensureMounts()
+    const copyResult = await this.transfers.copyTree(input, (targetPath) => this.list({ path: targetPath }), report)
+    await this.transfers.removeTree(
+      { dir: input.src_dir, names: input.names },
+      (targetPath) => this.list({ path: targetPath }),
+      (removeInput) => this.remove(removeInput),
+      report,
+    )
+    return { copied: copyResult.copied ?? input.names?.length ?? 0, removed: input.names?.length ?? 0 }
+  }
+
   mkdir(path: string): Promise<{ created: number }> {
     this.ensureMounts()
     return this.transfers.mkdir(path)
@@ -122,14 +151,16 @@ export class StorageService {
   private buildDriverProps(): AlistDriverProps {
     const mounts = this.mounts.list().mounts
     return {
-      mounts: mounts.map((mount) => ({
-        path: mount.virtual_path,
-        label: mount.name,
-        driver: localBackedDriver(mount.driver) ? 'local' : mount.driver,
-        authorization_id: mount.authorization_id,
-        readonly: mount.readonly,
-        ...mount.props,
-      })),
+      mounts: mounts
+        .filter((mount) => normalizeDriver(mount.driver) !== 'baidu_netdisk')
+        .map((mount) => ({
+          path: mount.virtual_path,
+          label: mount.name,
+          driver: localBackedDriver(mount.driver) ? 'local' : mount.driver,
+          authorization_id: mount.authorization_id,
+          readonly: mount.readonly,
+          ...mount.props,
+        })),
     }
   }
 

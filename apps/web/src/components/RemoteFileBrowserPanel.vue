@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { RemoteWorkspaceFileEntry, RemoteWorkspaceFileList, RemoteWorkspaceFilePreview } from '@/api/remoteWorkspace'
+import { formatCommonDateTime } from '@/utils/chinaTime'
 
 const props = withDefaults(defineProps<{
   title: string
@@ -48,7 +49,8 @@ function entryKindLabel(entry: RemoteWorkspaceFileEntry) {
 function entryMeta(entry: RemoteWorkspaceFileEntry) {
   const parts: string[] = [entry.type]
   if (entry.size != null && entry.type !== 'directory') parts.push(props.formatFileSize(entry.size))
-  if (entry.modified_at) parts.push(entry.modified_at)
+  const modifiedAt = formatCommonDateTime(entry.modified_at)
+  if (modifiedAt) parts.push(modifiedAt)
   return parts.join(' · ')
 }
 
