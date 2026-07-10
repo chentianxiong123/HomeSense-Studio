@@ -1,0 +1,99 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build
+frontend/dist/
+backend/dist/
+
+# Logs
+logs/
+*.log
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Configs with secrets
+backend/configs/config.yaml
+backend/data/auth.json
+
+# Cache
+backend/data/episodes_cache.json
+backend/data/sites.json
+backend/data/audio_cache/
+__pycache__/
+
+# Audio files (generated)
+*.mp3
+backend/test_output.mp3
+
+# Gradle wrapper jar (download on demand)
+frontend/android/gradle/wrapper/gradle-wrapper.jar
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test files
+test_*.py
+*_test.py
+
+# Temporary files
+*.tmp
+*.temp
+
+# Android
+frontend/android/.gradle/
+frontend/android/app/build/
+frontend/android/build/
+frontend/android/.idea/
+frontend/android/local.properties
+frontend/android/app/src/main/assets/public/
+
+# Playwright
+.playwright/
+
+# Reference projects
+reference/
+MiAir/
+nisheng/
+xiaomusic/
