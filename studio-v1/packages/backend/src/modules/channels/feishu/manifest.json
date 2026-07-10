@@ -1,0 +1,12 @@
+{
+  "name": "channel.feishu.send",
+  "kind": "channel",
+  "display_name": "飞书自定义机器人",
+  "description": "向飞书群 Webhook 发送消息（占位，真实 webhook 由用户在环境变量配置）",
+  "endpoint_env": "FEISHU_BOT_WEBHOOK",
+  "fields": {
+    "text": { "description": "消息正文", "required": true },
+    "msg_type": { "description": "text/interactive/post", "required": false, "default": "text" },
+    "card": { "description": "interactive 卡片 JSON", "required": false }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "hami-cli",
+  "archived": true,
+  "executable": "./runner.mjs",
+  "protocol": "in_process_module",
+  "cwd": ".",
+  "args": [],
+  "timeout_ms": 30000,
+  "actions": {
+    "tv_remote": {
+      "description": "Send a virtual IR remote command.",
+      "params_schema": {
+        "device": "string",
+        "command": "string"
+      }
+    }
+  }
+}
