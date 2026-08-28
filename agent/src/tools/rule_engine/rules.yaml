@@ -1,0 +1,12 @@
+rules:
+  - trigger: "打开乐视电视"
+  - trigger: "打开乐视电视机"
+  - trigger: "打开机顶盒"
+  - trigger: "小爱音箱放歌"
+  - trigger: "小爱音响放歌"
+  - trigger: "打开B站"
+  - trigger: "打开电视"
+  - trigger: "返回"
+  - trigger: "主页"
+  - trigger: "打开当贝市场"
+  - trigger: "腾讯视频"

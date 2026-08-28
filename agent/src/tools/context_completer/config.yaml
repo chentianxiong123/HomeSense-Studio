@@ -1,0 +1,42 @@
+rules:
+  - trigger_pattern: "看.*"
+    default_device_type: "tv"
+    completion_template: "在{device}上{content}"
+
+  - trigger_pattern: "听.*歌"
+    default_device_type: "speaker"
+    completion_template: "用{device}播放音乐"
+
+  - trigger_pattern: "播放音乐"
+    default_device_type: "speaker"
+    completion_template: "用{device}播放音乐"
+
+  - trigger_pattern: "打开.*"
+    default_device_type: ""
+    completion_template: "{content}"
+
+devices:
+  - device: "tv_letv"
+    label: "乐视电视"
+    keywords: ["乐视", "乐视电视"]
+    type: "tv"
+
+  - device: "toshiba_tv"
+    label: "东芝电视"
+    keywords: ["东芝", "东芝电视", "toshiba"]
+    type: "tv"
+
+  - device: "stb"
+    label: "机顶盒"
+    keywords: ["机顶盒", "盒子"]
+    type: "stb"
+
+  - device: "xiaoai_speaker"
+    label: "小爱音箱"
+    keywords: ["小爱", "音箱", "音响"]
+    type: "speaker"
+
+pronouns: ["它", "那个", "这个", "他", "她"]
+
+history_limit: 10
+decay_factor: 0.9
