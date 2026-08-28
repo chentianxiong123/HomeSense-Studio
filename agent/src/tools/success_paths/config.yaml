@@ -1,4 +1,0 @@
-dbPath: "./data/paths.json"
-minSuccessRate: 0.8
-useVectorService: true
-vectorServiceUrl: "http://localhost:8001"

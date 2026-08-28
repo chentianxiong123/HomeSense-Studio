@@ -1,4 +1,0 @@
-provider: "duckduckgo"
-apiKey: ""
-maxResults: 5
-timeoutMs: 10000
