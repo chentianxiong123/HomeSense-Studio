@@ -11,6 +11,7 @@ export type RuntimeCapabilityDomain =
   | 'provider'
   | 'workflow_node'
   | 'skill'
+  | 'mcp'
 
 export interface RuntimeCapabilityAction {
   name: string

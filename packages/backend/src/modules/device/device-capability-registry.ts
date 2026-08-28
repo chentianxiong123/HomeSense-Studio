@@ -1,4 +1,4 @@
-import type { CLIBridge } from '../cli-bridge/index.js'
+import type { CLIBridge } from '../integration/index.js'
 
 export type JsonSchema = Record<string, unknown>
 

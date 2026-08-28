@@ -1,19 +1,22 @@
-export const APP_DEFAULT_ROUTE = '/studio'
+export const APP_DEFAULT_ROUTE = '/home'
 export const LAST_ROUTE_STORAGE_KEY = 'homesense-studio.last-route'
 
 const ROUTE_PATTERNS = [
+  /^\/home$/,
   /^\/chat$/,
   /^\/studio$/,
+  /^\/workspace$/,
   /^\/assets$/,
   /^\/devices$/,
   /^\/integrations$/,
   /^\/mi$/,
   /^\/studio\/workflows\/[^/]+\/(overview|editor|runs)$/,
   /^\/assets\/device-skills\/[^/]+\/overview$/,
-  /^\/assets\/skills\/[^/]+\/(overview|prompt)$/,
+  /^\/assets\/skills\/[^/]+\/(overview|sections|prompt)$/,
   /^\/assets\/manifests\/[^/]+\/overview$/,
   /^\/assets\/plans\/[^/]+\/overview$/,
   /^\/assets\/memory\/[^/]+\/overview$/,
+  /^\/assets\/mcp\/[^/]+\/overview$/,
   /^\/assets\/agents\/[^/]+\/overview$/,
 ]
 

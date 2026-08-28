@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { getDb } from '../../db/index.js'
-import { ruleEngine } from '../rule-engine/index.js'
+import { ruleEngine } from './index.js'
 
 export async function ruleRoutes(app: FastifyInstance) {
   app.get('/api/rules', async () => {

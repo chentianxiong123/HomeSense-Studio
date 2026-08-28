@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { cliBridge } from '../cli-bridge/index.js'
+import { cliBridge } from '../integration/index.js'
 import { loadAdbConnections, upsertAdbConnection, removeAdbConnection } from './adb-connections-store.js'
 
 export async function deviceRoutes(app: FastifyInstance) {

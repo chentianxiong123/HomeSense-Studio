@@ -1,8 +1,7 @@
-import { cliBridge as defaultCliBridge, type CLIResult, type CLIBridge } from '../cli-bridge/index.js'
-import { agentAdapterRegistry as defaultAgentAdapterRegistry, type AgentCliAdapterBinding } from '../agent-adapter/index.js'
-import { serviceRegistry as defaultServiceRegistry } from '../service-registry/index.js'
-import { planLibrary as defaultPlanLibrary, type CompiledPlanDefinition, type PlanStepDefinition } from '../plan-library/index.js'
-import { memoryKernel as defaultMemoryKernel } from '../memory-kernel/index.js'
+import { cliBridge as defaultCliBridge, type CLIResult, type CLIBridge } from '../integration/index.js'
+import { serviceRegistry as defaultServiceRegistry } from '../registry/index.js'
+import { planLibrary as defaultPlanLibrary, type CompiledPlanDefinition, type PlanStepDefinition } from '../plan/index.js'
+import { memoryKernel as defaultMemoryKernel } from '../memory/index.js'
 
 interface ServiceRegistryInstance {
   call(serviceName: string, params: Record<string, unknown>): Promise<unknown>
@@ -27,7 +26,6 @@ interface MemoryKernelInstance {
   }): void
 }
 
-type AgentAdapterRegistryInstance = Pick<import('../agent-adapter/index.js').AgentAdapterRegistry, 'listEnabledTargets' | 'buildDispatchTemplate' | 'get'>
 
 export type ExecutorKind = 'cli' | 'service' | 'workflow' | 'agent' | 'plan'
 
@@ -74,7 +72,6 @@ export class ExecutorGatewayService {
 
   constructor(
     private readonly cliBridge: CLIBridge = defaultCliBridge,
-    private readonly agentAdapterRegistry: AgentAdapterRegistryInstance = defaultAgentAdapterRegistry,
     private readonly serviceRegistry: ServiceRegistryInstance = defaultServiceRegistry,
     private readonly planLibrary: PlanLibraryInstance = defaultPlanLibrary,
     private readonly memoryKernel: MemoryKernelInstance = defaultMemoryKernel,
@@ -151,47 +148,6 @@ export class ExecutorGatewayService {
       }
       const inputs = (params.inputs as Record<string, unknown>) ?? {}
       return this.workflowRuntime!.runWorkflow(workflowId, inputs)
-    })
-
-    this.register({
-      name: 'agent.dispatch',
-      kind: 'agent',
-      description: 'Dispatch a structured task envelope to a registered local capability adapter.',
-      enabled: true,
-      capabilities: ['device', 'adapter', 'dry_run'],
-      metadata: {
-        mode: 'dry_run',
-        supported_targets: this.agentAdapterRegistry.listEnabledTargets(),
-        param_template: this.agentAdapterRegistry.buildDispatchTemplate(),
-      },
-    }, async (params) => {
-      const target = String(params.target ?? '')
-      const task = String(params.task ?? '')
-      const payload = (params.payload as Record<string, unknown>) ?? {}
-      const executionMode = String(params.execution_mode ?? 'deferred')
-
-      if (!target) {
-        throw new Error('target is required')
-      }
-      if (!task) {
-        throw new Error('task is required')
-      }
-
-      const adapter = this.agentAdapterRegistry.get(target)
-      const adapterResult = adapter?.adapter_binding?.kind === 'cli'
-        ? await this.dispatchCliAdapter(adapter.adapter_binding, payload)
-        : null
-
-      return {
-        dispatch_id: `dispatch_${Date.now()}`,
-        status: adapterResult ? 'executed' : 'planned',
-        target,
-        task,
-        payload,
-        execution_mode: executionMode,
-        adapter_result: adapterResult ?? undefined,
-        accepted_at: new Date().toISOString(),
-      }
     })
 
     this.register({
@@ -375,18 +331,9 @@ export class ExecutorGatewayService {
     return null
   }
 
-  private async dispatchCliAdapter(
-    binding: AgentCliAdapterBinding,
-    payload: Record<string, unknown>,
-  ): Promise<CLIResult | null> {
-    const action = typeof payload.action === 'string'
-      ? payload.action
-      : binding.default_action
-    const { action: _action, ...cliPayload } = payload
-    return this.cliBridge.run(binding.cli_name, action, cliPayload)
-  }
+
 }
 
 export const executorGateway = new ExecutorGatewayService()
 export const defaultExecutorGateway = executorGateway
-export type { ServiceRegistryInstance, PlanLibraryInstance, WorkflowRuntimeInstance, MemoryKernelInstance, AgentAdapterRegistryInstance }
+export type { ServiceRegistryInstance, PlanLibraryInstance, WorkflowRuntimeInstance, MemoryKernelInstance }

@@ -1,19 +1,47 @@
 # Bilibili CLI
 
-Local dry-run executor for Bilibili-oriented media workflow demos.
+Real Bilibili CLI bridge for HomeSense Studio.
 
 ## Role
 
-This skill proves that HomeSense Studio can treat a third-party media automation CLI as a first-class executor. It is intentionally dry-run first: no upload or network request is made unless a future implementation adds credentials and explicitly disables `dry_run`.
+This skill wraps the upstream `jackwener/bilibili-cli` checkout as a structured executor.
+It is for read/query actions first: status, profile, search, video details, rankings, feed, collections, and interaction calls.
 
-## Actions
+## How it runs
 
-- `health`: inspect runtime readiness and supported actions.
-- `prepare_upload`: create a local upload draft with metadata and preflight checks.
-- `set_metadata`: update a local draft.
-- `list_drafts`: inspect staged drafts.
-- `submit_upload`: validate and mark a draft as staged/submitted. Defaults to dry-run.
+- The local bridge lives at `packages/bilibili-cli/src/index.mjs`
+- It calls the reference checkout with `uv run bili ... --json`
+- The bridge converts the upstream `ok/schema_version/data/error` envelope into the HomeSense `{ status, data, error }` shape
 
-## State
+## Use
 
-Drafts are stored at `data/bilibili-cli-state.json` by default. Override with `HOMESENSE_BILIBILI_STATE` when testing in isolation.
+Prefer narrow queries:
+
+- `health`
+- `status`
+- `whoami`
+- `video`
+- `user`
+- `user_videos`
+- `search`
+- `hot`
+- `rank`
+- `favorites`
+- `following`
+- `watch_later`
+- `history`
+- `feed`
+- `my_dynamics`
+- `dynamic_post`
+- `dynamic_delete`
+- `like`
+- `coin`
+- `triple`
+- `unfollow`
+
+## Notes
+
+- `health` does not touch the network.
+- `video` can include subtitles, comments, AI summary, and related videos.
+- Write actions still require the upstream CLI's real authentication.
+- If you need a different reference checkout, set `HOMESENSE_BILIBILI_CLI_DIR`.

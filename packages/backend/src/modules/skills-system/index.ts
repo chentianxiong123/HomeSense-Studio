@@ -15,6 +15,13 @@ export interface SkillDefinition {
   enabled: boolean
 }
 
+export interface SkillSection {
+  id: string
+  title: string
+  level: number
+  body: string
+}
+
 interface EventBusInstance {
   fire(event: string, data?: unknown): void
   on(event: string, handler: (...args: unknown[]) => void): void
@@ -115,6 +122,11 @@ export class SkillsService {
     }
 
     return skill.description
+  }
+
+  async loadSkillSections(skillName: string): Promise<SkillSection[]> {
+    const content = await this.loadFullSkill(skillName)
+    return parseMarkdownSections(content)
   }
 
   private parseSkillMd(content: string): {
@@ -235,3 +247,45 @@ export class SkillsService {
 }
 
 export const skillsService = new SkillsService()
+
+function parseMarkdownSections(content: string): SkillSection[] {
+  const lines = content.split(/\r?\n/)
+  const sections: SkillSection[] = []
+  let current: SkillSection | null = null
+  const bodyLines: string[] = []
+
+  const flush = () => {
+    if (!current) return
+    current.body = bodyLines.join('\n').trim()
+    sections.push(current)
+    bodyLines.length = 0
+  }
+
+  for (const line of lines) {
+    const heading = line.match(/^(#{1,4})\s+(.+)$/)
+    if (heading) {
+      flush()
+      const title = heading[2].trim()
+      current = {
+        id: slugify(title),
+        title,
+        level: heading[1].length,
+        body: '',
+      }
+      continue
+    }
+    if (current) bodyLines.push(line)
+  }
+
+  flush()
+  return sections
+}
+
+function slugify(value: string): string {
+  const slug = value
+    .toLowerCase()
+    .replace(/[`"'：:，,。.!?？/\\()[\]{}]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, '-')
+  return slug || 'section'
+}

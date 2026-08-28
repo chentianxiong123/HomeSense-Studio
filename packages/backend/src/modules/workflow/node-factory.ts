@@ -23,12 +23,12 @@ import {
   HumanInputWorkflowNode,
 } from './built-in-nodes.js'
 import { workflowNodeDefinitionRegistry } from './node-definitions.js'
-import { cliBridge } from '../cli-bridge/index.js'
-import { candidatePlanService } from '../candidate-plan/index.js'
+import { cliBridge } from '../integration/index.js'
+import { candidatePlanService } from '../plan/index.js'
 import { executorGateway } from '../executor-gateway/index.js'
 import { executeDeviceAgentTool } from '../device/device-agent-tools.js'
 import { llmService } from '../llm-provider/service.js'
-import { memoryKernel } from '../memory-kernel/index.js'
+import { memoryKernel } from '../memory/index.js'
 import { rerankService } from '../rerank-service/index.js'
 import type { WorkflowNode } from './types.js'
 

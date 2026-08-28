@@ -2,9 +2,9 @@ import { StateGraph, START, END, Annotation } from '@langchain/langgraph'
 import { llmService } from '../llm-provider/service.js'
 import { executorGateway } from '../executor-gateway/index.js'
 import type { ExecutorInvokeResult } from '../executor-gateway/index.js'
-import { intentRouter, type IntentRouterResult } from '../intent-router/index.js'
-import { approvalRegistry, isHighRiskCliCall } from '../approval/index.js'
-import { matchCommand } from '../command/routes.js'
+import { intentRouter, type IntentRouterResult } from '../intent/index.js'
+import { matchCommand } from '../integration/command.routes.js'
+import { shouldAttemptL1Reflex } from '../integration/command.l1-reflex-policy.js'
 import {
   DEVICE_AGENT_TOOL_DEFINITIONS,
   executeDeviceAgentTool,
@@ -26,10 +26,18 @@ import {
   executeSystemAgentTool,
   isSystemAgentTool,
 } from '../system-tools/index.js'
-import type { CandidatePlan } from '../candidate-plan/index.js'
-import type { PlanStepDefinition } from '../plan-library/index.js'
-import type { RuleAction } from '../rule-engine/index.js'
-import type { RuntimeContextWindow } from '../runtime-context/index.js'
+import { getL3Agent, type L3Agent } from './l3/index.js'
+import {
+  classifyL3ToolPolicy,
+  describeToolPolicy,
+  filterToolDefinitionsForPolicy,
+  isToolAllowedByPolicy,
+  type L3ToolPolicyKind,
+} from './l3/tool-policy.js'
+import type { CandidatePlan } from '../plan/index.js'
+import type { PlanStepDefinition } from '../plan/index.js'
+import type { RuleAction } from '../rule/index.js'
+import type { RuntimeContextWindow } from '../runtime/index.js'
 
 export interface RuntimeTraceEvent {
   stage: 'runtime.intent' | 'runtime.context' | 'runtime.l1.command' | 'runtime.l1.rule' | 'runtime.l2.candidates' | 'runtime.decision' | 'runtime.l3.llm' | 'runtime.execution'
@@ -49,6 +57,9 @@ interface LightIntent {
   prompt_mode: PromptMode
   context_policy: PromptContextPolicy
   allow_tools: boolean
+  l1_allowed?: boolean
+  tool_policy?: L3ToolPolicyKind
+  tool_policy_reason?: string
   confidence: number
   reason: string
 }
@@ -156,7 +167,15 @@ const CHAT_AGENT_TOOL_DEFINITIONS = [
 ]
 
 async function lightIntentNode(state: State): Promise<Partial<State>> {
-  const intent = classifyLightIntent(state.input, state.runtimeContext)
+  const baseIntent = classifyLightIntent(state.input, state.runtimeContext)
+  const toolPolicy = classifyL3ToolPolicy(state.input, state.runtimeContext)
+  const intent: LightIntent = {
+    ...baseIntent,
+    allow_tools: toolPolicy.kind !== 'none',
+    l1_allowed: toolPolicy.l1_reflex_allowed,
+    tool_policy: toolPolicy.kind,
+    tool_policy_reason: toolPolicy.reason,
+  }
   const deviceInventory = await buildDeviceInventorySnapshot()
   const runtimeTrace: RuntimeTraceEvent[] = [
     {
@@ -169,6 +188,9 @@ async function lightIntentNode(state: State): Promise<Partial<State>> {
         prompt_mode: intent.prompt_mode,
         context_policy: intent.context_policy,
         allow_tools: intent.allow_tools,
+        l1_allowed: intent.l1_allowed,
+        tool_policy: intent.tool_policy,
+        tool_policy_reason: intent.tool_policy_reason,
       },
     },
   ]
@@ -181,6 +203,8 @@ async function lightIntentNode(state: State): Promise<Partial<State>> {
     data: {
       disclosure: 'device_inventory_only',
       tools_available: intent.allow_tools,
+      tool_policy: intent.tool_policy,
+      l1_allowed: intent.l1_allowed,
       context_usage: state.runtimeContext?.context_usage,
       max_turns: state.runtimeContext?.max_turns,
       ttl_ms: state.runtimeContext?.ttl_ms,
@@ -207,15 +231,22 @@ async function executeContextCommand(match: CommandMatch): Promise<ExecutorInvok
   })
 }
 
-async function rehearseContextCommand(match: CommandMatch): Promise<ExecutorInvokeResult> {
-  return executeDeviceAgentTool('rehearse_device_capability', {
-    device_id: match.device_id,
-    capability: match.capability,
-    arguments: match.ir_key ? { key: match.ir_key } : {},
-  })
-}
-
 async function l1ContextCommandNode(state: State): Promise<Partial<State>> {
+  const reflexGate = shouldAttemptL1Reflex(state.input)
+  if (!reflexGate.allowed) {
+    return {
+      runtimeTrace: [
+        {
+          stage: 'runtime.l1.command',
+          status: 'skipped',
+          title: 'L1 反射层跳过',
+          detail: reflexGate.reason,
+          data: { input: state.input },
+        },
+      ],
+    }
+  }
+
   const match = matchCommand(state.input, state.runtimeContext) ?? undefined
   if (!match) {
     return {
@@ -284,9 +315,7 @@ async function l1ContextExecutionNode(state: State): Promise<Partial<State>> {
     return {}
   }
 
-  const rehearsalToolCallId = `l1_rehearse_${Date.now()}`
   const executeToolCallId = `l1_execute_${Date.now()}`
-  const rehearsalToolName = 'rehearse_device_capability'
   const executeToolName = 'context-command'
   const args = {
     device_id: match.device_id,
@@ -298,14 +327,6 @@ async function l1ContextExecutionNode(state: State): Promise<Partial<State>> {
     content: '',
     tool_calls: [
       {
-        id: rehearsalToolCallId,
-        type: 'function' as const,
-        function: {
-          name: rehearsalToolName,
-          arguments: JSON.stringify(args),
-        },
-      },
-      {
         id: executeToolCallId,
         type: 'function' as const,
         function: {
@@ -316,25 +337,7 @@ async function l1ContextExecutionNode(state: State): Promise<Partial<State>> {
     ],
   }
 
-  const rehearsal = await rehearseContextCommand(match)
-  const rehearsalData = rehearsal.data as { ok?: boolean; executable?: boolean } | undefined
-  const rehearsalPassed = rehearsal.status === 'success' && rehearsalData?.ok !== false && rehearsalData?.executable !== false
-  const result = rehearsalPassed
-    ? await executeContextCommand(match)
-    : {
-        status: 'error' as const,
-        executor: executeToolName,
-        error: rehearsal.message ?? rehearsal.error ?? 'SANDBOX_REHEARSAL_FAILED',
-        message: '沙箱演练未通过，已停止真实执行。',
-      }
-  const rehearsalToolMsg = {
-    role: 'tool',
-    tool_call_id: rehearsalToolCallId,
-    name: rehearsalToolName,
-    content: rehearsal.status === 'success'
-      ? JSON.stringify(rehearsal.data ?? { status: 'ok' })
-      : JSON.stringify({ error: rehearsal.message ?? rehearsal.error ?? 'Unknown rehearsal error' }),
-  }
+  const result = await executeContextCommand(match)
   const executeToolMsg = {
     role: 'tool',
     tool_call_id: executeToolCallId,
@@ -345,18 +348,8 @@ async function l1ContextExecutionNode(state: State): Promise<Partial<State>> {
   }
 
   return {
-    messages: [assistantMsg, rehearsalToolMsg, executeToolMsg],
+    messages: [assistantMsg, executeToolMsg],
     runtimeTrace: [
-      {
-        stage: 'runtime.execution',
-        status: rehearsalTraceStatus(rehearsal),
-        title: '沙箱演练',
-        detail: rehearsalTraceDetail(rehearsal),
-        data: {
-          ...args,
-          rehearsal: rehearsal.status === 'success' ? rehearsal.data : undefined,
-        },
-      },
       {
         stage: 'runtime.decision',
         status: result.status === 'success' ? 'execute' : 'error',
@@ -539,17 +532,19 @@ async function runtimeExecutionNode(state: State): Promise<Partial<State>> {
 }
 
 // ── Node: LLM Inference ──
-async function inferenceNode(state: State): Promise<Partial<State>> {
-  const allowTools = state.lightIntent?.allow_tools === true
+async function currentInferenceNode(state: State): Promise<Partial<State>> {
+  const toolPolicy = resolveL3ToolPolicyKind(state)
+  const allowedTools = filterToolDefinitionsForPolicy(CHAT_AGENT_TOOL_DEFINITIONS, toolPolicy)
+  const allowTools = allowedTools.length > 0
   const messages = await buildInferenceMessages(state)
 
   try {
-    return await runLlmInference(state, messages, allowTools, false)
+    return await runLlmInference(state, messages, allowTools, allowedTools, toolPolicy, false)
   } catch (err) {
     if (isContextOverflowError(err)) {
       try {
         const compressedMessages = await buildCompressedInferenceMessages(state)
-        const result = await runLlmInference(state, compressedMessages, allowTools, true)
+        const result = await runLlmInference(state, compressedMessages, allowTools, allowedTools, toolPolicy, true)
         return {
           ...result,
           runtimeTrace: [
@@ -589,12 +584,14 @@ async function runLlmInference(
   state: State,
   messages: any[],
   allowTools: boolean,
+  allowedTools: any[],
+  toolPolicy: L3ToolPolicyKind,
   compressedRetry: boolean,
 ): Promise<Partial<State>> {
   const params: Parameters<typeof llmService.chat>[0] = {
     messages,
   }
-  if (allowTools) params.tools = CHAT_AGENT_TOOL_DEFINITIONS
+  if (allowTools) params.tools = allowedTools
   const result = await llmService.chat(params)
   const content = result.content ?? ''
 
@@ -621,6 +618,8 @@ async function runLlmInference(
           data: {
             kind: 'llm_primary',
             allow_tools: allowTools,
+            tool_policy: toolPolicy,
+            allowed_tool_count: allowedTools.length,
             intent: state.lightIntent?.kind,
             compressed_retry: compressedRetry,
           },
@@ -652,6 +651,8 @@ async function runLlmInference(
         data: {
           kind: 'llm_primary',
           allow_tools: allowTools,
+          tool_policy: toolPolicy,
+          allowed_tool_count: allowedTools.length,
           intent: state.lightIntent?.kind,
           compressed_retry: compressedRetry,
         },
@@ -671,7 +672,7 @@ async function runLlmInference(
 }
 
 // ── Node: Execute Tool Call ──
-async function toolsExecutionNode(state: State): Promise<Partial<State>> {
+async function currentToolsExecutionNode(state: State): Promise<Partial<State>> {
   if (!state.currentToolCall) {
     return { isComplete: true, finalResponse: 'No tool call to execute.' }
   }
@@ -686,6 +687,37 @@ async function toolsExecutionNode(state: State): Promise<Partial<State>> {
   const toolName = fn.name
   const action = args.action ?? ''
   const toolParams = args.params ?? {}
+  const toolPolicy = resolveL3ToolPolicyKind(state)
+  if (!isToolAllowedByPolicy(toolName, toolPolicy)) {
+    return {
+      messages: [
+        {
+          role: 'tool',
+          tool_call_id: tc.id,
+          name: toolName,
+          content: JSON.stringify({
+            error: 'TOOL_POLICY_BLOCKED',
+            message: `Tool ${toolName} is not allowed under ${toolPolicy}.`,
+          }),
+        },
+      ],
+      runtimeTrace: [
+        {
+          stage: 'runtime.execution',
+          status: 'error',
+          title: '工具策略阻断',
+          detail: `当前策略 ${toolPolicy} 不允许调用 ${toolName}。`,
+          data: {
+            tool: toolName,
+            tool_policy: toolPolicy,
+          },
+        },
+      ],
+      currentToolCall: undefined,
+      pendingToolCalls: [],
+      isComplete: false,
+    }
+  }
   const executionTitle = isWorkflowAgentTool(toolName)
     ? workflowToolTraceTitle(toolName)
     : `${toolName}.${action}`
@@ -788,6 +820,20 @@ async function toolsExecutionNode(state: State): Promise<Partial<State>> {
   }
 }
 
+const currentL3Agent: L3Agent = {
+  name: 'current',
+  inference: currentInferenceNode,
+  executeTool: currentToolsExecutionNode,
+}
+
+async function inferenceNode(state: State): Promise<Partial<State>> {
+  return getL3Agent(currentL3Agent).inference(state)
+}
+
+async function toolsExecutionNode(state: State): Promise<Partial<State>> {
+  return getL3Agent(currentL3Agent).executeTool(state)
+}
+
 function isRehearsalPassed(result: ExecutorInvokeResult): boolean {
   const data = result.data as { ok?: boolean; executable?: boolean } | undefined
   return result.status === 'success' && data?.ok !== false && data?.executable !== false
@@ -836,13 +882,19 @@ function workflowToolTraceTitle(toolName: string): string {
   return '工作流工具'
 }
 
+function resolveL3ToolPolicyKind(state: State): L3ToolPolicyKind {
+  if (state.lightIntent?.tool_policy) return state.lightIntent.tool_policy
+  return state.lightIntent?.allow_tools ? 'execute_allowed' : 'none'
+}
+
 // ── Router ──
 function routeAfterRuntime(state: State): 'runtime_execute' | 'inference' {
   return selectDirectRuntimePlan(state.runtimeRoute) ? 'runtime_execute' : 'inference'
 }
 
 function routeAfterLightIntent(state: State): 'l1_context_command' | 'inference' {
-  return state.lightIntent?.allow_tools ? 'l1_context_command' : 'inference'
+  const allowL1 = state.lightIntent?.l1_allowed ?? state.lightIntent?.allow_tools ?? false
+  return allowL1 ? 'l1_context_command' : 'inference'
 }
 
 function routeAfterL1(state: State): 'l1_execute' | 'runtime_route' {
@@ -1023,6 +1075,17 @@ function classifyLightIntent(input: string, context: RuntimeContextWindow | unde
   const mentionsAction = actionWords.some((word) => text.includes(word))
   const mentionsQuery = queryWords.some((word) => text.includes(word))
 
+  if (hasExplicitNoExecutionIntent(text) && (mentionsDevice || mentionsWorkflow || mentionsAction)) {
+    return {
+      kind: 'chat',
+      prompt_mode: 'unified',
+      context_policy: mentionsDevice || mentionsWorkflow ? 'device_focused' : 'recent',
+      allow_tools: false,
+      confidence: 0.9,
+      reason: 'user explicitly asked not to execute device or workflow actions',
+    }
+  }
+
   if (isCasualFollowUp(text)) {
     return {
       kind: 'chat',
@@ -1097,6 +1160,18 @@ function classifyLightIntent(input: string, context: RuntimeContextWindow | unde
     confidence: 0.55,
     reason: 'no clear device-action intent',
   }
+}
+
+function hasExplicitNoExecutionIntent(text: string): boolean {
+  const patterns = [
+    /(?:先别|别|不要|不需要|不用|先不).{0,6}(?:执行|操作|运行|打开|关闭|控制|动)/,
+    /(?:先别|别|不要|不需要|不用).{0,6}真的.{0,6}(?:执行|操作|运行|打开|关闭|控制|动)/,
+    /(?:只是|只是想|只是先|我只是想|我只是).{0,8}(?:了解|确认|看看|问|咨询|知道|学习)/,
+    /(?:只是|只是想|只是先|我只是想|我只是).{0,8}不(?:用|需要).{0,4}真的.{0,6}(?:执行|操作|运行|打开|关闭|控制|动)/,
+    /不(?:要|用|需要).{0,6}真的.{0,6}(?:执行|操作|运行|打开|关闭|控制|动)/,
+    /不(?:要|用|需要).{0,6}(?:执行|操作|运行|打开|关闭|控制|动)/,
+  ]
+  return patterns.some((pattern) => pattern.test(text))
 }
 
 function isCasualFollowUp(text: string): boolean {
@@ -1243,10 +1318,12 @@ async function buildSystemPrompt(state: State): Promise<string> {
   const retrievedContext = JSON.stringify(state.runtimeContext?.retrieval_hits ?? [])
   const deviceInventory = JSON.stringify(state.deviceInventory ?? [])
   const runtimeCandidates = JSON.stringify(buildRuntimeCandidateSnapshot(state.runtimeRoute))
+  const toolPolicy = resolveL3ToolPolicyKind(state)
   return [
     'You are HomeSense, one unified smart-home assistant inside a smart-home studio.',
     'You can chat naturally and you can operate devices when the user clearly asks for a device action.',
     `Current lightweight intent hint: ${state.lightIntent?.kind ?? 'unknown'}. Treat it as a routing hint, not as the user intent itself.`,
+    `Current L3 tool policy: ${toolPolicy}. ${describeToolPolicy(toolPolicy)}`,
     'Always answer the latest user message first. Do not summarize or replay unrelated historical messages.',
     'For greetings and small talk, reply briefly and naturally.',
     'Active runtime context, location, current device and device inventory are always awareness, not commands. Do not turn ordinary chat into a device command because context exists.',
@@ -1475,23 +1552,6 @@ async function invokeCliWithApproval(params: {
   params: Record<string, unknown>
   turnId: string
 }): Promise<ExecutorInvokeResult> {
-  if (isHighRiskCliCall(params.cliName, params.action)) {
-    const approval = approvalRegistry.create(
-      params.turnId,
-      `High-risk device action: ${params.cliName}.${params.action}`,
-      { cli: params.cliName, action: params.action, params: params.params },
-    )
-    const decision = await approvalRegistry.wait(approval.id, 60_000)
-    if (decision !== 'approved') {
-      return {
-        status: 'error',
-        executor: 'cli.invoke',
-        error: `approval_${decision}`,
-        message: `Approval ${decision} by user.`,
-      }
-    }
-  }
-
   return executorGateway.invoke('cli.invoke', {
     cli_name: params.cliName,
     action: params.action,

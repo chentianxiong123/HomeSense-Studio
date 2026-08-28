@@ -1,4 +1,4 @@
-import { ruleEngine as defaultRuleEngine } from '../rule-engine/index.js'
+import { ruleEngine as defaultRuleEngine } from '../rule/index.js'
 import { skillsService as defaultSkillsService } from '../skills-system/index.js'
 
 interface RuleEngineInstance {

@@ -20,8 +20,16 @@ export interface SkillRecord {
   enabled: boolean
 }
 
+export interface SkillSectionRecord {
+  id: string
+  title: string
+  level: number
+  body: string
+}
+
 export const skillApi = {
   list: () => request<{ skills: SkillRecord[] }>('/api/skills'),
   get: (name: string) => request<{ skill: SkillRecord }>(`/api/skills/${encodeURIComponent(name)}`),
   getFull: (name: string) => request<{ prompt_template: string }>(`/api/skills/${encodeURIComponent(name)}/full`),
+  getSections: (name: string) => request<{ sections: SkillSectionRecord[] }>(`/api/skills/${encodeURIComponent(name)}/sections`),
 }
