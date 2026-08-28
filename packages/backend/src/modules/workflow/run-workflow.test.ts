@@ -155,7 +155,6 @@ describe('workflow runtime', () => {
         new FakeEventBus(),
         { observeOutcome: () => {} },
         { processFailureAndEnhance: () => {} },
-        { recordWorkflowNodeFailure: () => undefined },
         { recordExperiencePath: () => {}, recordExperiencePathFailure: () => {} },
       )
 
@@ -258,7 +257,6 @@ describe('workflow runtime', () => {
         new FakeEventBus(),
         { observeOutcome: () => {} },
         { processFailureAndEnhance: () => {} },
-        { recordWorkflowNodeFailure: () => undefined },
         { recordExperiencePath: () => {}, recordExperiencePathFailure: () => {} },
       )
 
@@ -341,7 +339,6 @@ describe('workflow runtime', () => {
         new FakeEventBus(),
         { observeOutcome },
         { processFailureAndEnhance: () => {} },
-        { recordWorkflowNodeFailure: () => undefined },
         { recordExperiencePath, recordExperiencePathFailure: () => {} },
       )
 
@@ -433,7 +430,6 @@ describe('workflow runtime', () => {
         new FakeEventBus(),
         { observeOutcome },
         { processFailureAndEnhance },
-        { recordWorkflowNodeFailure: vi.fn(() => ({ id: 321 })) },
         { recordExperiencePath: () => {}, recordExperiencePathFailure: () => {} },
       )
 
@@ -470,7 +466,7 @@ describe('workflow runtime', () => {
     }
   })
 
-  it('records failed nodes as compensation observations', async () => {
+  it.skip('records failed nodes as compensation observations (compensation module removed)', async () => {
     const db = createInMemoryDb()
     const ids = insertFailingCodeWorkflow(db)
     const bus = new FakeEventBus()
@@ -480,7 +476,6 @@ describe('workflow runtime', () => {
       bus,
       { observeOutcome: () => {} },
       { processFailureAndEnhance: () => {} },
-      { recordWorkflowNodeFailure },
     )
 
     const result = await runtime.runWorkflow(ids.workflowId, { intent: 'fail_demo' }, { triggeredBy: 'chat' })
@@ -549,7 +544,6 @@ describe('workflow runtime', () => {
       new FakeEventBus(),
       { observeOutcome: () => {} },
       { processFailureAndEnhance: () => {} },
-      { recordWorkflowNodeFailure: vi.fn(() => ({ id: 123 })) },
     )
 
     delete (globalThis as Record<string, unknown>).__workflowRetryCount

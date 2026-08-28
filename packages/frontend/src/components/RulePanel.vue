@@ -7,9 +7,17 @@ const props = withDefaults(defineProps<{ showEntry?: boolean }>(), { showEntry: 
 interface Alias { id: number; device_type: string; device_id: number | null; capability: string; ir_key: string; alias: string; is_custom: number; enabled: number }
 interface Stopword { id: number; word: string; is_custom: number }
 interface Capability { name: string; kind: string; type?: string; source?: string }
+interface L1PolicyRule { id: string; label: string; description: string; examples: string[] }
+interface L1Policy {
+  max_compact_length: number
+  allow_summary: string
+  blocked_markers: L1PolicyRule[]
+  blocked_punctuation: L1PolicyRule[]
+  blocked_patterns: L1PolicyRule[]
+}
 
 const showModal = ref(false)
-const modalTab = ref<'aliases' | 'stopwords' | 'workflows'>('aliases')
+const modalTab = ref<'aliases' | 'stopwords' | 'l1_policy' | 'workflows'>('aliases')
 
 // Devices
 const devices = ref<UserDevice[]>([])
@@ -28,17 +36,24 @@ const newAliasIrKey = ref('')
 const stopwords = ref<Stopword[]>([])
 const newStopword = ref('')
 
+// L1 policy
+const l1Policy = ref<L1Policy | null>(null)
+const l1ProbeInput = ref('')
+const l1ProbeResult = ref<{ allowed: boolean; reason: string } | null>(null)
+
 const zh = true
 function label(z: string, e: string) { return zh ? z : e }
 
 async function load() {
   try {
-    const [devRes, swRes] = await Promise.all([
+    const [devRes, swRes, policyRes] = await Promise.all([
       api.userDevices.list().catch(() => ({ devices: [] as UserDevice[] })),
       api.command.listStopwords().catch(() => ({ stopwords: [] as Stopword[] })),
+      api.command.l1Policy().catch(() => ({ policy: null })),
     ])
     devices.value = devRes.devices
     stopwords.value = swRes.stopwords
+    l1Policy.value = policyRes.policy
     if (devices.value.length > 0 && !selectedDeviceId.value) {
       selectedDeviceId.value = devices.value[0].id
     }
@@ -114,6 +129,14 @@ async function removeStopword(id: number) {
   stopwords.value = r.stopwords
 }
 
+async function checkL1Probe() {
+  if (!l1ProbeInput.value.trim()) {
+    l1ProbeResult.value = null
+    return
+  }
+  l1ProbeResult.value = await api.command.checkL1Policy(l1ProbeInput.value).catch(() => null)
+}
+
 // ── Group aliases by capability ──
 const groupedAliases = computed(() => {
   const groups: Record<string, Alias[]> = {}
@@ -128,6 +151,15 @@ const groupedAliases = computed(() => {
 function deviceIcon(t: string) {
   const m: Record<string, string> = { television: '📺', stb: '📡', speaker: '🔊', phone: '📱', computer: '💻' }
   return m[t] ?? '⚙'
+}
+
+function l1RuleGroups(policy: L1Policy | null) {
+  if (!policy) return []
+  return [
+    { key: 'markers', title: label('硬阻断', 'Hard Blocks'), items: policy.blocked_markers },
+    { key: 'punctuation', title: label('标点阻断', 'Punctuation'), items: policy.blocked_punctuation },
+    { key: 'patterns', title: label('复杂句式', 'Complex Patterns'), items: policy.blocked_patterns },
+  ]
 }
 </script>
 
@@ -153,6 +185,7 @@ function deviceIcon(t: string) {
       <div class="rp-tabs">
         <button :class="['rp-tab', { active: modalTab === 'aliases' }]" @click="modalTab = 'aliases'">{{ label('别名', 'Aliases') }}</button>
         <button :class="['rp-tab', { active: modalTab === 'stopwords' }]" @click="modalTab = 'stopwords'">{{ label('虚词', 'Stopwords') }}</button>
+        <button :class="['rp-tab', { active: modalTab === 'l1_policy' }]" @click="modalTab = 'l1_policy'">{{ label('L1 反射', 'L1 Reflex') }}</button>
         <button :class="['rp-tab', { active: modalTab === 'workflows' }]" @click="modalTab = 'workflows'">{{ label('工作流', 'Workflows') }}</button>
       </div>
 
@@ -209,6 +242,44 @@ function deviceIcon(t: string) {
             <button v-if="sw.is_custom" class="rp-tag-x" @click="removeStopword(sw.id)">&times;</button>
           </span>
         </div>
+      </div>
+
+      <!-- L1 policy tab -->
+      <div v-if="modalTab === 'l1_policy'" class="rp-body">
+        <div v-if="!l1Policy" class="rp-empty">{{ label('L1 策略加载失败', 'Failed to load L1 policy') }}</div>
+        <template v-else>
+          <div class="rp-policy-summary">
+            <div>
+              <span>{{ label('定位', 'Role') }}</span>
+              <p>{{ label('L1 只处理极短、明确、命令式的反射动作。复杂句、问句和否定句会直接交给模型。', 'L1 only handles very short imperative reflex actions.') }}</p>
+            </div>
+            <strong>{{ l1Policy.max_compact_length }}</strong>
+          </div>
+
+          <div class="rp-l1-probe">
+            <input v-model="l1ProbeInput" class="rp-input" :placeholder="label('试一句话，比如：打开电视吗？', 'Try an utterance')" @keydown.enter="checkL1Probe" />
+            <button class="rp-btn-sm primary" @click="checkL1Probe">{{ label('检查', 'Check') }}</button>
+          </div>
+          <div v-if="l1ProbeResult" :class="['rp-probe-result', { allowed: l1ProbeResult.allowed }]">
+            <strong>{{ l1ProbeResult.allowed ? label('允许进入 L1', 'Allowed') : label('跳过 L1', 'Skipped') }}</strong>
+            <span>{{ l1ProbeResult.reason }}</span>
+          </div>
+
+          <div class="rp-policy-groups">
+            <section v-for="group in l1RuleGroups(l1Policy)" :key="group.key" class="rp-policy-group">
+              <h4>{{ group.title }}</h4>
+              <article v-for="item in group.items" :key="item.id" class="rp-policy-item">
+                <div>
+                  <strong>{{ item.label }}</strong>
+                  <p>{{ item.description }}</p>
+                </div>
+                <div class="rp-policy-examples">
+                  <span v-for="example in item.examples" :key="example">{{ example }}</span>
+                </div>
+              </article>
+            </section>
+          </div>
+        </template>
       </div>
 
       <!-- Workflows placeholder -->
@@ -306,6 +377,44 @@ function deviceIcon(t: string) {
 .rp-sw-add { display: flex; gap: 8px; margin-bottom: 12px; }
 .rp-sw-add .rp-input { flex: 1; }
 .rp-sw-list { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* L1 policy */
+.rp-policy-summary {
+  display: grid; grid-template-columns: 1fr 72px; gap: 12px; align-items: center;
+  padding: 14px; margin-bottom: 14px; border: 1px solid rgba(16, 185, 129, 0.18);
+  border-radius: 12px; background: rgba(16, 185, 129, 0.05);
+}
+.rp-policy-summary span,
+.rp-policy-group h4 {
+  font-size: 11px; font-weight: 900; color: #059669; letter-spacing: 0.08em; text-transform: uppercase;
+}
+.rp-policy-summary p { margin: 4px 0 0; font-size: 13px; line-height: 1.55; color: var(--text-secondary); }
+.rp-policy-summary strong {
+  width: 56px; height: 56px; display: flex; align-items: center; justify-content: center;
+  border-radius: 12px; background: #10b981; color: #fff; font-size: 22px; font-weight: 900;
+}
+.rp-l1-probe { display: flex; gap: 8px; margin-bottom: 10px; }
+.rp-l1-probe .rp-input { flex: 1; }
+.rp-probe-result {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 9px 10px; margin-bottom: 14px; border-radius: 10px;
+  background: rgba(239, 68, 68, 0.07); color: #b91c1c; font-size: 12px; font-weight: 700;
+}
+.rp-probe-result.allowed { background: rgba(16, 185, 129, 0.08); color: #047857; }
+.rp-probe-result span { color: inherit; opacity: 0.78; text-align: right; }
+.rp-policy-groups { display: grid; gap: 14px; }
+.rp-policy-group h4 { margin: 0 0 8px; color: var(--text-tertiary); }
+.rp-policy-item {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(130px, 0.72fr); gap: 12px;
+  padding: 11px 0; border-top: 1px solid rgba(229, 231, 235, 0.8);
+}
+.rp-policy-item strong { font-size: 13px; color: var(--text-primary); }
+.rp-policy-item p { margin: 4px 0 0; font-size: 12px; line-height: 1.45; color: var(--text-secondary); }
+.rp-policy-examples { display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; justify-content: flex-end; }
+.rp-policy-examples span {
+  padding: 3px 7px; border-radius: 7px; background: rgba(0,0,0,0.04);
+  font-size: 11px; font-weight: 700; color: var(--text-secondary);
+}
 
 /* Shared */
 .rp-input {

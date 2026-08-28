@@ -84,7 +84,7 @@ const DEFAULT_WORKFLOW_SEEDS: SeedWorkflowInput[] = [
   },
   {
     name: 'Bilibili CLI Demo',
-    description: 'Demo productivity workflow: prepare a local dry-run Bilibili upload draft through the generic CLI executor.',
+    description: 'Demo productivity workflow: search the real Bilibili CLI bridge and surface structured results.',
     trigger_type: 'manual',
     published: true,
     nodes: [
@@ -94,27 +94,23 @@ const DEFAULT_WORKFLOW_SEEDS: SeedWorkflowInput[] = [
         position: { x: 80, y: 260 },
         config: {
           inputs: {
-            title: 'HomeSense Studio demo',
-            source_path: './exports/homesense-demo.mp4',
+            query: 'HomeSense Studio',
           },
         },
       },
       {
         type: 'executor_call',
-        label: 'Prepare Upload Draft',
+        label: 'Search Bilibili',
         position: { x: 360, y: 260 },
         config: {
           executor_name: 'cli.invoke',
           params: {
             cli_name: 'bilibili-cli',
-            action: 'prepare_upload',
+            action: 'search',
             params: {
-              title: '{{input.title}}',
-              source_path: '{{input.source_path}}',
-              description: 'HomeSense Studio workflow and smart-home runtime demo.',
-              tags: ['HomeSense', 'Smart Home', 'Workflow'],
-              visibility: 'private',
-              dry_run: true,
+              query: '{{input.query}}',
+              type: 'video',
+              max: 3,
             },
           },
         },
@@ -124,7 +120,7 @@ const DEFAULT_WORKFLOW_SEEDS: SeedWorkflowInput[] = [
         label: 'Answer',
         position: { x: 660, y: 260 },
         config: {
-          message: 'Bilibili CLI dry-run draft prepared. Review node.result for the staged media package.',
+          message: 'Bilibili CLI search completed. Review node.result for the structured response.',
         },
       },
     ],
@@ -259,7 +255,7 @@ const DEFAULT_WORKFLOW_SEEDS: SeedWorkflowInput[] = [
   },
   {
     name: 'Bilibili Media Dispatch Demo',
-    description: 'Demo local capability workflow: dispatch a Bilibili media draft task through the registered CLI adapter and keep the result visible in trace.',
+    description: 'Demo local capability workflow: dispatch a Bilibili search task through the registered CLI adapter and keep the result visible in trace.',
     trigger_type: 'manual',
     published: true,
     nodes: [
@@ -269,8 +265,7 @@ const DEFAULT_WORKFLOW_SEEDS: SeedWorkflowInput[] = [
         position: { x: 80, y: 400 },
         config: {
           inputs: {
-            title: 'HomeSense Studio media dispatch demo',
-            source_path: './exports/homesense-media-demo.mp4',
+            query: 'HomeSense Studio',
           },
         },
       },
@@ -282,14 +277,12 @@ const DEFAULT_WORKFLOW_SEEDS: SeedWorkflowInput[] = [
           executor_name: 'agent.dispatch',
           params: {
             target: 'bilibili_cli',
-            task: 'Prepare a Bilibili upload draft through the local media adapter.',
+            task: 'Search Bilibili for HomeSense Studio demo videos.',
             payload: {
-              title: '{{input.title}}',
-              source_path: '{{input.source_path}}',
-              description: 'HomeSense Studio local adapter and workflow demo.',
-              tags: ['HomeSense', 'Smart Home', 'Workflow'],
-              visibility: 'private',
-              dry_run: true,
+              action: 'search',
+              query: '{{input.query}}',
+              type: 'video',
+              max: 3,
             },
             execution_mode: 'deferred',
           },
@@ -300,7 +293,7 @@ const DEFAULT_WORKFLOW_SEEDS: SeedWorkflowInput[] = [
         label: 'Answer',
         position: { x: 700, y: 400 },
         config: {
-          message: 'Bilibili media dispatch demo executed through local adapter binding. Review node.result.adapter_result for the CLI output.',
+          message: 'Bilibili media dispatch demo executed through the local adapter binding. Review node.result.adapter_result for the structured CLI output.',
         },
       },
     ],
@@ -321,8 +314,7 @@ const DEFAULT_WORKFLOW_SEEDS: SeedWorkflowInput[] = [
         position: { x: 80, y: 540 },
         config: {
           inputs: {
-            title: 'HomeSense Studio subflow demo',
-            source_path: './exports/homesense-subflow-demo.mp4',
+            query: 'HomeSense Studio',
           },
         },
       },
@@ -333,8 +325,7 @@ const DEFAULT_WORKFLOW_SEEDS: SeedWorkflowInput[] = [
         config: {
           workflow_name: 'Bilibili Media Dispatch Demo',
           inputs: {
-            title: '{{input.title}}',
-            source_path: '{{input.source_path}}',
+            query: '{{input.query}}',
           },
         },
       },

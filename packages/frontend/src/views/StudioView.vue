@@ -120,13 +120,12 @@ const AGENT_ADAPTER_PRESETS: Record<string, Partial<AgentAdapterDescriptor>> = {
       execution_mode: ['deferred'],
     },
     sample_dispatch: {
-      task: 'Prepare a Bilibili upload draft for a HomeSense demo video.',
+      task: 'Search Bilibili for HomeSense Studio demo videos.',
       payload: {
-        title: 'HomeSense Studio demo',
-        source_path: './exports/homesense-demo.mp4',
-        tags: ['HomeSense', 'Smart Home', 'Workflow'],
-        visibility: 'private',
-        dry_run: true,
+        action: 'search',
+        query: 'HomeSense Studio',
+        type: 'video',
+        max: 3,
       },
       execution_mode: 'deferred',
     },

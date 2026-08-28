@@ -14,6 +14,20 @@ function label(zh: string, en: string) {
   return isZh.value ? zh : en
 }
 
+function formatAuthSummary(item: ExternalIntegrationRecord): string {
+  const auth = item.metadata?.auth as Record<string, unknown> | undefined
+  if (!auth || typeof auth !== 'object') return label('未声明认证方式', 'Auth not declared')
+  const mode = String(auth.mode ?? auth.strategy ?? '')
+  const owner = String(auth.credentials_owned_by ?? auth.owner ?? '')
+  const action = String(auth.status_action ?? auth.identity_action ?? auth.login_action ?? '')
+  const parts = [
+    mode ? `${label('认证', 'Auth')}: ${mode}` : '',
+    owner ? `${label('归属', 'Owned by')}: ${owner}` : '',
+    action ? `${label('状态', 'Status')}: ${action}` : '',
+  ].filter(Boolean)
+  return parts.length > 0 ? parts.join(' · ') : label('已声明独立认证', 'Independent auth declared')
+}
+
 const cards: { id: CliId; name: string; subtitle: string; icon: string; route: string }[] = [
   { id: 'mi-cli', name: 'mi-cli', subtitle: '米家扫码登录与认证', icon: '🔑', route: '/integrations/mi-cli' },
   { id: 'adb-cli', name: 'adb-cli', subtitle: 'Android ADB 电视调试', icon: '📺', route: '/integrations/adb-cli' },
@@ -268,15 +282,16 @@ onUnmounted(() => {
       <div v-else class="integration-grid">
         <article v-for="item in integrations" :key="item.id" class="integration-card glass-card">
           <div class="integration-head">
-            <span class="kind-badge">{{ kindLabels[item.kind] ?? item.kind }}</span>
-            <span :class="['status-dot', { active: item.enabled }]"></span>
-            <button class="remove-btn" @click="removeIntegration(item.id)">×</button>
-          </div>
-          <strong>{{ item.name }}</strong>
-          <p v-if="item.description">{{ item.description }}</p>
-          <div v-if="item.endpoint" class="endpoint-line">{{ item.endpoint }}</div>
-          <div v-if="item.capability_ids.length > 0" class="caps-line">
-            <span v-for="cap in item.capability_ids.slice(0, 4)" :key="cap" class="cap-tag">{{ cap }}</span>
+          <span class="kind-badge">{{ kindLabels[item.kind] ?? item.kind }}</span>
+          <span :class="['status-dot', { active: item.enabled }]"></span>
+          <button class="remove-btn" @click="removeIntegration(item.id)">×</button>
+        </div>
+        <strong>{{ item.name }}</strong>
+        <p v-if="item.description">{{ item.description }}</p>
+        <div v-if="item.metadata?.auth" class="auth-line">{{ formatAuthSummary(item) }}</div>
+        <div v-if="item.endpoint" class="endpoint-line">{{ item.endpoint }}</div>
+        <div v-if="item.capability_ids.length > 0" class="caps-line">
+          <span v-for="cap in item.capability_ids.slice(0, 4)" :key="cap" class="cap-tag">{{ cap }}</span>
             <span v-if="item.capability_ids.length > 4" class="cap-tag more">+{{ item.capability_ids.length - 4 }}</span>
           </div>
           <div v-if="item.actions.length > 0" class="actions-line">
@@ -623,6 +638,13 @@ h1 {
   padding: 6px 10px;
   background: rgba(241, 245, 249, 0.8);
   border-radius: 6px;
+}
+
+.auth-line {
+  font-size: 12px;
+  font-weight: 800;
+  color: #0f766e;
+  line-height: 1.45;
 }
 
 .caps-line {

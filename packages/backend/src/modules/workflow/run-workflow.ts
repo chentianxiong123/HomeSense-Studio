@@ -1,12 +1,11 @@
 import { getDb as defaultGetDb } from '../../db/index.js'
 import { eventBus as defaultEventBus, HeartEvent } from '../event-bus/index.js'
-import { memoryKernel as defaultMemoryKernel } from '../memory-kernel/index.js'
-import { memoryAssetsService as defaultMemoryAssetsService } from '../memory-assets/index.js'
+import { memoryKernel as defaultMemoryKernel } from '../memory/index.js'
+import { memoryAssetsService as defaultMemoryAssetsService } from '../memory/index.js'
 import { executeNode, type NodeResult, type WorkflowNode } from './execute-node.js'
 import { resolveNodeValue } from './node-base.js'
 import { selfEnhancementService as defaultSelfEnhancement } from '../self-enhancement/index.js'
-import { compensationService as defaultCompensationService } from '../compensation/index.js'
-import type { RecordExperiencePathInput } from '../memory-assets/index.js'
+import type { RecordExperiencePathInput } from '../memory/index.js'
 import type { WorkflowEdge, WorkflowResult, NodeTrace } from './types.js'
 import { VariablePool } from './variable-pool.js'
 import { GraphRuntimeState } from './runtime-state.js'
@@ -36,21 +35,6 @@ interface SelfEnhancementInstance {
   processFailureAndEnhance(failure: TaskFailure): void
 }
 
-interface CompensationInstance {
-  recordWorkflowNodeFailure(params: {
-    workflow_id: number
-    run_id: number
-    node_id: string
-    node_type: string
-    label?: string
-    error?: string
-    inputs?: Record<string, unknown>
-    resolved_inputs?: Record<string, unknown>
-    outputs?: Record<string, unknown>
-    triggered_by?: string
-    duration_ms?: number
-  }): { id: number } | undefined
-}
 
 interface MemoryAssetsInstance {
   recordExperiencePath(input: RecordExperiencePathInput): unknown
@@ -68,7 +52,6 @@ export class WorkflowRuntime {
     private readonly eventBus: EventBusInstance = defaultEventBus,
     private readonly memoryKernel: MemoryKernelInstance = defaultMemoryKernel,
     private readonly selfEnhancement: SelfEnhancementInstance = defaultSelfEnhancement,
-    private readonly compensation: CompensationInstance = defaultCompensationService,
     private readonly memoryAssets: MemoryAssetsInstance = defaultMemoryAssetsService,
   ) {}
 
@@ -123,7 +106,6 @@ export class WorkflowRuntime {
 
       let failed = false
       const failedNodeIds: string[] = []
-      const compensationTaskIds: number[] = []
       while (readyQueue.length > 0) {
         const batchIds = readyQueue.splice(0, readyQueue.length)
         const batchNodes = batchIds
@@ -164,24 +146,6 @@ export class WorkflowRuntime {
         for (const { node, result } of batchResults) {
           const resolvedInputs = this.resolveNodeInputs(node, runtimeState.variable_pool)
           const upstream = this.buildUpstreamSummary(node.id, incoming, traceByNodeId)
-          const compensationTaskId = result.status === 'failed'
-            ? this.recordWorkflowNodeFailure({
-                workflow_id: workflowId,
-                run_id: runId,
-                node_id: node.id,
-                node_type: node.type,
-                label: node.label,
-                error: result.error,
-                inputs: node.config,
-                resolved_inputs: resolvedInputs,
-                outputs: result.outputs,
-                triggered_by: triggeredBy,
-                duration_ms: result.duration_ms,
-              })
-            : undefined
-          if (compensationTaskId != null) {
-            compensationTaskIds.push(compensationTaskId)
-          }
           const traceEntry: NodeTrace = {
             node_id: result.node_id,
             node_type: node.type,
@@ -192,7 +156,6 @@ export class WorkflowRuntime {
             outputs: result.outputs,
             duration_ms: result.duration_ms,
             error: result.error,
-            compensation_task_id: compensationTaskId,
             attempts: result.attempts,
             retry_errors: result.retry_errors,
           }
@@ -211,8 +174,7 @@ export class WorkflowRuntime {
               outputs: result.outputs,
               duration_ms: result.duration_ms,
               error: result.error,
-              compensation_task_id: compensationTaskId,
-              attempts: result.attempts,
+                attempts: result.attempts,
               retry_errors: result.retry_errors,
             })
           } else {
@@ -325,7 +287,6 @@ export class WorkflowRuntime {
           run_id: runId,
           workflow_id: workflowId,
           failed_node_ids: failedNodeIds,
-          compensation_task_ids: compensationTaskIds,
         })
       }
 
@@ -536,13 +497,6 @@ export class WorkflowRuntime {
       : {}
   }
 
-  private recordWorkflowNodeFailure(params: Parameters<CompensationInstance['recordWorkflowNodeFailure']>[0]): number | undefined {
-    try {
-      return this.compensation.recordWorkflowNodeFailure(params)?.id
-    } catch {
-      return undefined
-    }
-  }
 
   private recordWorkflowExperiencePath(
     workflowId: number,

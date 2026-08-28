@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createInMemoryDb } from '../../db/index.js'
-import { MemoryAssetsService } from '../memory-assets/index.js'
+import { MemoryAssetsService } from '../memory/index.js'
 import { executeWorkflowAgentTool, resolveWorkflowToolInputs } from './workflow-agent-tools.js'
 import * as dbModule from '../../db/index.js'
 import { workflowPreviewService } from './preview-workflow.js'

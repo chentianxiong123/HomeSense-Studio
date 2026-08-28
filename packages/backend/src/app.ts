@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url'
 import path from 'path'
 import fs from 'fs'
 import { initDb } from './db/index.js'
-import { authRoutes } from './modules/auth/routes.js'
+
 import { deviceRoutes } from './modules/device/routes.js'
 import { userDeviceRoutes } from './modules/device/user-device-routes.js'
 import { roomRoutes } from './modules/device/room-routes.js'
@@ -14,43 +14,48 @@ import { chatRoutes } from './modules/chat/routes.js'
 import { workflowRoutes } from './modules/workflow/routes.js'
 import { workflowSeedService } from './modules/workflow/seed.js'
 import { llmProviderRoutes } from './modules/llm-provider/routes.js'
-import { memoryRoutes } from './modules/memory/routes.js'
+import { memoryRoutes } from './modules/memory/index.js'
 import { experienceRoutes } from './modules/experience/routes.js'
 import { settingRoutes } from './modules/setting/routes.js'
 import { skillRoutes } from './modules/skill/routes.js'
 import { ruleRoutes } from './modules/rule/routes.js'
-import { commandRoutes } from './modules/command/routes.js'
-import { compensationRoutes } from './modules/compensation/routes.js'
-import { compensationService } from './modules/compensation/index.js'
+import { commandRoutes } from './modules/integration/command.routes.js'
+
+
 import { cronRoutes } from './modules/cron/routes.js'
 import { executorGatewayRoutes } from './modules/executor-gateway/routes.js'
-import { manifestRegistryRoutes } from './modules/manifest-registry/routes.js'
-import { approvalRoutes } from './modules/approval/routes.js'
+import { manifestRegistryRoutes } from './modules/registry/routes.js'
+
 import { agentInstanceRoutes } from './modules/agent-instance/routes.js'
 // import { devtestRoutes } from './modules/devtest/routes.js'
-import { intentRouterRoutes } from './modules/intent-router/routes.js'
+import { intentRouterRoutes } from './modules/intent/routes.js'
 import { deviceTypeSkillRoutes } from './modules/device-type-skill/routes.js'
-import { memoryAssetsRoutes } from './modules/memory-assets/routes.js'
-import { runtimeCapabilityMapRoutes } from './modules/runtime-capability-map/routes.js'
-import { externalIntegrationsService } from './modules/external-integrations/index.js'
-import { externalIntegrationRoutes } from './modules/external-integrations/routes.js'
+import { memoryAssetsRoutes } from './modules/memory/index.js'
+import { runtimeCapabilityMapRoutes } from './modules/runtime/routes.js'
+import { mcpRegistryRoutes } from './modules/mcp-registry/routes.js'
+import { externalIntegrationsService } from './modules/integration/index.js'
+import { externalIntegrationRoutes } from './modules/integration/external-integrations.routes.js'
+import { remoteWorkspaceRoutes } from './modules/remote-workspace/routes.js'
+import { remoteWorkspaceService } from './modules/remote-workspace/index.js'
+import { streamingGatewayRoutes } from './modules/streaming-gateway/routes.js'
 import { eventBus } from './modules/event-bus/index.js'
 // import { deviceStatePoller } from './modules/device-state-poller/index.js'
-import { ruleEngine } from './modules/rule-engine/index.js'
+import { ruleEngine } from './modules/rule/index.js'
 import { skillsService } from './modules/skills-system/index.js'
+import { mcpRegistryService } from './modules/mcp-registry/index.js'
 import { experienceService } from './modules/experience/index.js'
 import { cronService } from './modules/cron/index.js'
 import { agentInstanceService } from './modules/agent-instance/index.js'
-import { agentAdapterRegistry } from './modules/agent-adapter/index.js'
+
 import { llmService, seedDefaultProviders } from './modules/llm-provider/service.js'
-import { cliBridge } from './modules/cli-bridge/index.js'
-import { memoryKernel } from './modules/memory-kernel/index.js'
+import { cliBridge } from './modules/integration/index.js'
+import { memoryKernel } from './modules/memory/index.js'
 import { knowledgeCompiler } from './modules/knowledge-compiler/index.js'
 import { executorGateway } from './modules/executor-gateway/index.js'
-import { planLibrary } from './modules/plan-library/index.js'
+import { planLibrary } from './modules/plan/index.js'
 import { assertWorkflowNodeRegistryIntegrity } from './modules/workflow/node-factory.js'
-import './modules/service-registry/index.js'
-import { channelRegistry } from './modules/channels/index.js'
+import './modules/registry/index.js'
+
 import { stateMachine } from './modules/state-machine/index.js'
 
 const wsClients = new Set<import('ws').WebSocket>()
@@ -67,10 +72,8 @@ export async function buildApp() {
   stateMachine.hydrate()
 
   agentInstanceService.ensureDefaults()
-  agentAdapterRegistry.initialize()
   memoryKernel.initialize()
   await executorGateway.initialize()
-  channelRegistry.register()
   assertWorkflowNodeRegistryIntegrity()
   workflowSeedService.ensureDefaults()
   ruleEngine.loadFromDb()
@@ -97,6 +100,7 @@ export async function buildApp() {
   experienceService.indexAllExperiences()
   knowledgeCompiler.refreshKnowledge()
   externalIntegrationsService.ensureDefaults()
+  mcpRegistryService.ensureDefaults()
   seedDefaultProviders()
 
   setTimeout(() => {
@@ -120,23 +124,19 @@ export async function buildApp() {
       .catch(() => {})
   }, 10 * 60 * 1000)
 
-  const compensationTimer = setInterval(() => {
-    compensationService.processPendingTasks()
-  }, 30000)
-
   app.get('/api/health', async () => {
     return { status: 'ok', timestamp: new Date().toISOString() }
   })
 
   app.get('/api/services', async () => {
-    const { serviceRegistry } = await import('./modules/service-registry/index.js')
+    const { serviceRegistry } = await import('./modules/registry/index.js')
     return { services: serviceRegistry.list() }
   })
 
   app.post('/api/services/:name/call', async (request) => {
     const { name } = request.params as { name: string }
     const params = (request.body as Record<string, unknown>) ?? {}
-    const { serviceRegistry } = await import('./modules/service-registry/index.js')
+    const { serviceRegistry } = await import('./modules/registry/index.js')
     try {
       const result = await serviceRegistry.call(name, params)
       return { status: 'success', data: result }
@@ -149,7 +149,6 @@ export async function buildApp() {
     return { executors: cliBridge.listExecutors() }
   })
 
-  app.register(authRoutes)
   app.register(deviceRoutes)
   app.register(userDeviceRoutes)
   app.register(roomRoutes)
@@ -163,18 +162,19 @@ export async function buildApp() {
   app.register(skillRoutes)
   app.register(ruleRoutes)
   app.register(commandRoutes)
-  app.register(compensationRoutes)
   app.register(cronRoutes)
   app.register(executorGatewayRoutes)
   app.register(manifestRegistryRoutes)
-  app.register(approvalRoutes)
   app.register(agentInstanceRoutes)
   // app.register(devtestRoutes)
   app.register(intentRouterRoutes)
   app.register(deviceTypeSkillRoutes)
   app.register(memoryAssetsRoutes)
   app.register(runtimeCapabilityMapRoutes)
+  app.register(mcpRegistryRoutes)
   app.register(externalIntegrationRoutes)
+  app.register(remoteWorkspaceRoutes)
+  app.register(streamingGatewayRoutes)
 
   app.register(async (instance) => {
     instance.get('/ws', { websocket: true }, (socket) => {
@@ -265,9 +265,9 @@ export async function buildApp() {
   // deviceStatePoller.start(30000)
 
   app.addHook('onClose', async () => {
-    clearInterval(compensationTimer)
     clearInterval(embeddingRefreshTimer)
     cronService.stop()
+    remoteWorkspaceService.shutdown()
     // deviceStatePoller.stop()
     wsClients.clear()
   })

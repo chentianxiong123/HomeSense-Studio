@@ -27,6 +27,16 @@ export async function skillRoutes(app: FastifyInstance) {
     return { prompt_template: (fullSkill as any)?.prompt_template ?? (skill as any).prompt_template ?? '' }
   })
 
+  app.get('/api/skills/:name/sections', async (request) => {
+    const { name } = request.params as { name: string }
+    const skill = skillsService.getSkill(name)
+    if (!skill) {
+      return { status: 'error', error: 'NOT_FOUND', message: `技能 ${name} 不存在` }
+    }
+    const sections = await skillsService.loadSkillSections(name)
+    return { sections }
+  })
+
   app.post('/api/skills', async (request) => {
     const body = request.body as {
       name: string

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { matchCommand } from '../command/routes.js'
-import type { RuntimeContextWindow } from '../runtime-context/index.js'
+import { matchCommand } from '../integration/command.routes.js'
+import type { RuntimeContextWindow } from '../runtime/index.js'
 
 let capturedMessages: Array<{ role: string; content: string }> = []
 let capturedTools: unknown
@@ -46,13 +46,13 @@ vi.mock('../llm-provider/service.js', () => ({
   },
 }))
 
-vi.mock('../intent-router/index.js', () => ({
+vi.mock('../intent/index.js', () => ({
   intentRouter: {
     route: routeMock,
   },
 }))
 
-vi.mock('../command/routes.js', () => ({
+vi.mock('../integration/command.routes.js', () => ({
   matchCommand: vi.fn(() => null),
 }))
 
@@ -189,6 +189,88 @@ describe('chat graph context policy', () => {
     expect(matchCommandMock).not.toHaveBeenCalled()
   })
 
+  it('does not route to L1 when the user explicitly asks not to execute device actions', async () => {
+    await runGraph('我想看电视，但先别操作设备，你会怎么确认？', {
+      runtimeContext: {
+        entries: {},
+        working_context: {
+          current_device: '2',
+          current_device_name: '客厅机顶盒',
+          current_device_type: 'stb',
+          current_room_name: '客厅',
+        },
+        recent_messages: [{ role: 'user', content: '我想看电视，但先别操作设备，你会怎么确认？' }],
+        retrieval_hits: [],
+        context_usage: {
+          used_tokens: 0,
+          max_tokens: 20_000,
+          message_tokens: 0,
+          working_context_tokens: 0,
+          retrieval_tokens: 0,
+        },
+        max_turns: 12,
+        ttl_ms: 30 * 60 * 1000,
+        retrieval_limit: 3,
+        context_token_budget: 20_000,
+        session_active: true,
+        last_activity_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+      },
+    })
+
+    expect(matchCommandMock).not.toHaveBeenCalled()
+    const toolNames = ((capturedTools as any[]) ?? []).map((tool) => tool?.function?.name).filter(Boolean)
+    expect(toolNames).not.toContain('execute_device_capability')
+    expect(toolNames).not.toContain('run_workflow')
+    expect(capturedMessages.map((message) => message.content).join('\n')).toContain('先别操作设备')
+  })
+
+  it('does not route to L1 for explanatory device questions that explicitly say not to really execute', async () => {
+    await runGraph('我只是想了解怎么开电视，不用真的执行。', {
+      runtimeContext: {
+        entries: {},
+        working_context: {
+          current_device: '2',
+          current_device_name: '客厅机顶盒',
+          current_device_type: 'stb',
+          current_room_name: '客厅',
+        },
+        recent_messages: [{ role: 'user', content: '我只是想了解怎么开电视，不用真的执行。' }],
+        retrieval_hits: [],
+        context_usage: {
+          used_tokens: 0,
+          max_tokens: 20_000,
+          message_tokens: 0,
+          working_context_tokens: 0,
+          retrieval_tokens: 0,
+        },
+        max_turns: 12,
+        ttl_ms: 30 * 60 * 1000,
+        retrieval_limit: 3,
+        context_token_budget: 20_000,
+        session_active: true,
+        last_activity_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+      },
+    })
+
+    expect(matchCommandMock).not.toHaveBeenCalled()
+    const toolNames = ((capturedTools as any[]) ?? []).map((tool) => tool?.function?.name).filter(Boolean)
+    expect(toolNames).not.toContain('execute_device_capability')
+    expect(toolNames).not.toContain('run_workflow')
+  })
+
+  it('keeps questions and complex action sentences out of the L1 reflex matcher', async () => {
+    await runGraph('打开电视吗？')
+    expect(matchCommandMock).not.toHaveBeenCalled()
+
+    await runGraph('我想打开电视')
+    expect(matchCommandMock).not.toHaveBeenCalled()
+
+    await runGraph('打开电视，然后播放B站')
+    expect(matchCommandMock).not.toHaveBeenCalled()
+  })
+
   it('keeps active-session greetings with a small recent chat window', async () => {
     await runGraph('你好', {
       messages: [
@@ -290,7 +372,7 @@ describe('chat graph context policy', () => {
     expect(capturedTools).toBeDefined()
   })
 
-  it('exposes workflow tools together with device tools for executable routines', async () => {
+  it('keeps workflow requests in preview mode instead of exposing direct execution tools', async () => {
     await runGraph('执行看电视流程')
 
     const toolNames = ((capturedTools as any[]) ?? [])
@@ -300,7 +382,7 @@ describe('chat graph context policy', () => {
     expect(toolNames).toContain('list_user_devices')
     expect(toolNames).toContain('list_workflows')
     expect(toolNames).toContain('preview_workflow')
-    expect(toolNames).toContain('run_workflow')
+    expect(toolNames).not.toContain('run_workflow')
   })
 
   it('adds structured workflow tool data to runtime execution trace', async () => {

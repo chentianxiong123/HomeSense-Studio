@@ -32,8 +32,9 @@ function traceIntentLabel(trace: RuntimeTraceEvent[]): string {
   if (!intent) return ''
   const kind = intentKindLabel(String(intent.title ?? '').replace(/^Intent:\s*/, ''))
   const policy = contextPolicyLabel(String(intent.data?.context_policy ?? ''))
-  const tools = intent.data?.allow_tools === true ? '工具可用' : '仅对话'
-  return [kind, policy, tools].filter(Boolean).join(' · ')
+  const toolPolicy = toolPolicyLabel(String(intent.data?.tool_policy ?? ''))
+  const l1 = l1ReflexLabel(intent.data?.l1_allowed)
+  return [kind, policy, toolPolicy, l1].filter(Boolean).join(' · ')
 }
 
 function intentKindLabel(kind: string): string {
@@ -56,6 +57,22 @@ function contextPolicyLabel(policy: string): string {
     device_focused: '设备上下文',
   }
   return labels[policy] ?? policy
+}
+
+function toolPolicyLabel(policy: string): string {
+  const labels: Record<string, string> = {
+    none: 'L3: 无工具',
+    read_only: 'L3: 只读',
+    preview_only: 'L3: 预览',
+    execute_allowed: 'L3: 执行',
+  }
+  return labels[policy] ?? (policy ? `L3: ${policy}` : '')
+}
+
+function l1ReflexLabel(value: unknown): string {
+  if (value === true) return 'L1: 可用'
+  if (value === false) return 'L1: 关闭'
+  return ''
 }
 
 function formatConfidence(value?: number): string {
@@ -140,6 +157,30 @@ function displayTraceDetail(item: RuntimeTraceEvent): string {
     .replace(/\bL2\b/g, '经验候选')
     .replace(/\bL3\b/g, '模型')
     .replace(/\bLLM\b/g, '模型')
+}
+
+function tracePolicyNote(item: RuntimeTraceEvent): string {
+  if (item.stage !== 'runtime.intent') return ''
+  const reason = String(item.data?.tool_policy_reason ?? '')
+  if (!reason) return ''
+  return `策略原因：${translateToolPolicyReason(reason)}`
+}
+
+function translateToolPolicyReason(reason: string): string {
+  const labels: Record<string, string> = {
+    'empty input': '空输入',
+    'pure greeting': '纯问候',
+    'memory write requested': '需要写入记忆',
+    'timer or delayed action requested': '需要定时或延迟动作',
+    'user explicitly blocked execution': '用户明确要求不执行',
+    'question or inspection intent': '提问或查看',
+    'workflow requests must preview before running': '工作流请求先预演',
+    'multi-step device request must preview before execution': '多步骤设备请求先预演',
+    'short imperative command': '短指令可直接执行',
+    'device-related utterance is not a direct command': '设备相关表达但不是直接命令',
+    'no tool-worthy intent': '无需工具',
+  }
+  return labels[reason] ?? reason
 }
 
 function traceDeviceCard(item: RuntimeTraceEvent): any {
@@ -359,6 +400,7 @@ function workflowToneClass(tone: string): string {
         </div>
         <div class="trace-step-title">{{ displayTraceTitle(item) }}</div>
         <div v-if="displayTraceDetail(item)" class="trace-detail">{{ displayTraceDetail(item) }}</div>
+        <div v-if="tracePolicyNote(item)" class="trace-policy-note">{{ tracePolicyNote(item) }}</div>
         <div v-if="isSandboxTrace(item)" class="sandbox-card">
           <div class="sandbox-head">
             <span :class="['sandbox-status-dot', sandboxStatusClass(item)]"></span>
@@ -622,6 +664,13 @@ function workflowToneClass(tone: string): string {
   font-weight: 600;
   color: var(--text-secondary);
   opacity: 0.85;
+}
+.trace-policy-note {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.45;
+  font-weight: 800;
+  color: #0f766e;
 }
 .sandbox-card {
   margin-top: 8px;

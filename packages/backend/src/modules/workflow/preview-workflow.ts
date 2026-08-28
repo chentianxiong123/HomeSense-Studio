@@ -798,13 +798,13 @@ function inferNodeRisk(type: string): WorkflowPreviewStep['risk'] {
 
 function inferCliRisk(cliName: string, action: string): WorkflowPreviewStep['risk'] {
   if (cliName === 'adb-cli' || cliName === 'mi-cli') return 'device'
-  if (cliName === 'bilibili-cli' && action !== 'health' && action !== 'list_drafts') return 'dry_run'
+  if (cliName === 'bilibili-cli') return action === 'health' ? 'none' : 'external'
   return 'external'
 }
 
 function inferAgentRisk(target: string, payload: Record<string, unknown>): WorkflowPreviewStep['risk'] {
   if (target === 'mi_adb') return 'device'
-  if (target === 'bilibili_cli') return payload.dry_run === false ? 'external' : 'dry_run'
+  if (target === 'bilibili_cli') return String(payload.action ?? '') === 'health' ? 'none' : 'external'
   if (target.startsWith('a2a_')) return payload.dry_run === false ? 'external' : 'dry_run'
   return 'external'
 }

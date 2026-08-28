@@ -585,6 +585,21 @@ export const api = {
       request<{ status: string }>('/api/command/stopwords', { method: 'POST', body: JSON.stringify({ word }) }),
     removeStopword: (id: number) =>
       request<{ status: string }>(`/api/command/stopwords/${id}`, { method: 'DELETE' }),
+    l1Policy: () =>
+      request<{
+        policy: {
+          max_compact_length: number
+          allow_summary: string
+          blocked_markers: Array<{ id: string; label: string; description: string; examples: string[] }>
+          blocked_punctuation: Array<{ id: string; label: string; description: string; examples: string[] }>
+          blocked_patterns: Array<{ id: string; label: string; description: string; examples: string[] }>
+        }
+      }>('/api/command/l1-policy'),
+    checkL1Policy: (input: string) =>
+      request<{ allowed: boolean; reason: string }>('/api/command/l1-policy/check', {
+        method: 'POST',
+        body: JSON.stringify({ input }),
+      }),
   },
   observability: {
     cronSchedules: () => request<{ schedules: Array<{ id: string; cron: string }> }>('/api/cron/schedules'),

@@ -257,4 +257,54 @@ function workflowButtonLabel(): string {
   0%, 80%, 100% { opacity: 0.2; transform: translateY(0); }
   40% { opacity: 1; transform: translateY(-6px); }
 }
+
+@media (max-width: 760px) {
+  .bubble {
+    max-width: 100%;
+    width: 100%;
+    padding: 14px 12px;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+
+  .bubble.user {
+    max-width: calc(100% - 24px);
+    width: auto;
+    padding: 12px 14px;
+    border-radius: 16px 16px 6px 16px;
+    background: rgba(16, 185, 129, 0.1);
+  }
+
+  .bubble.assistant {
+    padding-right: 0;
+    padding-left: 0;
+  }
+
+  .path-action {
+    align-items: stretch;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .path-save-btn,
+  .workflow-save-btn,
+  .workflow-open-btn {
+    flex: 1 1 auto;
+    min-width: 126px;
+  }
+
+  .path-save-error {
+    flex-basis: 100%;
+  }
+
+  .think-toggle {
+    padding: 9px 10px;
+    font-size: 11px;
+  }
+
+  .think-content {
+    padding: 0 10px 12px;
+    max-height: 260px;
+  }
+}
 </style>

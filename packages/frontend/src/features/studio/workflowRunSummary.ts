@@ -159,6 +159,23 @@ function summarizeExecutorResult(
   }
 
   const data = asRecord(result.data)
+  const payload = asRecord(data.data)
+  const bilibiliPayload = Array.isArray(payload.items) ? payload : asRecord(payload.data)
+  if (Array.isArray(bilibiliPayload.items)) {
+    const firstItem = asRecord(bilibiliPayload.items[0])
+    return {
+      title: label('Bilibili 查询', 'Bilibili Query'),
+      kind: 'executor',
+      tone: readToneFromStatus(String(result.status)),
+      rows: compactRows([
+        [label('状态', 'Status'), stringifyValue(result.status)],
+        [label('条数', 'Items'), String(bilibiliPayload.items.length)],
+        [label('首条', 'First'), stringifyValue(firstItem.title || firstItem.name || firstItem.bvid || firstItem.id)],
+        [label('作者', 'Owner'), stringifyValue(asRecord(firstItem.owner).name || asRecord(firstItem.owner).id)],
+      ]),
+    }
+  }
+
   const draft = asRecord(data.draft)
   if (draft.draft_id) {
     return {

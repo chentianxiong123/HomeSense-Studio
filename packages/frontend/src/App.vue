@@ -8,12 +8,22 @@ const router = useRouter()
 const { locale, setLocale, t } = useLocale()
 
 const navItems = computed(() => [
+  { key: 'home', label: locale.value === 'zh' ? '首页' : 'Home', route: '/home' },
   { key: 'chat', label: t('app.chat'), route: '/chat' },
   { key: 'studio', label: t('app.studio'), route: '/studio' },
+  { key: 'workspace', label: locale.value === 'zh' ? '远程' : 'Remote', route: '/workspace' },
   { key: 'assets', label: locale.value === 'zh' ? '资产' : 'Assets', route: '/assets' },
   { key: 'providers', label: locale.value === 'zh' ? '供应商' : 'Providers', route: '/providers' },
   { key: 'devices', label: locale.value === 'zh' ? '设备' : 'Devices', route: '/devices' },
   { key: 'integrations', label: locale.value === 'zh' ? '集成' : 'Integrations', route: '/integrations' },
+])
+
+const mobileNavItems = computed(() => [
+  { key: 'home', label: locale.value === 'zh' ? '首页' : 'Home', route: '/home', marker: 'H' },
+  { key: 'chat', label: t('app.chat'), route: '/chat', marker: 'AI' },
+  { key: 'studio', label: t('app.studio'), route: '/studio', marker: 'WF' },
+  { key: 'workspace', label: locale.value === 'zh' ? '工作台' : 'Work', route: '/workspace', marker: 'NAS' },
+  { key: 'devices', label: locale.value === 'zh' ? '设备' : 'Devices', route: '/devices', marker: 'DEV' },
 ])
 
 function isActive(target: string) {
@@ -45,6 +55,17 @@ function isActive(target: string) {
     <main class="app-main">
       <RouterView />
     </main>
+    <nav class="mobile-bottom-nav" :aria-label="locale === 'zh' ? '主导航' : 'Primary navigation'">
+      <button
+        v-for="item in mobileNavItems"
+        :key="item.key"
+        :class="['mobile-nav-btn', { active: isActive(item.route) }]"
+        @click="router.push(item.route)"
+      >
+        <span>{{ item.marker }}</span>
+        <strong>{{ item.label }}</strong>
+      </button>
+    </nav>
   </div>
 </template>
 
@@ -65,6 +86,12 @@ function isActive(target: string) {
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --app-header-height: 80px;
+  --app-safe-top: env(safe-area-inset-top, 0px);
+  --app-safe-right: env(safe-area-inset-right, 0px);
+  --app-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --app-safe-left: env(safe-area-inset-left, 0px);
+  --app-mobile-nav-height: 72px;
 }
 
 * {
@@ -75,6 +102,7 @@ function isActive(target: string) {
 
 html, body, #app {
   height: 100%;
+  min-width: 320px;
   font-family: var(--font-sans);
   background-color: var(--bg-color);
   color: var(--text-primary);
@@ -85,15 +113,16 @@ html, body, #app {
 .app-container {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  min-height: 100%;
+  height: 100dvh;
   overflow: hidden;
 }
 
 .app-header {
   display: flex;
   align-items: center;
-  height: 80px;
-  padding: 0 48px;
+  min-height: calc(var(--app-header-height) + var(--app-safe-top));
+  padding: var(--app-safe-top) calc(48px + var(--app-safe-right)) 0 calc(48px + var(--app-safe-left));
   background: rgba(255, 255, 255, 0.5);
   backdrop-filter: blur(48px);
   border-bottom: 1px solid rgba(229, 231, 235, 0.4);
@@ -128,6 +157,14 @@ html, body, #app {
 .tab-nav {
   display: flex;
   gap: 12px;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.tab-nav::-webkit-scrollbar {
+  display: none;
 }
 
 .tab-btn {
@@ -249,8 +286,14 @@ html, body, #app {
 
 .app-main {
   flex: 1;
-  overflow: hidden;
+  min-height: 0;
+  overflow: auto;
   position: relative;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mobile-bottom-nav {
+  display: none;
 }
 
 /* Base styles for modern scrollbars */
@@ -270,5 +313,135 @@ html, body, #app {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-tertiary);
+}
+
+@media (max-width: 1180px) {
+  .app-header {
+    padding-right: calc(24px + var(--app-safe-right));
+    padding-left: calc(24px + var(--app-safe-left));
+  }
+
+  .logo {
+    margin-right: 28px;
+  }
+
+  .tab-btn {
+    padding: 0 18px;
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 760px) {
+  :root {
+    --app-header-height: 66px;
+  }
+
+  .app-container {
+    height: 100dvh;
+  }
+
+  .app-header {
+    position: sticky;
+    top: 0;
+    align-items: center;
+    gap: 12px;
+    padding-right: calc(12px + var(--app-safe-right));
+    padding-left: calc(12px + var(--app-safe-left));
+  }
+
+  .logo {
+    width: 44px;
+    min-width: 44px;
+    margin-right: 0;
+    gap: 0;
+    overflow: hidden;
+    color: transparent;
+    letter-spacing: 0;
+  }
+
+  .logo::before {
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+  }
+
+  .tab-nav {
+    display: none;
+  }
+
+  .header-actions {
+    margin-left: 0;
+  }
+
+  .locale-switch {
+    padding: 4px;
+    border-radius: 12px;
+  }
+
+  .locale-btn {
+    min-width: 34px;
+    height: 28px;
+    font-size: 12px;
+  }
+
+  .app-main {
+    padding-bottom: calc(var(--app-mobile-nav-height) + var(--app-safe-bottom));
+  }
+
+  .mobile-bottom-nav {
+    position: fixed;
+    left: calc(10px + var(--app-safe-left));
+    right: calc(10px + var(--app-safe-right));
+    bottom: calc(10px + var(--app-safe-bottom));
+    z-index: 120;
+    height: var(--app-mobile-nav-height);
+    padding: 7px;
+    border: 1px solid rgba(226, 232, 240, 0.92);
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(18px);
+    box-shadow: 0 18px 42px rgba(15, 23, 42, 0.16);
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .mobile-nav-btn {
+    min-width: 0;
+    border: 1px solid transparent;
+    border-radius: 14px;
+    background: transparent;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+  }
+
+  .mobile-nav-btn span {
+    color: inherit;
+    font-size: 10px;
+    font-weight: 950;
+    line-height: 1;
+  }
+
+  .mobile-nav-btn strong {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: inherit;
+    font-size: 11px;
+    font-weight: 900;
+    line-height: 1.1;
+    white-space: nowrap;
+  }
+
+  .mobile-nav-btn.active {
+    border-color: rgba(16, 185, 129, 0.18);
+    background: rgba(16, 185, 129, 0.1);
+    color: #0f766e;
+  }
 }
 </style>

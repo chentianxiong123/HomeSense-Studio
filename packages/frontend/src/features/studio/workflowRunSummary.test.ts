@@ -158,6 +158,42 @@ describe('buildWorkflowStepSummary', () => {
     expect(summary?.rows).toContainEqual({ label: '能力数|Actions', value: '4' })
   })
 
+  it('summarizes real Bilibili CLI list payloads without draft-upload assumptions', () => {
+    const summary = buildWorkflowStepSummary({
+      nodeId: '7',
+      nodeType: 'executor_call',
+      status: 'succeeded',
+      outputs: {
+        result: {
+          status: 'success',
+          data: {
+            status: 'success',
+            data: {
+              schema_version: '1',
+              data: {
+                items: [
+                  {
+                    bvid: 'BV1test',
+                    title: 'HomeSense Studio demo',
+                    owner: { name: 'tester' },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+    }, label)
+
+    expect(summary).toMatchObject({
+      title: 'Bilibili 查询|Bilibili Query',
+      kind: 'executor',
+      tone: 'success',
+    })
+    expect(summary?.rows).toContainEqual({ label: '条数|Items', value: '1' })
+    expect(summary?.rows).toContainEqual({ label: '首条|First', value: 'HomeSense Studio demo' })
+  })
+
   it('summarizes failed DLNA cast actions as failed executor trace cards', () => {
     const summary = buildWorkflowStepSummary({
       nodeId: '3',

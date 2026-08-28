@@ -1,5 +1,5 @@
 import { getDb as defaultGetDb } from '../../db/index.js'
-import { cliBridge } from '../cli-bridge/index.js'
+import { cliBridge } from '../integration/index.js'
 import { buildDeviceCardProjection, buildDeviceRuntimeCard, type DeviceCardRow, type DeviceCardProjection } from './device-card-projection.js'
 import { buildDeviceCapabilityRegistry, type DeviceAgentCapability } from './device-capability-registry.js'
 

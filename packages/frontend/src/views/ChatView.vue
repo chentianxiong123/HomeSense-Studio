@@ -807,4 +807,116 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   .msg-row { padding: 0 36px; }
   .input-area { padding: 0 36px 20px; }
 }
+
+@media (max-width: 760px) {
+  .chat-view {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .side-pane,
+  .resize-handle {
+    display: none;
+  }
+
+  .center-pane {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .chat-toolbar {
+    min-height: 52px;
+    padding: 8px 12px;
+    gap: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .chat-toolbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .trace-toggle-btn,
+  .context-usage-chip,
+  .stop-btn {
+    height: 34px;
+    flex: 0 0 auto;
+  }
+
+  .context-usage-chip {
+    max-width: 178px;
+    gap: 8px;
+    font-size: 11px;
+  }
+
+  .context-usage-meter {
+    width: 44px;
+  }
+
+  .stop-btn {
+    margin-left: 0;
+    padding: 0 14px;
+    font-size: 12px;
+  }
+
+  .message-list {
+    padding: 12px 0;
+  }
+
+  .msg-row {
+    padding: 0 12px;
+    margin-bottom: 6px;
+  }
+
+  .welcome {
+    padding: 120px 24px;
+  }
+
+  .welcome h2 {
+    font-size: 30px;
+  }
+
+  .welcome p {
+    font-size: 15px;
+  }
+
+  .time-divider {
+    padding: 12px 0;
+    font-size: 11px;
+  }
+
+  .time-divider::before,
+  .time-divider::after {
+    width: calc(50% - 46px);
+  }
+
+  .input-area {
+    padding: 0 12px calc(12px + var(--app-mobile-nav-height, 72px) + env(safe-area-inset-bottom, 0px));
+  }
+
+  .input-wrap {
+    max-width: none;
+    border-radius: 16px;
+    box-shadow: 0 14px 38px rgba(15, 23, 42, 0.12);
+  }
+
+  .input-wrap:focus-within {
+    transform: none;
+  }
+
+  .chat-input {
+    min-height: 56px;
+    max-height: 160px;
+    padding: 15px 74px 15px 16px;
+    font-size: 15px;
+  }
+
+  .send-btn {
+    right: 8px;
+    bottom: 8px;
+    width: 40px;
+    height: 40px;
+    border-radius: 13px;
+  }
+}
 </style>

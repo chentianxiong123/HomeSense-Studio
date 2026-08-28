@@ -1,4 +1,4 @@
-import { cliBridge, type CLIResult } from '../cli-bridge/index.js'
+import { cliBridge, type CLIResult } from '../integration/index.js'
 import { getDb } from '../../db/index.js'
 import type { ExecutorInvokeResult } from '../executor-gateway/index.js'
 import { buildDeviceCardProjection, buildDeviceRuntimeCard } from './device-card-projection.js'
