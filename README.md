@@ -1,47 +1,35 @@
-# HomeSense Studio v2
+# HomeSense Studio
 
-Active workspace: `D:\files\HomeSense-Studio-v2`.
+家庭智能体平台 — 双入口体验：Chat Surface（自然语言控制）+ Studio Surface（可视化工作流编排）。
 
-## Device Backend
+## 快速启动
 
-The v2 server owns the local device database, rooms, Mi auth/discovery, Mi capability execution, LAN presence checks, and Android TV/box LAN control through the migrated CLI bridge.
+```bash
+# 安装依赖
+npm install
 
-Run the backend:
+# 安装 Python CLI 依赖
+cd packages/mi-cli && uv sync && cd ../..
 
-```powershell
-pnpm --filter @hs/server start:dev
+# 启动开发环境
+npm run dev
 ```
 
-The server listens on `http://localhost:3000` and exposes API routes under `/api`.
+- 前端：http://localhost:5173
+- 后端：http://localhost:3000
 
-## Web API Modes
+## 项目结构
 
-Default web dev mode still uses the browser mock API:
-
-```powershell
-pnpm --filter @hs/web dev
+```
+packages/
+├── backend/     # TS 后端 (Fastify + better-sqlite3 + Zod)
+├── frontend/    # Vue 3 前端 (Vite + NaiveUI + Vue Flow)
+└── mi-cli/      # Python CLI (米家设备控制, phone-mcp 风格 run+JSON)
 ```
 
-Use the real backend through the Vite `/api` proxy:
+## 技术栈
 
-```powershell
-$env:VITE_ENABLE_MOCK_API='0'
-pnpm --filter @hs/web dev
-```
-
-The proxy target defaults to `http://localhost:3000`. Override it with `VITE_DEV_API_TARGET` if the server runs elsewhere.
-
-Alternatively, set `VITE_API_BASE` to call the backend directly:
-
-```powershell
-$env:VITE_API_BASE='http://localhost:3000'
-pnpm --filter @hs/web dev
-```
-
-## Device Page Direction
-
-`/devices` is the unified device and digital-twin surface. The frontend product language should expose only `Mi` and `LAN` as device sources; IR, MIoT, XiaoAi virtual children, and CLI-specific implementation details stay behind the backend boundary.
-
-`/integrations` is the unified authentication and authorization surface. It is split first by account class: external accounts such as Mi and Bilibili, then local-network accounts such as ADB, streaming, SSH, FRP, and SMB.
-
-Next product step: replace the plain device grid with a 2D room-first device view.
+- **后端**：TypeScript + Fastify + better-sqlite3 + @fastify/websocket + Zod + OpenAI SDK
+- **前端**：Vue 3 + Vue Flow + NaiveUI + Vite
+- **Python CLI**：Python 3.11+ + uv + httpx + pydantic
+- **存储**：SQLite (better-sqlite3) + sqlite-vss + FTS5

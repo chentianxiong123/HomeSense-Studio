@@ -6,10 +6,6 @@ def main():
         from adb_cli.cli import cli_main
         cli_main(sys.argv[2:])
         return
-    if len(sys.argv) >= 2 and sys.argv[1] == "serve":
-        from adb_cli.cli import serve_main
-        serve_main()
-        return
 
     print('Usage: adb-cli run \'<json>\'')
     print('Example: adb-cli run \'{"action":"list_devices"}\'')

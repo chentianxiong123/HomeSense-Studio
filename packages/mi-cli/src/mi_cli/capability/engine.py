@@ -342,26 +342,6 @@ def lookup_capability_for_property(device_info: dict, capability_name: str) -> d
     return _find_capability_in_profile(device_info, capability_name, "property")
 
 
-def _schema_type(value_type: str) -> str:
-    if value_type in ("integer", "float", "number"):
-        return "number" if value_type == "float" else "integer"
-    if value_type == "boolean":
-        return "boolean"
-    return "string"
-
-
-def _capability_input_schema(value_type: str | None) -> dict:
-    if not value_type or value_type == "none":
-        return {"type": "object", "required": [], "properties": {}}
-    return {
-        "type": "object",
-        "required": ["value"],
-        "properties": {
-            "value": {"type": _schema_type(value_type)},
-        },
-    }
-
-
 def build_discover_summary(devices: list) -> list:
     """Compact AI-friendly device list grouped by capability kind."""
     summary = []
@@ -397,15 +377,7 @@ def build_device_capabilities_list(device_info: dict) -> list:
     # IR 设备（机顶盒/电视）：用统一"遥控按键"能力替代 MIoT 动作映射。
     # 每个设备的真实按键码表不同，不能靠 MIoT spec 通用映射覆盖全部键。
     if device_type in ("stb", "television"):
-        return [{
-            "capability_id": "mi.ir_keys",
-            "name": "遥控按键",
-            "kind": "action",
-            "type": "string",
-            "source": "mi",
-            "input_schema": _capability_input_schema("string"),
-            "metadata": {"capability_key": "ir_keys"},
-        }]
+        return [{"name": "遥控按键", "kind": "action", "type": "string", "source": "mi"}]
 
     controls = cap_profile.get("controls", {})
     domains = cap_profile.get("domains", [])
@@ -413,15 +385,12 @@ def build_device_capabilities_list(device_info: dict) -> list:
     for cap_key in controls:
         entry = CAPABILITY_REGISTRY.get(cap_key, {})
         cap_info = controls[cap_key]
-        vtype = cap_info.get("type", entry.get("value_type"))
         item = {
-            "capability_id": f"mi.{cap_key}",
             "name": entry.get("name_cn", cap_key),
             "kind": cap_info.get("kind", entry.get("kind", "property")),
             "source": "mi",
-            "input_schema": _capability_input_schema(vtype),
-            "metadata": {"capability_key": cap_key},
         }
+        vtype = cap_info.get("type", entry.get("value_type"))
         if vtype and vtype != "none":
             item["type"] = vtype
         if entry.get("value_resolution"):
@@ -439,15 +408,12 @@ def build_device_capabilities_list(device_info: dict) -> list:
         for key in injected_keys:
             if CAPABILITY_REGISTRY[key].get("name_cn") not in existing:
                 entry = CAPABILITY_REGISTRY[key]
-                vtype = entry.get("value_type")
                 item = {
-                    "capability_id": f"mi.{key}",
                     "name": entry.get("name_cn", key),
                     "kind": entry.get("kind", "action"),
                     "source": "mi",
-                    "input_schema": _capability_input_schema(vtype),
-                    "metadata": {"capability_key": key},
                 }
+                vtype = entry.get("value_type")
                 if vtype and vtype != "none":
                     item["type"] = vtype
                 capabilities.append(item)
