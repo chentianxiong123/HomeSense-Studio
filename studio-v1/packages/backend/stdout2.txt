@@ -1,4 +1,0 @@
-{"level":30,"time":1779342836546,"pid":17096,"hostname":"LAPTOP-G30GITI6","msg":"Server listening at http://127.0.0.1:3001"}
-{"level":30,"time":1779342836546,"pid":17096,"hostname":"LAPTOP-G30GITI6","msg":"Server listening at http://192.168.31.204:3001"}
-{"level":30,"time":1779342836547,"pid":17096,"hostname":"LAPTOP-G30GITI6","msg":"HomeSense Studio backend running on http://0.0.0.0:3001"}
-{"level":30,"time":1779342845984,"pid":17096,"hostname":"LAPTOP-G30GITI6","msg":"[startup] Knowledge embeddings rebuilt: 61/61 (profile=demo-piexian)"}

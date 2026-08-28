@@ -1,6 +1,0 @@
-provider: "openai-compatible"
-model: "gpt-4o-mini"
-base_url: "https://daidai.rxwysystem.com"
-api_key: "sk-d468157c3ae2fa0b2ecc59e1f0c37048e69af3766c85e467585bfca04cb75918"
-max_iterations: 5
-timeout_ms: 30000

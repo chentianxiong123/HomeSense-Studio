@@ -1,8 +1,0 @@
-[project]
-name = "homesense-moonlight-driver"
-version = "0.1.0"
-description = "HomeSense lightweight Moonlight/Sunshine driver"
-requires-python = ">=3.11"
-
-[project.scripts]
-moonlight-driver = "moonlight_driver.cli:main"
