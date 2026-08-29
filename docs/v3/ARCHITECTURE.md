@@ -296,30 +296,45 @@ Studio 模式 (生产力): React Flow 画布工作流编排 — v1 Studio 平移
 - **禁止 per-user 容器**：100 用户 = 300 容器必炸，绝不做
 - Docker 只跑内部那**一套**基础设施，全用户共享
 
-### 10.2 SQLite 多租户策略
+### 10.2 SQLite 多租户策略（一租户一文件）
 
-**起步用 SQLite，后期平滑迁移 Postgres。**
+**每个租户一个独立 SQLite 文件，物理隔离，零耦合。**
 
-```sql
--- 单库单表，加 tenant_id 字段隔离
-CREATE TABLE devices (
-    id TEXT PRIMARY KEY,
-    tenant_id INTEGER NOT NULL,  -- 租户隔离字段
-    name TEXT,
-    room TEXT,
-    props JSON
-);
-
-CREATE INDEX idx_devices_tenant ON devices(tenant_id);
+```
+/home/homesense/data/
+  ├── tenant_1.db    # 用户1的设备、记忆、对话
+  ├── tenant_2.db    # 用户2的...
+  └── tenant_3.db    # 用户3的...
 ```
 
-| 阶段 | 方案 | 适用场景 |
-|------|------|----------|
-| Phase 1 | SQLite 单库单表 | 开发期，快速迭代 |
-| Phase 2 | SQLite 多文件（每租户一个 .db） | 小规模测试，便于隔离 |
-| Phase 3 | PostgreSQL + 单库单表 | 正式 SaaS，生产环境 |
+**核心优势**:
+| 维度 | 一租户一文件 ✅ |
+|------|----------------|
+| 数据隔离 | 物理隔离，天然无冲突 |
+| 备份/恢复 | `cp tenant_1.db backup.db` |
+| 迁移/销毁 | 删除/复制文件，无需 SQL |
+| 调试 | 直接打开文件查看 |
+| 并发写入 | 不同文件无锁冲突 |
 
-**关键原则**：从第一天就用 `tenant_id` 字段隔离，后续换数据库只改驱动，不改业务逻辑。
+**代码极简**:
+```typescript
+// 路由层：按租户分发到对应文件
+function getDb(tenantId: string): Database {
+  const dbPath = `/home/homesense/data/tenant_${tenantId}.db`;
+  return new Database(dbPath);
+}
+
+// 业务层：和普通 SQLite 开发一模一样
+async function listDevices(tenantId: string) {
+  const db = getDb(tenantId);
+  return db.query('SELECT * FROM devices'); // 无需 tenant_id 字段
+}
+```
+
+**限制与升级**:
+- 单文件 > 100MB → 拆分或合并架构
+- 租户数 > 10000 → 考虑统一存储
+- **正常情况下这两个限制永远不会触发**
 
 ### 10.3 云边协同架构
 
