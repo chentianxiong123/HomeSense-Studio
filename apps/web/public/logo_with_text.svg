@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="44" viewBox="0 0 220 44" fill="none">
+  <defs>
+    <linearGradient id="hs-home" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+    <radialGradient id="hs-node" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#67e8f9"/>
+      <stop offset="1" stop-color="#0ea5e9"/>
+    </radialGradient>
+    <linearGradient id="hs-text" x1="0" y1="0" x2="150" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e0f2fe"/>
+      <stop offset="1" stop-color="#bae6fd"/>
+    </linearGradient>
+  </defs>
+
+  <!-- icon: smart home -->
+  <g transform="translate(0,0)">
+    <path d="M24 6 L43 26 L5 26 Z" fill="none" stroke="url(#hs-home)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M11 26 L37 26 L37 40 L11 40 Z" fill="none" stroke="url(#hs-home)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="24" cy="33" r="4.2" fill="url(#hs-node)"/>
+    <circle cx="24" cy="33" r="7.8" stroke="#22d3ee" stroke-opacity="0.45" stroke-width="1.6" fill="none"/>
+    <path d="M20.5 29.5 L13 23" stroke="#38bdf8" stroke-opacity="0.7" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M27.5 29.5 L35 23" stroke="#38bdf8" stroke-opacity="0.7" stroke-width="1.8" stroke-linecap="round"/>
+    <circle cx="12" cy="22" r="1.6" fill="#22d3ee"/>
+    <circle cx="36" cy="22" r="1.6" fill="#22d3ee"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="58" y="31" fill="url(#hs-text)" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="24" font-weight="700" letter-spacing="0.5">HomeSense</text>
+  <text x="59" y="40" fill="#67e8f9" fill-opacity="0.75" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="9" font-weight="500" letter-spacing="3">AI HOME MANAGER</text>
+</svg>

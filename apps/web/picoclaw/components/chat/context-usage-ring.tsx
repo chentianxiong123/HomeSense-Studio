@@ -140,8 +140,11 @@ export function ContextUsageRing({
           </div>
           <div className="bg-muted mt-1.5 h-1.5 w-full overflow-hidden rounded-full">
             <div
-              className="h-full rounded-full bg-violet-500 transition-all"
-              style={{ width: `${barPercent}%` }}
+              className="h-full rounded-full transition-all"
+              style={{
+                background: "linear-gradient(90deg, var(--ring), oklch(0.68 0.14 232))",
+                width: `${barPercent}%`,
+              }}
             />
           </div>
 
@@ -174,7 +177,7 @@ export function ContextUsageRing({
             type="button"
             onClick={handleDetail}
             disabled={cooldown}
-            className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-violet-600 transition-opacity hover:opacity-70 disabled:opacity-40 dark:text-violet-400"
+            className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-cyan-600 transition-opacity hover:opacity-70 disabled:opacity-40 dark:text-cyan-400"
           >
             {t("chat.contextDetail")}
             <IconArrowRight className="h-3 w-3" />
