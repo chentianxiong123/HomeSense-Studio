@@ -278,18 +278,21 @@ Studio 模式 (生产力): React Flow 画布工作流编排 — v1 Studio 平移
 
 ### 10.1 共享进程 + 数据隔离（不 per-user 容器）
 
-**多用户 ≠ 每用户开容器。** 云端跑**一套共享进程**，用户隔离靠数据层：
+**多用户 ≠ 每用户开容器。** 云端跑**一套共享进程**，每个租户一个独立 SQLite 文件：
 
 ```
 云端就一套进程
-│  SQLite (单库单表, 不是每人一个文件)
+│  SQLite 文件目录 /home/homesense/data/
+│    ├── tenant_1.db
+│    ├── tenant_2.db
+│    └── tenant_3.db
 │  LLM 网关 (共享)
 │  Agent 服务 (共享进程)
 │
-└── 每用户 = 数据库一行 tenant_id
-     用户1 → tenant_id=1 (对话/记忆/设备绑定)
-     用户2 → tenant_id=2
-     隔离 = WHERE tenant_id = ?  (一行代码, 不是一台容器)
+└── 路由层根据 token 分发到对应文件
+     用户1 → tenant_1.db
+     用户2 → tenant_2.db
+     隔离 = 物理文件隔离，无需 SQL WHERE
 ```
 
 - 这是 Notion / Supabase 的模型：几千万用户共享同一套数据库 + 进程
