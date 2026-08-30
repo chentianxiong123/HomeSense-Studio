@@ -273,10 +273,6 @@ function isMissingRequiredValue(value: unknown): boolean {
   return false
 }
 
-function getChannelDocSlug(channelName: string): string {
-  return channelName.replaceAll("_", "-")
-}
-
 const CHANNELS_WITHOUT_DOCS = new Set([
   "pico",
   "wecom",
@@ -288,7 +284,7 @@ const CHANNELS_WITHOUT_DOCS = new Set([
 ])
 
 export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const { state: gatewayState } = useGateway()
 
   const [loading, setLoading] = useState(true)
@@ -400,16 +396,8 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
   const docsUrl = useMemo(() => {
     if (!channel) return ""
     if (CHANNELS_WITHOUT_DOCS.has(channel.name)) return ""
-    const language = (
-      i18n.resolvedLanguage ??
-      i18n.language ??
-      ""
-    ).toLowerCase()
-    const base = language.startsWith("zh")
-      ? "https://docs.picoclaw.io/zh-Hans/docs/channels"
-      : "https://docs.picoclaw.io/docs/channels"
-    return `${base}/${getChannelDocSlug(channel.name)}`
-  }, [channel, i18n.language, i18n.resolvedLanguage])
+    return `https://github.com/chentianxiong123/HomeSense-Studio-v3/issues/new?title=${encodeURIComponent(channel.name)}`
+  }, [channel])
 
   const channelDisplayName = useMemo(() => {
     if (!channel) return channelName

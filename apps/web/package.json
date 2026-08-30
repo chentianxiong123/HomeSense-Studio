@@ -1,7 +1,7 @@
 {
   "name": "@hs/web",
   "version": "0.1.0",
-  "description": "HomeSense v3 Web (PicoClaw UI + pi engine)",
+  "description": "HomeSense v3 Web (HomeSense UI + pi engine)",
   "license": "MIT",
   "engines": {
     "node": ">=22.19.0"
