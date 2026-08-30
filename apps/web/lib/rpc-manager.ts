@@ -47,6 +47,8 @@ import {
   readSessionToolSelection,
   validateSessionToolSelection,
 } from "./session-tool-selection";
+import { createHomeSenseMemoryExtension } from "./memory-extension";
+import { buildMemorySnapshot } from "./memory-store";
 
 // ============================================================================
 // Types
@@ -1956,7 +1958,10 @@ export async function startRpcSession(
                 () => listSubagentProfiles(sessionCwd),
                 isBuiltInSubagentsEnabled,
               ),
+              createHomeSenseMemoryExtension(),
             ],
+            // 会话启动时冻结注入跨会话记忆快照(与 hermes 一致,保前缀缓存)。
+            appendSystemPrompt: [buildMemorySnapshot()].filter((s) => s !== ""),
             extensionsOverride: (base) => preferUserBashExtension(preferPiWebSubagentExtension(base)),
           },
       ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
