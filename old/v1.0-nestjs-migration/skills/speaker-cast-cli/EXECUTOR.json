@@ -1,0 +1,78 @@
+{
+  "name": "speaker-cast-cli",
+  "executable": "../../packages/bilibili-cast-bridge/src/index.mjs",
+  "protocol": "in_process_module",
+  "cwd": ".",
+  "args": [],
+  "timeout_ms": 30000,
+  "actions": {
+    "health": {
+      "description": "Check whether the bilibili-music casting adapter is reachable for speaker casting.",
+      "params_schema": {
+        "base_url": "string?"
+      }
+    },
+    "service_status": {
+      "description": "Read Xiaomi speaker service login/device status.",
+      "params_schema": {
+        "base_url": "string?"
+      }
+    },
+    "list_speakers": {
+      "description": "List available Xiaomi speaker devices.",
+      "params_schema": {
+        "base_url": "string?"
+      }
+    },
+    "search_bilibili": {
+      "description": "Search Bilibili media entries before pushing music to a speaker.",
+      "params_schema": {
+        "keyword": "string",
+        "page": "number?",
+        "page_size": "number?",
+        "base_url": "string?"
+      }
+    },
+    "resolve_audio": {
+      "description": "Resolve Bilibili audio metadata by bvid.",
+      "params_schema": {
+        "bvid": "string",
+        "quality": "number?",
+        "base_url": "string?"
+      }
+    },
+    "play_bilibili": {
+      "description": "Push Bilibili music to a speaker.",
+      "params_schema": {
+        "bvid": "string",
+        "did": "string",
+        "quality": "number?",
+        "base_url": "string?"
+      }
+    },
+    "control_playback": {
+      "description": "Control speaker playback.",
+      "params_schema": {
+        "did": "string",
+        "control_action": "string?",
+        "volume": "number?",
+        "base_url": "string?"
+      }
+    },
+    "get_volume": {
+      "description": "Get speaker volume.",
+      "params_schema": {
+        "did": "string",
+        "base_url": "string?"
+      }
+    },
+    "set_volume": {
+      "description": "Set speaker volume.",
+      "params_schema": {
+        "did": "string",
+        "volume": "number",
+        "base_url": "string?"
+      }
+    }
+  }
+}

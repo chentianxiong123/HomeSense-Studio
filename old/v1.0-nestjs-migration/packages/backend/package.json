@@ -1,0 +1,41 @@
+{
+  "name": "backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "db:init": "tsx src/db/init.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check:isolation": "node ../../scripts/check-module-isolation.mjs --by-source",
+    "check:isolation:strict": "node ../../scripts/check-module-isolation.mjs --strict --by-source",
+    "dev:nest": "tsc --outDir dist-nest --watch & node --watch dist-nest/nest-main.js",
+    "start:nest": "tsc --outDir dist-nest && node dist-nest/nest-main.js"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "file:../../../HomeSense/References/pi/packages/agent",
+    "@earendil-works/pi-ai": "file:../../../HomeSense/References/pi/packages/ai",
+    "@fastify/cors": "^10.0.2",
+    "@fastify/websocket": "^11.0.2",
+    "adbkit": "^2.11.1",
+    "better-sqlite3": "^11.9.1",
+    "dotenv": "^16.4.7",
+    "fastify": "^5.3.3",
+    "miio": "^0.15.6",
+    "node-pty": "^1.1.0",
+    "openai": "^4.85.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@swc-node/register": "^1.11.1",
+    "@swc/core": "^1.15.40",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.19.19",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.6"
+  }
+}
