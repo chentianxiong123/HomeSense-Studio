@@ -1,0 +1,11 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+allowBuilds:
+  '@nestjs/core': true
+  better-sqlite3: true
+  cpu-features: true
+  esbuild: true
+  node-pty: true
+  ssh2: true
+  vue-demi: true

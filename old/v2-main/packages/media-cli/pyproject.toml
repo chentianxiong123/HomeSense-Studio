@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "media-cli"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.28.0",
+    "qrcode>=7.0",
+]
+
+[project.scripts]
+media-cli = "media_cli.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/media_cli"]
