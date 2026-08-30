@@ -4,22 +4,19 @@ import {
   type ChangeEvent,
   type ClipboardEvent,
   type DragEvent,
+  useCallback,
   useEffect,
   useRef,
   useState,
 } from "react"
 import { useTranslation } from "react-i18next"
 
-import { AssistantMessage } from "@pico/components/chat/assistant-message"
-import {
-  ChatComposer,
-  type ChatInputDisabledReason,
-} from "@pico/components/chat/chat-composer"
+import { ChatComposer, type ChatInputDisabledReason } from "@pico/components/chat/chat-composer"
 import { ChatEmptyState } from "@pico/components/chat/chat-empty-state"
+import { MessageList } from "@pico/components/chat/message-list"
 import { ModelSelector } from "@pico/components/chat/model-selector"
 import { SessionHistoryMenu } from "@pico/components/chat/session-history-menu"
 import { TypingIndicator } from "@pico/components/chat/typing-indicator"
-import { UserMessage } from "@pico/components/chat/user-message"
 import { PageHeader } from "@pico/components/page-header"
 import { Button } from "@pico/components/ui/button"
 import {
@@ -44,7 +41,6 @@ import type { ConnectionState } from "@pico/store/chat"
 import type { ChatAttachment } from "@pico/store/chat"
 import {
   assistantDetailVisibilityAtom,
-  shouldShowAssistantMessage,
 } from "@pico/store/chat"
 import type { GatewayState } from "@pico/store/gateway"
 
@@ -107,7 +103,6 @@ export function ChatPage() {
   const dragDepthRef = useRef(0)
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [hasScrolled, setHasScrolled] = useState(false)
-  const [input, setInput] = useState("")
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const [isDragActive, setIsDragActive] = useState(false)
   const [assistantDetailVisibility, setAssistantDetailVisibility] = useAtom(
@@ -190,124 +185,149 @@ export function ChatPage() {
     }
   }, [messages, isTyping, isAtBottom])
 
-  const handleSend = () => {
-    if ((!input.trim() && attachments.length === 0) || !canInput) return
-    if (
-      sendMessage({
-        content: input,
-        attachments,
-      })
-    ) {
-      setInput("")
-      setAttachments([])
-    }
-  }
+  const handleSend = useCallback(
+    (payload: { content: string; attachments: ChatAttachment[] }) => {
+      if (!canInput) return
+      if (
+        sendMessage({
+          content: payload.content,
+          attachments: payload.attachments,
+        })
+      ) {
+        setAttachments([])
+      }
+    },
+    [canInput, sendMessage],
+  )
 
-  const handleAddImages = () => {
+  const handleAddImages = useCallback(() => {
     if (!canInput) return
     fileInputRef.current?.click()
-  }
+  }, [canInput])
 
-  const handleRemoveAttachment = (index: number) => {
+  const handleRemoveAttachment = useCallback((index: number) => {
     setAttachments((prev) => prev.filter((_, itemIndex) => itemIndex !== index))
-  }
+  }, [])
 
-  const appendImageFiles = async (files: readonly File[]) => {
-    if (!canInput || files.length === 0) {
-      return
-    }
+  const appendImageFiles = useCallback(
+    async (files: readonly File[]) => {
+      if (!canInput || files.length === 0) {
+        return
+      }
 
-    const nextAttachments = await buildChatImageAttachments(files, t)
-    if (nextAttachments.length === 0) {
-      return
-    }
+      const nextAttachments = await buildChatImageAttachments(files, t)
+      if (nextAttachments.length === 0) {
+        return
+      }
 
-    setAttachments((prev) => [...prev, ...nextAttachments])
-  }
+      setAttachments((prev) => [...prev, ...nextAttachments])
+    },
+    [canInput, t],
+  )
 
-  const handleImageSelection = async (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? [])
-    event.target.value = ""
+  const handleImageSelection = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(event.target.files ?? [])
+      event.target.value = ""
 
-    if (files.length === 0) {
-      return
-    }
+      if (files.length === 0) {
+        return
+      }
 
-    await appendImageFiles(files)
-  }
+      await appendImageFiles(files)
+    },
+    [appendImageFiles],
+  )
 
-  const resetDragState = () => {
+  const resetDragState = useCallback(() => {
     dragDepthRef.current = 0
     setIsDragActive(false)
-  }
+  }, [])
 
-  const handleComposerPaste = async (
-    event: ClipboardEvent<HTMLTextAreaElement>,
-  ) => {
-    const files = getTransferredFiles(event.clipboardData)
-    if (files.length === 0) {
-      return
-    }
+  const handleComposerPaste = useCallback(
+    async (event: ClipboardEvent<HTMLTextAreaElement>) => {
+      const files = getTransferredFiles(event.clipboardData)
+      if (files.length === 0) {
+        return
+      }
 
-    await appendImageFiles(files)
-  }
+      await appendImageFiles(files)
+    },
+    [appendImageFiles],
+  )
 
-  const handleComposerDragEnter = (event: DragEvent<HTMLDivElement>) => {
-    if (!hasFileTransfer(event.dataTransfer)) {
-      return
-    }
+  const handleComposerDragEnter = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      if (!hasFileTransfer(event.dataTransfer)) {
+        return
+      }
 
-    event.preventDefault()
-    if (!canInput) {
-      return
-    }
-    dragDepthRef.current += 1
-    setIsDragActive(true)
-  }
+      event.preventDefault()
+      if (!canInput) {
+        return
+      }
+      dragDepthRef.current += 1
+      setIsDragActive(true)
+    },
+    [canInput],
+  )
 
-  const handleComposerDragLeave = (event: DragEvent<HTMLDivElement>) => {
-    if (!hasFileTransfer(event.dataTransfer)) {
-      return
-    }
+  const handleComposerDragLeave = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      if (!hasFileTransfer(event.dataTransfer)) {
+        return
+      }
 
-    event.preventDefault()
-    if (!canInput) {
+      event.preventDefault()
+      if (!canInput) {
+        resetDragState()
+        return
+      }
+      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+      if (dragDepthRef.current === 0) {
+        setIsDragActive(false)
+      }
+    },
+    [canInput, resetDragState],
+  )
+
+  const handleComposerDragOver = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      if (!hasFileTransfer(event.dataTransfer)) {
+        return
+      }
+
+      event.preventDefault()
+      event.dataTransfer.dropEffect = canInput ? "copy" : "none"
+    },
+    [canInput],
+  )
+
+  const handleComposerDrop = useCallback(
+    async (event: DragEvent<HTMLDivElement>) => {
+      if (!hasFileTransfer(event.dataTransfer)) {
+        return
+      }
+
+      event.preventDefault()
+      const files = getTransferredFiles(event.dataTransfer)
       resetDragState()
-      return
+
+      if (!canInput || files.length === 0) {
+        return
+      }
+
+      await appendImageFiles(files)
+    },
+    [canInput, resetDragState, appendImageFiles],
+  )
+
+  const handleContextDetail = useCallback(() => {
+    if (!canInput) return
+    if (sendMessage({ content: "/context", attachments: [] })) {
+      setAttachments([])
     }
-    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
-    if (dragDepthRef.current === 0) {
-      setIsDragActive(false)
-    }
-  }
-
-  const handleComposerDragOver = (event: DragEvent<HTMLDivElement>) => {
-    if (!hasFileTransfer(event.dataTransfer)) {
-      return
-    }
-
-    event.preventDefault()
-    event.dataTransfer.dropEffect = canInput ? "copy" : "none"
-  }
-
-  const handleComposerDrop = async (event: DragEvent<HTMLDivElement>) => {
-    if (!hasFileTransfer(event.dataTransfer)) {
-      return
-    }
-
-    event.preventDefault()
-    const files = getTransferredFiles(event.dataTransfer)
-    resetDragState()
-
-    if (!canInput || files.length === 0) {
-      return
-    }
-
-    await appendImageFiles(files)
-  }
-
-  const canSubmit =
-    canInput && (Boolean(input.trim()) || attachments.length > 0)
+  }, [canInput, sendMessage])
 
   return (
     <div className="bg-background/95 flex h-full flex-col">
@@ -397,34 +417,10 @@ export function ChatPage() {
             />
           )}
 
-          {messages.map((msg) => {
-            if (
-              !shouldShowAssistantMessage(assistantDetailVisibility, msg.kind)
-            ) {
-              return null
-            }
-
-            return (
-              <div key={msg.id} className="flex w-full">
-                {msg.role === "assistant" ? (
-                  <AssistantMessage
-                    content={msg.content}
-                    attachments={msg.attachments}
-                    kind={msg.kind}
-                    modelName={msg.modelName}
-                    toolCalls={msg.toolCalls}
-                    timestamp={msg.timestamp}
-                  />
-                ) : (
-                  <UserMessage
-                    content={msg.content}
-                    attachments={msg.attachments}
-                    timestamp={msg.timestamp}
-                  />
-                )}
-              </div>
-            )
-          })}
+          <MessageList
+            messages={messages}
+            assistantDetailVisibility={assistantDetailVisibility}
+          />
 
           {isTyping && <TypingIndicator />}
         </div>
@@ -440,9 +436,7 @@ export function ChatPage() {
       />
 
       <ChatComposer
-        input={input}
         attachments={attachments}
-        onInputChange={setInput}
         onAddImages={handleAddImages}
         onPaste={handleComposerPaste}
         onDragEnter={handleComposerDragEnter}
@@ -451,13 +445,8 @@ export function ChatPage() {
         onDrop={handleComposerDrop}
         onRemoveAttachment={handleRemoveAttachment}
         onSend={handleSend}
-        onContextDetail={() => {
-          if (sendMessage({ content: "/context", attachments: [] })) {
-            setInput("")
-          }
-        }}
+        onContextDetail={handleContextDetail}
         inputDisabledReason={inputDisabledReason}
-        canSend={canSubmit}
         isDragActive={isDragActive}
         contextUsage={contextUsage}
       />
