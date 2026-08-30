@@ -208,7 +208,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                             data-tour={
                               item.url === "/models" ? "models-nav" : undefined
                             }
-                            className={`h-9 px-3 ${isActive ? "bg-accent/80 text-foreground font-medium" : "text-muted-foreground hover:bg-muted/60"}`}
+                            className={`h-9 px-3 ${isActive ? "bg-accent/80! text-foreground font-medium" : "bg-transparent! text-muted-foreground hover:bg-muted/60"}`}
                           >
                             <Link to={item.url}>
                               <item.icon
@@ -232,7 +232,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                       <SidebarMenuItem key="channels-more-toggle">
                         <SidebarMenuButton
                           onClick={toggleShowAllChannels}
-                          className="text-muted-foreground hover:bg-muted/60 h-9 px-3"
+                          className="bg-transparent text-muted-foreground hover:bg-muted/60 h-9 px-3"
                         >
                           {showAllChannels ? (
                             <IconChevronsUp className="size-4 opacity-60" />
