@@ -91,7 +91,7 @@ export function ChatComposer({
   }
 
   return (
-    <div className="before:bg-background pointer-events-none relative z-10 -mt-[24px] shrink-0 [scrollbar-gutter:stable] overflow-y-auto px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] before:pointer-events-none before:absolute before:inset-x-0 before:top-[24px] before:bottom-0 before:content-[''] md:px-8 md:pb-8 lg:px-24 xl:px-48">
+    <div className="before:bg-background pointer-events-none relative z-10 shrink-0 [scrollbar-gutter:stable] overflow-y-auto px-4 pb-[calc(0.25rem+env(safe-area-inset-bottom))] before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:bottom-0 before:content-[''] md:px-8 lg:px-24 xl:px-48">
       <div className="pointer-events-auto mx-auto flex max-w-[1000px] flex-col items-end">
         <div
           className={cn(

@@ -108,8 +108,10 @@ export function AppHeader({
   return (
     <header
       className={
-        "bg-background/95 supports-backdrop-filter:bg-background/60 border-b-border/50 sticky top-0 z-50 flex h-14 shrink-0 items-center justify-between border-b px-4 backdrop-blur transition-transform duration-200 ease-out " +
-        (expanded ? "translate-y-0" : "-translate-y-full")
+        "bg-background/95 supports-backdrop-filter:bg-background/60 border-b-border/50 sticky top-0 z-50 flex shrink-0 items-center justify-between overflow-hidden border-b px-4 backdrop-blur transition-[height,opacity] duration-200 ease-out " +
+        (expanded
+          ? "h-14 opacity-100"
+          : "pointer-events-none h-0 border-0 opacity-0")
       }
     >
       <div className="flex items-center gap-2">
