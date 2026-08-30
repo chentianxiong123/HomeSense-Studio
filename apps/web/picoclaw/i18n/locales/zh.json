@@ -121,6 +121,8 @@
     }
   },
   "header": {
+    "collapse": "收起工具栏",
+    "expand": "展开工具栏",
     "logout": {
       "tooltip": "退出登录",
       "confirm": "退出登录",
