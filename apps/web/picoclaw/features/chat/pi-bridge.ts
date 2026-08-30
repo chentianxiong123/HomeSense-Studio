@@ -24,6 +24,7 @@ import {
   getChatState,
   updateChatStore,
 } from "@pico/store/chat"
+import { writeStoredSessionId } from "@pico/features/chat/state"
 
 const DEFAULT_CWD = "/home/a1/HomeSense-Studio-v3"
 
@@ -503,6 +504,48 @@ export async function newChatSession() {
 // 生命周期
 // ---------------------------------------------------------------------------
 
+interface TimelineMessageDto {
+  id: number
+  role: "user" | "assistant"
+  content: string
+  ts: string
+  model: string | null
+}
+
+interface TimelinePageDto {
+  messages?: TimelineMessageDto[]
+  title?: string
+  activeSessionId?: string | null
+  stats?: { count: number; lastId: number | null }
+}
+
+async function fetchTimelinePage(beforeId?: number): Promise<TimelinePageDto> {
+  const qs = beforeId ? `?before=${beforeId}` : ""
+  const res = await fetch(`/api/timeline${qs}`, {
+    headers: { "Cache-Control": "no-cache" },
+  })
+  if (!res.ok) throw new Error(`Failed to fetch timeline: ${res.status}`)
+  return (await res.json()) as TimelinePageDto
+}
+
+function timelineMessageToChatMessage(dto: TimelineMessageDto): ChatMessage {
+  return {
+    id: `tl-${dto.id}`,
+    role: dto.role,
+    content: dto.content,
+    modelName: dto.model ?? undefined,
+    timestamp: dto.ts ? Date.parse(dto.ts) : Date.now(),
+    timelineId: dto.id,
+  }
+}
+
+/** 上拉加载更早的历史消息；返回是否有更早数据。 */
+export async function loadEarlierTimeline(beforeId: number): Promise<ChatMessage[]> {
+  const page = await fetchTimelinePage(beforeId)
+  if (!page.messages) return []
+  return page.messages.map(timelineMessageToChatMessage)
+}
+
 export function initializeChatStore() {
   if (initialized) return
   initialized = true
@@ -515,13 +558,39 @@ export function initializeChatStore() {
   })
 
   const stored = localStorage.getItem("picoclaw:last-session-id")
-  activeSessionId = stored ?? ""
-  if (activeSessionId) {
-    updateChatStore({ activeSessionId: activeSessionId })
-    shouldMaintainConnection = true
-    void hydrateActiveSession().catch(() => undefined)
-    void connectChat()
-  }
+  const deferredSessionId = stored || ""
+  void (async () => {
+    try {
+      const page = await fetchTimelinePage()
+      const messages = (page.messages ?? []).map(timelineMessageToChatMessage)
+      let sessionId = page.activeSessionId || deferredSessionId || ""
+      if (!sessionId && page.stats?.lastId) {
+        // 有历史但没有活跃引擎会话:保持空,首条发送时走 /api/agent/new 新建
+        sessionId = ""
+      }
+      activeSessionId = sessionId
+      updateChatStore({
+        messages,
+        activeSessionId: sessionId,
+        hasHydratedActiveSession: true,
+        connectionState: "connected",
+      })
+      if (sessionId) {
+        writeStoredSessionId(sessionId)
+        shouldMaintainConnection = true
+        void connectChat()
+      }
+    } catch {
+      // 时间线不可用时退回旧行为:仅恢复 localStorage 会话
+      activeSessionId = deferredSessionId
+      if (deferredSessionId) {
+        updateChatStore({ activeSessionId: deferredSessionId })
+        shouldMaintainConnection = true
+        void hydrateActiveSession().catch(() => undefined)
+        void connectChat()
+      }
+    }
+  })()
 }
 
 export function teardownChatStore() {
