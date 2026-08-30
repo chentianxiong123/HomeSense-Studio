@@ -340,16 +340,17 @@ export function AppHeader({
           </TooltipTrigger>
           <TooltipContent>{t("header.logout.tooltip")}</TooltipContent>
         </Tooltip>
+      </div>
 
-        <Separator className="mx-1 my-2" orientation="vertical" />
-
-        {/* Collapse header */}
+      {/* Center: collapse handle (always at the same spot the
+          HeaderExpandHandle sits when the header is collapsed) */}
+      <div className="pointer-events-none absolute left-1/2 flex h-full -translate-x-1/2 items-center justify-center">
         <Tooltip delayDuration={700}>
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
               size="icon"
-              className="size-8"
+              className="pointer-events-auto size-8"
               onClick={onToggle}
               aria-label={t("header.collapse")}
             >
@@ -358,6 +359,18 @@ export function AppHeader({
           </TooltipTrigger>
           <TooltipContent>{t("header.collapse")}</TooltipContent>
         </Tooltip>
+      </div>
+
+      {/* Center prominent connection status */}
+      <div className="pointer-events-none absolute left-1/2 hidden h-full -translate-x-1/2 items-center justify-center lg:flex">
+        {showNotConnectedHint && (
+          <div className="text-muted-foreground flex items-center gap-2 rounded-full border border-dashed px-4 py-1.5 text-xs shadow-sm backdrop-blur-md">
+            <span className="bg-destructive/50 relative flex size-2 shrink-0 items-center justify-center rounded-full">
+              <span className="bg-destructive absolute inline-flex size-full animate-ping rounded-full opacity-75"></span>
+            </span>
+            {t("chat.notConnected")}
+          </div>
+        )}
       </div>
     </header>
   )
@@ -375,7 +388,7 @@ export function HeaderExpandHandle({ onClick }: { onClick: () => void }) {
           size="icon"
           onClick={onClick}
           aria-label={t("header.expand")}
-          className="text-muted-foreground hover:bg-accent hover:text-foreground fixed left-1/2 top-2 z-50 size-7 -translate-x-1/2 rounded-full border border-border/50 bg-background/80 shadow-sm backdrop-blur"
+          className="text-muted-foreground hover:bg-accent hover:text-foreground fixed left-1/2 top-7 z-50 size-7 -translate-x-1/2 rounded-full border border-border/50 bg-background/80 shadow-sm backdrop-blur"
         >
           <IconChevronDown className="size-4" />
         </Button>
