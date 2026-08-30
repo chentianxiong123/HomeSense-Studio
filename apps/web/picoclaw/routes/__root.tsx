@@ -36,6 +36,9 @@ const RootLayout = () => {
     if (isAuthPage) return
     void getLauncherAuthStatus()
       .then((s) => {
+        // Launcher auth not implemented (no /api/auth/* in this Next.js app):
+        // don't redirect to login/setup, just use the app.
+        if (!s.available) return
         if (!s.initialized) {
           globalThis.location.assign("/launcher-setup")
         } else if (!s.authenticated) {
