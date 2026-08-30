@@ -1,0 +1,33 @@
+{
+  "name": "HomeSense Studio",
+  "short_name": "HomeSense",
+  "description": "Home hub studio for chat, workflows, devices, workspace, and streaming.",
+  "start_url": "/home",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f7f9fa",
+  "theme_color": "#0f766e",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icons/homesense-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Chat",
+      "url": "/chat"
+    },
+    {
+      "name": "Workspace",
+      "url": "/workspace"
+    },
+    {
+      "name": "Studio",
+      "url": "/studio"
+    }
+  ]
+}

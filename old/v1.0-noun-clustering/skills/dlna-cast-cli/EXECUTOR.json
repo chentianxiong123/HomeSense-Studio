@@ -1,0 +1,81 @@
+{
+  "name": "dlna-cast-cli",
+  "executable": "../../packages/bilibili-cast-bridge/src/index.mjs",
+  "protocol": "in_process_module",
+  "cwd": ".",
+  "args": [],
+  "timeout_ms": 30000,
+  "actions": {
+    "health": {
+      "description": "Check whether the bilibili-music casting adapter is reachable for DLNA casting.",
+      "params_schema": {
+        "base_url": "string?"
+      }
+    },
+    "search_bilibili": {
+      "description": "Search Bilibili media entries before selecting a DLNA casting source.",
+      "params_schema": {
+        "keyword": "string",
+        "page": "number?",
+        "page_size": "number?",
+        "base_url": "string?"
+      }
+    },
+    "resolve_audio": {
+      "description": "Resolve Bilibili audio metadata by bvid.",
+      "params_schema": {
+        "bvid": "string",
+        "quality": "number?",
+        "base_url": "string?"
+      }
+    },
+    "discover_devices": {
+      "description": "Discover DLNA renderer devices.",
+      "params_schema": {
+        "target_ip": "string?",
+        "base_url": "string?"
+      }
+    },
+    "sniff_media": {
+      "description": "Extract playable media episodes from a video page.",
+      "params_schema": {
+        "url": "string",
+        "base_url": "string?"
+      }
+    },
+    "resolve_play_url": {
+      "description": "Convert a media URL into a DLNA playable URL.",
+      "params_schema": {
+        "url": "string",
+        "title": "string?",
+        "base_url": "string?"
+      }
+    },
+    "start_cast": {
+      "description": "Start DLNA casting to a renderer.",
+      "params_schema": {
+        "episode_url": "string",
+        "device_udn": "string",
+        "title": "string?",
+        "base_url": "string?"
+      }
+    },
+    "control_cast": {
+      "description": "Control an active DLNA cast session.",
+      "params_schema": {
+        "device_udn": "string",
+        "control_action": "string",
+        "target": "string?",
+        "volume": "number?",
+        "base_url": "string?"
+      }
+    },
+    "cast_status": {
+      "description": "Read a DLNA cast session status.",
+      "params_schema": {
+        "device_udn": "string",
+        "base_url": "string?"
+      }
+    }
+  }
+}

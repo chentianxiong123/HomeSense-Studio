@@ -1,0 +1,12 @@
+{
+  "name": "channel.wechat.send",
+  "kind": "channel",
+  "display_name": "微信 Bot 发送",
+  "description": "向微信 Bot/机器人 Webhook 发送一条消息（当前为占位，未绑定真实 token）",
+  "endpoint_env": "WECHAT_BOT_WEBHOOK",
+  "fields": {
+    "text": { "description": "消息正文", "required": true },
+    "mentioned_list": { "description": "@ 成员列表", "required": false },
+    "msg_type": { "description": "消息类型：text/markdown/news", "required": false, "default": "text" }
+  }
+}
