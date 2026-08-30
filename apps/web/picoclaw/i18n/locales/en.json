@@ -121,6 +121,8 @@
     }
   },
   "header": {
+    "collapse": "Collapse toolbar",
+    "expand": "Expand toolbar",
     "logout": {
       "tooltip": "Sign out",
       "confirm": "Sign out",

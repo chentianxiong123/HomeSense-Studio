@@ -1,5 +1,7 @@
 import {
   IconBook,
+  IconChevronDown,
+  IconChevronUp,
   IconLanguage,
   IconLoader2,
   IconLogout,
@@ -42,7 +44,13 @@ import {
 import { useGateway } from "@pico/hooks/use-gateway"
 import { useTheme } from "@pico/hooks/use-theme"
 
-export function AppHeader() {
+export function AppHeader({
+  expanded,
+  onToggle,
+}: {
+  expanded: boolean
+  onToggle: () => void
+}) {
   const { i18n, t } = useTranslation()
   const { theme, toggleTheme } = useTheme()
   const {
@@ -98,16 +106,23 @@ export function AppHeader() {
   }
 
   return (
-    <header className="bg-background/95 supports-backdrop-filter:bg-background/60 border-b-border/50 sticky top-0 z-50 flex h-14 shrink-0 items-center justify-between border-b px-4 backdrop-blur">
+    <header
+      className={
+        "bg-background/95 supports-backdrop-filter:bg-background/60 border-b-border/50 sticky top-0 z-50 flex h-14 shrink-0 items-center justify-between border-b px-4 backdrop-blur transition-transform duration-200 ease-out " +
+        (expanded ? "translate-y-0" : "-translate-y-full")
+      }
+    >
       <div className="flex items-center gap-2">
         <SidebarTrigger className="text-muted-foreground hover:bg-accent hover:text-foreground flex h-9 w-9 items-center justify-center rounded-lg sm:hidden [&>svg]:size-5">
           <IconMenu2 />
         </SidebarTrigger>
-        <div className="hidden w-36 shrink-0 items-center sm:flex">
-          <Link to="/">
-            <img className="w-full" src="/logo_with_text.svg" alt="HomeSense" />
-          </Link>
-        </div>
+        <Link to="/" className="flex items-center">
+          <img
+            className="h-7 w-auto"
+            src="/logo_with_text.svg"
+            alt="HomeSense"
+          />
+        </Link>
       </div>
 
       {/* Center prominent connection status */}
@@ -325,7 +340,48 @@ export function AppHeader() {
           </TooltipTrigger>
           <TooltipContent>{t("header.logout.tooltip")}</TooltipContent>
         </Tooltip>
+
+        <Separator className="mx-1 my-2" orientation="vertical" />
+
+        {/* Collapse header */}
+        <Tooltip delayDuration={700}>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              onClick={onToggle}
+              aria-label={t("header.collapse")}
+            >
+              <IconChevronUp className="size-4.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t("header.collapse")}</TooltipContent>
+        </Tooltip>
       </div>
     </header>
   )
 }
+
+// Fixed handle rendered when the header is collapsed, so the user can
+// pull it back down. Pinned to the top of the viewport.
+export function HeaderExpandHandle({ onClick }: { onClick: () => void }) {
+  const { t } = useTranslation()
+  return (
+    <Tooltip delayDuration={700}>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onClick}
+          aria-label={t("header.expand")}
+          className="text-muted-foreground hover:bg-accent hover:text-foreground fixed left-1/2 top-2 z-50 size-7 -translate-x-1/2 rounded-full border border-border/50 bg-background/80 shadow-sm backdrop-blur"
+        >
+          <IconChevronDown className="size-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{t("header.expand")}</TooltipContent>
+    </Tooltip>
+  )
+}
+
