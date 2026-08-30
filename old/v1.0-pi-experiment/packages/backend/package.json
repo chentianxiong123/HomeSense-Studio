@@ -1,0 +1,32 @@
+{
+  "name": "backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "db:init": "tsx src/db/init.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.2",
+    "@fastify/websocket": "^11.0.2",
+    "@earendil-works/pi-agent-core": "file:../../../HomeSense/References/pi/packages/agent",
+    "@earendil-works/pi-ai": "file:../../../HomeSense/References/pi/packages/ai",
+    "better-sqlite3": "^11.9.1",
+    "dotenv": "^16.4.7",
+    "fastify": "^5.3.3",
+    "openai": "^4.85.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.19.19",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.6"
+  }
+}
