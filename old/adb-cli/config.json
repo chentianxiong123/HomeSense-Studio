@@ -1,0 +1,18 @@
+{
+  "ocr_local": {
+    "engine": "paddleocr",
+    "lang": "ch"
+  },
+  "ocr_api": {
+    "url": "",
+    "api_key": "",
+    "model": "",
+    "timeout": 60
+  },
+  "vision_api": {
+    "url": "",
+    "api_key": "",
+    "model": "",
+    "timeout": 60
+  }
+}
