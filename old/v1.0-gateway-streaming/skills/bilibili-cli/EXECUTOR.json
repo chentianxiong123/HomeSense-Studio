@@ -1,0 +1,148 @@
+{
+  "name": "bilibili-cli",
+  "executable": "../../packages/bilibili-cli/src/index.mjs",
+  "protocol": "in_process_module",
+  "cwd": ".",
+  "args": [],
+  "timeout_ms": 60000,
+  "actions": {
+    "health": {
+      "description": "Check the local bridge to the real Bilibili CLI reference checkout.",
+      "params_schema": {}
+    },
+    "status": {
+      "description": "Check login/auth status.",
+      "params_schema": {}
+    },
+    "whoami": {
+      "description": "Read the current account profile.",
+      "params_schema": {}
+    },
+    "video": {
+      "description": "Inspect a video by BV id or URL, with subtitles, comments, AI summary, and related items.",
+      "params_schema": {
+        "bv_or_url": "string",
+        "subtitle": "boolean?",
+        "subtitle_timeline": "boolean?",
+        "subtitle_format": "string?",
+        "comments": "boolean?",
+        "ai": "boolean?",
+        "related": "boolean?"
+      }
+    },
+    "user": {
+      "description": "Inspect a user profile by UID or name.",
+      "params_schema": {
+        "uid_or_name": "string"
+      }
+    },
+    "user_videos": {
+      "description": "List videos from a user.",
+      "params_schema": {
+        "uid_or_name": "string",
+        "max": "number?"
+      }
+    },
+    "search": {
+      "description": "Search users or videos.",
+      "params_schema": {
+        "query": "string",
+        "type": "string?",
+        "page": "number?",
+        "max": "number?"
+      }
+    },
+    "hot": {
+      "description": "List trending videos.",
+      "params_schema": {
+        "page": "number?",
+        "max": "number?"
+      }
+    },
+    "rank": {
+      "description": "List site-wide rankings.",
+      "params_schema": {
+        "day": "string?",
+        "max": "number?"
+      }
+    },
+    "favorites": {
+      "description": "List favorite folders or folder contents.",
+      "params_schema": {
+        "fav_id": "number?",
+        "page": "number?"
+      }
+    },
+    "following": {
+      "description": "List followed accounts.",
+      "params_schema": {
+        "page": "number?"
+      }
+    },
+    "watch_later": {
+      "description": "List watch-later items.",
+      "params_schema": {}
+    },
+    "history": {
+      "description": "List watch history.",
+      "params_schema": {
+        "page": "number?",
+        "max": "number?"
+      }
+    },
+    "feed": {
+      "description": "Read the dynamic feed.",
+      "params_schema": {
+        "offset": "string?"
+      }
+    },
+    "my_dynamics": {
+      "description": "Read the current account's dynamics.",
+      "params_schema": {
+        "offset": "string?",
+        "top": "boolean?",
+        "max": "number?"
+      }
+    },
+    "dynamic_post": {
+      "description": "Publish a text dynamic.",
+      "params_schema": {
+        "text": "string"
+      }
+    },
+    "dynamic_delete": {
+      "description": "Delete a dynamic by id.",
+      "params_schema": {
+        "dynamic_id": "number",
+        "yes": "boolean?"
+      }
+    },
+    "like": {
+      "description": "Like or unlike a video.",
+      "params_schema": {
+        "bv_or_url": "string",
+        "undo": "boolean?"
+      }
+    },
+    "coin": {
+      "description": "Give one or two coins to a video.",
+      "params_schema": {
+        "bv_or_url": "string",
+        "num": "number?"
+      }
+    },
+    "triple": {
+      "description": "Do a one-click triple action on a video.",
+      "params_schema": {
+        "bv_or_url": "string"
+      }
+    },
+    "unfollow": {
+      "description": "Unfollow a user by UID.",
+      "params_schema": {
+        "uid": "number",
+        "yes": "boolean?"
+      }
+    }
+  }
+}

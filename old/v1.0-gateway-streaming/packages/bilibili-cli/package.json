@@ -1,0 +1,12 @@
+{
+  "name": "@homesense/bilibili-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "homesense-bilibili": "./src/index.mjs"
+  },
+  "scripts": {
+    "smoke": "node ./src/index.mjs run \"{\\\"action\\\":\\\"health\\\"}\""
+  }
+}
