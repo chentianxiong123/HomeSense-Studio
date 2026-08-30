@@ -28,6 +28,11 @@ export type LauncherAuthStatus = {
   authenticated: boolean
   /** true when a bcrypt password has been stored in the DB */
   initialized: boolean
+  /**
+   * false when the launcher auth endpoints are not implemented (Next.js has
+   * no /api/auth/status etc.), so the UI must not redirect to login/setup.
+   */
+  available: boolean
 }
 
 export async function getLauncherAuthStatus(): Promise<LauncherAuthStatus> {
@@ -35,10 +40,19 @@ export async function getLauncherAuthStatus(): Promise<LauncherAuthStatus> {
     method: "GET",
     credentials: "same-origin",
   })
-  if (!res.ok) {
-    throw new Error(`status ${res.status}`)
+  // Launcher auth endpoints are not implemented in this Next.js app. They
+  // return an HTML 404 page, so res.json() would throw "Unexpected token '<'".
+  // Treat that as "auth unavailable" instead of an error the UI must show.
+  const contentType = res.headers.get("content-type") ?? ""
+  if (!res.ok || !contentType.includes("application/json")) {
+    return { authenticated: false, initialized: false, available: false }
   }
-  return (await res.json()) as LauncherAuthStatus
+  const body = (await res.json()) as Partial<LauncherAuthStatus>
+  return {
+    authenticated: Boolean(body.authenticated),
+    initialized: Boolean(body.initialized),
+    available: true,
+  }
 }
 
 export async function postLauncherDashboardLogout(): Promise<boolean> {

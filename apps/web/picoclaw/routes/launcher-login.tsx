@@ -33,10 +33,13 @@ function LauncherLoginPage() {
   const [error, setError] = React.useState("")
 
   // If the password store has never been initialized, go to setup instead.
+  // If launcher auth isn't implemented, go back to the app.
   React.useEffect(() => {
     void getLauncherAuthStatus()
       .then((s) => {
-        if (!s.initialized) {
+        if (!s.available) {
+          globalThis.location.assign("/")
+        } else if (!s.initialized) {
           globalThis.location.assign("/launcher-setup")
         }
       })
