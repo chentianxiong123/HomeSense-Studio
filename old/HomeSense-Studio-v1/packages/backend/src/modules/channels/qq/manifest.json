@@ -1,0 +1,12 @@
+{
+  "name": "channel.qq.send",
+  "kind": "channel",
+  "display_name": "QQ Bot 发送",
+  "description": "向 QQ Bot（go-cqhttp / NapCat 等）发送私聊或群聊消息（占位）",
+  "endpoint_env": "QQ_BOT_ENDPOINT",
+  "fields": {
+    "text": { "description": "消息正文", "required": true },
+    "target_type": { "description": "private/group", "required": false, "default": "private" },
+    "target_id": { "description": "接收者 QQ 号或群号", "required": true }
+  }
+}
