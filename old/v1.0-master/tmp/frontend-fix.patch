@@ -1,0 +1,75 @@
+﻿*** Begin Patch
+*** Update File: packages/frontend/src/App.vue
+@@
+-<script setup lang="ts">
+-import { ref } from 'vue'
++<script setup lang="ts">
++import { onMounted, ref, watch } from 'vue'
+ import ChatView from './views/ChatView.vue'
+ import StudioView from './views/StudioView.vue'
+ import SettingsModal from './components/SettingsModal.vue'
+ 
+ const activeTab = ref<'chat' | 'studio'>('chat')
+ const showSettings = ref(false)
++
++const ACTIVE_TAB_KEY = 'homesense-studio.active-tab'
++
++onMounted(() => {
++  const savedTab = window.localStorage.getItem(ACTIVE_TAB_KEY)
++  if (savedTab === 'chat' || savedTab === 'studio') {
++    activeTab.value = savedTab
++  }
++})
++
++watch(activeTab, (value) => {
++  window.localStorage.setItem(ACTIVE_TAB_KEY, value)
++})
+ </script>
+@@
+       </nav>
+       <div class="header-actions">
+-        <button class="settings-btn" @click="showSettings = true">鈿?璁剧疆</button>
++        <button class="settings-btn" @click="showSettings = true">&#35774;&#32622;</button>
+       </div>
+     </header>
+*** Update File: packages/frontend/src/views/ChatView.vue
+@@
+ const quickActions = [
+   { label: 'Watch Bilibili', text: 'bilibili' },
+   { label: 'TV Bilibili', text: 'watch_bilibili_demo' },
+-  { label: 'Power Toshiba', text: '鎵撳紑涓滆姖鐢佃' },
+-  { label: 'Show Devices', text: '鏌ョ湅璁惧鐘舵€? },
++  { label: 'Power Toshiba', text: '\u6253\u5f00\u4e1c\u829d\u7535\u89c6' },
++  { label: 'Show Devices', text: '\u67e5\u770b\u8bbe\u5907\u72b6\u6001' },
+ ]
+@@
+         <textarea
+           v-model="inputText"
+           class="chat-input"
+-          placeholder="Type a home control request..."
++          placeholder="&#36755;&#20837;&#23478;&#24237;&#25511;&#21046;&#25110;&#24037;&#20316;&#27969;&#35831;&#27714;&#65292;&#27604;&#22914;&#65306;&#25105;&#24819;&#30475;B&#31449;"
+           rows="1"
+           :disabled="loading"
+           @keydown="onKeydown"
+         ></textarea>
+         <button class="send-btn" :disabled="loading || !inputText.trim()" @click="onSend">
+-          Send
++          &#21457;&#36865;
+         </button>
+       </div>
+     </div>
+*** Update File: packages/frontend/src/views/StudioView.vue
+@@
+-          <div class="form-group">
+-            <label>Params JSON</label>
+-            <textarea
+-              rows="6"
+-              :value="JSON.stringify(selectedNode.config.params ?? {}, null, 2)"
+-              @input="handleUpdateConfig('params', JSON.parse(($event.target as HTMLTextAreaElement).value || '{}'))"
+-            ></textarea>
+-          </div>
+-
+           <div class="form-group">
+             <label>Params JSON</label>
+             <textarea
+*** End Patch
