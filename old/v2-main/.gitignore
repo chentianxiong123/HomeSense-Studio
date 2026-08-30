@@ -1,0 +1,29 @@
+node_modules
+dist
+data/
+.logs/
+.vite/
+apps/web/.vite/
+logs/
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+.DS_Store
+__pycache__/
+*.py[cod]
+*.egg-info/
+packages/adb-cli/src/adb_cli/cache/
+.venv/
+venv/
+
+# Project-owned local-network credentials (SSH keys, ADB pairing keys).
+# Keep these on disk for the project to use, but never commit.
+apps/server/runtime-keys/ssh/*
+!apps/server/runtime-keys/ssh/.gitkeep
+apps/server/runtime-keys/adb/*
+!apps/server/runtime-keys/adb/.gitkeep
+
+# Server runtime log files (startup output, error output). Local-only.
+apps/server/runtime-logs/
+!apps/server/runtime-logs/.gitkeep
