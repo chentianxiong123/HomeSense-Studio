@@ -40,6 +40,7 @@ import {
 import { createSubagentController } from "./subagent-runtime";
 import { isBuiltInSubagentsEnabled } from "./subagent-settings";
 import { resolveShellTools } from "./powershell-settings";
+import { mirrorAgentEventToTimeline } from "./timeline-mirror";
 import { CHAT_ONLY_RESOURCE_LOADER_OPTIONS, contextFilesSystemPrompt } from "./chat-only";
 import {
   appendSessionToolSelection,
@@ -275,6 +276,7 @@ export class AgentSessionWrapper {
         invalidateSessionListCache();
       }
       if (IDLE_RESET_EVENT_TYPES.has(event.type)) this.resetIdleTimer();
+      mirrorAgentEventToTimeline(this.sessionId, event);
       this.emit(event);
       if (event.type === "agent_settled") this.notifyAgentRunCompleteIfIdle();
     });

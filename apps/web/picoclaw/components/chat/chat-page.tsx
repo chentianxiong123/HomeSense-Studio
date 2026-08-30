@@ -1,4 +1,3 @@
-import { IconPlus } from "@tabler/icons-react"
 import { useAtom } from "jotai"
 import {
   type ChangeEvent,
@@ -15,10 +14,8 @@ import { ChatComposer, type ChatInputDisabledReason } from "@pico/components/cha
 import { ChatEmptyState } from "@pico/components/chat/chat-empty-state"
 import { MessageList } from "@pico/components/chat/message-list"
 import { ModelSelector } from "@pico/components/chat/model-selector"
-import { SessionHistoryMenu } from "@pico/components/chat/session-history-menu"
 import { TypingIndicator } from "@pico/components/chat/typing-indicator"
 import { PageHeader } from "@pico/components/page-header"
-import { Button } from "@pico/components/ui/button"
 import {
   Select,
   SelectContent,
@@ -35,7 +32,7 @@ import {
 import { useChatModels } from "@pico/hooks/use-chat-models"
 import { useGateway } from "@pico/hooks/use-gateway"
 import { usePicoChat } from "@pico/hooks/use-pico-chat"
-import { useSessionHistory } from "@pico/hooks/use-session-history"
+import { useTimelineHistory } from "@pico/hooks/use-timeline-history"
 import type { AssistantDetailVisibility } from "@pico/store/chat"
 import type { ConnectionState } from "@pico/store/chat"
 import type { ChatAttachment } from "@pico/store/chat"
@@ -126,11 +123,8 @@ export function ChatPage() {
     messages,
     connectionState,
     isTyping,
-    activeSessionId,
     contextUsage,
     sendMessage,
-    switchSession,
-    newChat,
   } = usePicoChat()
 
   const { state: gwState } = useGateway()
@@ -153,18 +147,7 @@ export function ChatPage() {
   })
   const canInput = inputDisabledReason === null
 
-  const {
-    sessions,
-    hasMore,
-    loadError,
-    loadErrorMessage,
-    observerRef,
-    loadSessions,
-    handleDeleteSession,
-  } = useSessionHistory({
-    activeSessionId,
-    onDeletedActiveSession: newChat,
-  })
+  const { isLoadingMore, loadError, loadOlder } = useTimelineHistory()
 
   const syncScrollState = (element: HTMLDivElement) => {
     const { clientHeight, scrollHeight, scrollTop } = element
@@ -174,6 +157,9 @@ export function ChatPage() {
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     syncScrollState(e.currentTarget)
+    if (e.currentTarget.scrollTop <= 24 && !isLoadingMore) {
+      void loadOlder()
+    }
   }
 
   useEffect(() => {
@@ -385,32 +371,6 @@ export function ChatPage() {
             </SelectContent>
           </Select>
         </div>
-
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={newChat}
-          className="h-9 gap-2"
-        >
-          <IconPlus className="size-4" />
-          <span className="hidden sm:inline">{t("chat.newChat")}</span>
-        </Button>
-
-        <SessionHistoryMenu
-          sessions={sessions}
-          activeSessionId={activeSessionId}
-          hasMore={hasMore}
-          loadError={loadError}
-          loadErrorMessage={loadErrorMessage}
-          observerRef={observerRef}
-          onOpenChange={(open) => {
-            if (open) {
-              void loadSessions(true)
-            }
-          }}
-          onSwitchSession={switchSession}
-          onDeleteSession={handleDeleteSession}
-        />
       </PageHeader>
 
       <div
@@ -425,6 +385,24 @@ export function ChatPage() {
               defaultModelName={defaultModelName}
               isConnected={isGatewayRunning}
             />
+          )}
+
+          {messages.length > 0 && (
+            <div className="flex min-h-8 items-center justify-center">
+              {isLoadingMore ? (
+                <span className="text-muted-foreground animate-pulse text-xs">
+                  {t("chat.loadingOlder")}
+                </span>
+              ) : loadError ? (
+                <span className="text-destructive text-xs">
+                  {t("chat.loadOlderFailed")}
+                </span>
+              ) : (
+                <span className="text-muted-foreground/60 text-xs">
+                  {t("chat.scrollUpForHistory")}
+                </span>
+              )}
+            </div>
           )}
 
           <MessageList

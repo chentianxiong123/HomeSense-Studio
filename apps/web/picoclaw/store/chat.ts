@@ -47,6 +47,8 @@ export interface ChatMessage {
   modelName?: string
   attachments?: ChatAttachment[]
   toolCalls?: ChatToolCall[]
+  /** SQLite 时间线消息 id（仅来自 /api/timeline 的历史消息），用于上拉分页去重。 */
+  timelineId?: number
 }
 
 export interface ContextUsage {
