@@ -185,6 +185,15 @@ export function ChatPage() {
     }
   }, [messages, isTyping, isAtBottom])
 
+  const scrollToBottom = useCallback(() => {
+    if (!scrollRef.current) return
+    requestAnimationFrame(() => {
+      if (!scrollRef.current) return
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+      setIsAtBottom(true)
+    })
+  }, [])
+
   const handleSend = useCallback(
     (payload: { content: string; attachments: ChatAttachment[] }) => {
       if (!canInput) return
@@ -195,9 +204,10 @@ export function ChatPage() {
         })
       ) {
         setAttachments([])
+        scrollToBottom()
       }
     },
-    [canInput, sendMessage],
+    [canInput, sendMessage, scrollToBottom],
   )
 
   const handleAddImages = useCallback(() => {
