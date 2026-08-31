@@ -40,6 +40,7 @@ export interface TenantRecord {
   dbPath: string
   createdAt: string
   ownerUserId: string | null
+  activeSessionId: string | null
 }
 
 export interface TenantUserRecord {
@@ -80,9 +81,16 @@ function applyIndexSchema(target: DatabaseSync): void {
       name TEXT NOT NULL,
       db_path TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      owner_user_id TEXT
+      owner_user_id TEXT,
+      active_session_id TEXT
     )
   `)
+  // 兼容老 schema(没有 active_session_id 列的旧库)
+  try {
+    target.exec(`ALTER TABLE tenants ADD COLUMN active_session_id TEXT`)
+  } catch {
+    /* 列已存在 */
+  }
   target.exec(`
     CREATE TABLE IF NOT EXISTS tenant_users (
       tenant_id TEXT NOT NULL,
@@ -159,7 +167,8 @@ export function getTenantDb(tenantId: string): DatabaseSync {
 export function listTenants(): TenantRecord[] {
   return getIndexDb()
     .prepare(
-      `SELECT id, name, db_path AS dbPath, created_at AS createdAt, owner_user_id AS ownerUserId
+      `SELECT id, name, db_path AS dbPath, created_at AS createdAt, owner_user_id AS ownerUserId,
+              active_session_id AS activeSessionId
        FROM tenants ORDER BY created_at ASC`,
     )
     .all() as unknown as TenantRecord[]
@@ -168,7 +177,8 @@ export function listTenants(): TenantRecord[] {
 export function getTenant(tenantId: string): TenantRecord | null {
   const row = getIndexDb()
     .prepare(
-      `SELECT id, name, db_path AS dbPath, created_at AS createdAt, owner_user_id AS ownerUserId
+      `SELECT id, name, db_path AS dbPath, created_at AS createdAt, owner_user_id AS ownerUserId,
+              active_session_id AS activeSessionId
        FROM tenants WHERE id = ?`,
     )
     .get(tenantId) as TenantRecord | undefined
@@ -224,6 +234,12 @@ export function createTenant(input: CreateTenantInput): {
 
   const tenantId = newId("ten")
   const userId = newId("usr")
+  // v3 一户一session: 注册时直接生成 activeSessionId,绑定到 tenants 表。
+  // 前端永远从 server 拿这个 id(通过 /api/auth/me 一起返回),
+  // 不存 localStorage,避免 404 重试。
+  // pi engine 第一次发消息时按 sessionId + tenantId 落到 per-tenant 路径
+  // (data/<tenantId>/.homesense/agent/sessions/<cwd>/<iso>_<sessionId>.jsonl)。
+  const activeSessionId = crypto.randomUUID()
   const now = new Date().toISOString()
   const dbPath = path.join(DATA_ROOT, `${tenantId}.db`)
   const { hash, salt } = hashPassword(password)
@@ -232,9 +248,9 @@ export function createTenant(input: CreateTenantInput): {
   db.exec("BEGIN")
   try {
     db.prepare(
-      `INSERT INTO tenants (id, name, db_path, created_at, owner_user_id)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).run(tenantId, name.trim() || "新家庭", dbPath, now, userId)
+      `INSERT INTO tenants (id, name, db_path, created_at, owner_user_id, active_session_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(tenantId, name.trim() || "新家庭", dbPath, now, userId, activeSessionId)
 
     db.prepare(
       `INSERT INTO tenant_users (tenant_id, user_id, username, password_hash, password_salt, created_at)
@@ -264,6 +280,7 @@ export function createTenant(input: CreateTenantInput): {
       dbPath,
       createdAt: now,
       ownerUserId: userId,
+      activeSessionId,
     },
     user: {
       tenantId,
@@ -282,17 +299,28 @@ export function createTenant(input: CreateTenantInput): {
  */
 export function ensureDefaultTenant(): TenantRecord | null {
   const existing = getTenant(DEFAULT_TENANT_ID)
-  if (existing) return existing
+  if (existing) {
+    // 老 default 库没有 activeSessionId(向前兼容),补一个
+    if (!existing.activeSessionId) {
+      const sid = crypto.randomUUID()
+      getIndexDb().prepare(
+        `UPDATE tenants SET active_session_id = ? WHERE id = ?`,
+      ).run(sid, DEFAULT_TENANT_ID)
+      existing.activeSessionId = sid
+    }
+    return existing
+  }
 
   // 检查 legacy db 是否存在数据
   if (!fs.existsSync(LEGACY_DB_PATH)) return null
 
   const now = new Date().toISOString()
+  const activeSessionId = crypto.randomUUID()
   const db = getIndexDb()
   db.prepare(
-    `INSERT OR IGNORE INTO tenants (id, name, db_path, created_at, owner_user_id)
-     VALUES (?, ?, ?, ?, NULL)`,
-  ).run(DEFAULT_TENANT_ID, DEFAULT_TENANT_NAME, LEGACY_DB_PATH, now)
+    `INSERT OR IGNORE INTO tenants (id, name, db_path, created_at, owner_user_id, active_session_id)
+     VALUES (?, ?, ?, ?, NULL, ?)`,
+  ).run(DEFAULT_TENANT_ID, DEFAULT_TENANT_NAME, LEGACY_DB_PATH, now, activeSessionId)
 
   // 触发租户库 schema 升级(在 legacy db 上加 users/tenant_meta 表;messages/timeline_meta 保持不动)
   getTenantDb(DEFAULT_TENANT_ID)

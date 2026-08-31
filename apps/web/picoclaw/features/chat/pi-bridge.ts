@@ -312,6 +312,21 @@ export async function connectChat() {
       updateChatStore({ connectionState: "error" })
       es.close()
       if (eventSource === es) eventSource = null
+      // 持续 3 次连不上(events endpoint 404 意味着 sessionId 在 server 已不存在,
+      // 比如 server 端清掉了 ~/.homesense/agent/sessions/ 后 dev 重启)。
+      // 清掉本地持有的 sessionId,让用户下一次发消息触发新 session(piSend 走
+      // /api/agent/new 自动 ensure_session)。避免无限 404 重试卡死 UI。
+      if (reconnectAttempts >= 2) {
+        const stale = activeSessionId
+        activeSessionId = ""
+        reconnectAttempts = 0
+        clearReconnectTimer()
+        if (stale) {
+          updateChatStore({ activeSessionId: "" })
+          console.warn(`[pi-bridge] 丢弃失效的 sessionId: ${stale.slice(0, 8)}… — 下次发消息会建新 session`)
+        }
+        return
+      }
       scheduleReconnect()
     }
   } catch {
@@ -418,8 +433,9 @@ export function sendChatMessage({ content, attachments = [] }: SendChatMessageIn
     connectionState: "connected",
   }))
 
-  // 仅当已有真实 pi 会话(bridge 内部 activeSessionId 只在 pi 返回 sessionId 后才赋值)
-  // 才走 POST /api/agent/[id];否则首次请求一步建会话+发消息。
+  // v3: 始终用 server 端的 activeSessionId(注册时绑定到 tenants.active_session_id)
+  // 走 /api/agent/[id]。无 activeSessionId 时才退化到 /api/agent/new(注册刚完成到
+  // 第一次 me 请求之间的极短窗口)。
   const hasSession = Boolean(activeSessionId)
 
   const send = hasSession
@@ -557,38 +573,60 @@ export function initializeChatStore() {
     hasHydratedActiveSession: true,
   })
 
-  const stored = localStorage.getItem("picoclaw:last-session-id")
-  const deferredSessionId = stored || ""
   void (async () => {
+    // v3: activeSessionId 由 server 绑定(注册时生成,存 tenants.db.active_session_id),
+    // 前端不存 localStorage 也不自己建。直接读 /api/auth/me 拿权威值。
+    let serverSessionId = ""
+    try {
+      const meRes = await fetch("/api/auth/me", { credentials: "same-origin" })
+      if (meRes.ok) {
+        const me = (await meRes.json()) as { authenticated?: boolean; activeSessionId?: string | null }
+        if (me.authenticated && typeof me.activeSessionId === "string" && me.activeSessionId) {
+          serverSessionId = me.activeSessionId
+        }
+      }
+    } catch {
+      /* me 不可用就走 timeline */
+    }
+
+    if (!serverSessionId) {
+      // 后退:从 /api/timeline 的 activeSessionId 拿(老路径)
+      try {
+        const tl = await fetch("/api/timeline", { credentials: "same-origin" })
+        if (tl.ok) {
+          const tj = (await tl.json()) as { activeSessionId?: string | null }
+          if (typeof tj.activeSessionId === "string" && tj.activeSessionId) {
+            serverSessionId = tj.activeSessionId
+          }
+        }
+      } catch { /* ignore */ }
+    }
+
+    let messages: ChatMessage[] = []
     try {
       const page = await fetchTimelinePage()
-      const messages = (page.messages ?? []).map(timelineMessageToChatMessage)
-      let sessionId = page.activeSessionId || deferredSessionId || ""
-      if (!sessionId && page.stats?.lastId) {
-        // 有历史但没有活跃引擎会话:保持空,首条发送时走 /api/agent/new 新建
-        sessionId = ""
-      }
-      activeSessionId = sessionId
+      messages = (page.messages ?? []).map(timelineMessageToChatMessage)
+    } catch { /* 时间线不可用,继续 */ }
+
+    if (serverSessionId) {
+      activeSessionId = serverSessionId
+      shouldMaintainConnection = true
       updateChatStore({
+        activeSessionId: serverSessionId,
         messages,
-        activeSessionId: sessionId,
         hasHydratedActiveSession: true,
         connectionState: "connected",
       })
-      if (sessionId) {
-        writeStoredSessionId(sessionId)
-        shouldMaintainConnection = true
-        void connectChat()
-      }
-    } catch {
-      // 时间线不可用时退回旧行为:仅恢复 localStorage 会话
-      activeSessionId = deferredSessionId
-      if (deferredSessionId) {
-        updateChatStore({ activeSessionId: deferredSessionId })
-        shouldMaintainConnection = true
-        void hydrateActiveSession().catch(() => undefined)
-        void connectChat()
-      }
+      void connectChat()
+    } else {
+      // 极端:server 还没生成 sessionId(用户刚注册还没首次 prompt 前的极短窗口)。
+      // 仍正常进入 chat,等用户发消息时 server 自动建。
+      updateChatStore({
+        activeSessionId: "",
+        messages,
+        hasHydratedActiveSession: true,
+        connectionState: "connected",
+      })
     }
   })()
 }

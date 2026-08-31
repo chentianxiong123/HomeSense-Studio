@@ -1881,7 +1881,7 @@ export function getCompletionNotificationSuppressedRpcSessionIds(): string[] {
  */
 export async function startRpcSession(
   sessionId: string,
-  sessionFile: string,
+  sessionFile: string | undefined,
   cwd: string | undefined,
   options: RpcSessionStartOptions = {},
 ): Promise<{ session: AgentSessionWrapper; realSessionId: string }> {
@@ -1898,12 +1898,16 @@ export async function startRpcSession(
   const inflight = locks.get(sessionId);
   if (inflight) return inflight;
 
+  const sessionDir = join(resolveTenantAgentDir(tenantId), "sessions");
+
   let sessionManager: SessionManager;
   if (sessionFile) {
-    sessionManager = SessionManager.open(sessionFile, undefined);
+    sessionManager = SessionManager.open(sessionFile, sessionDir);
   } else {
     if (!cwd) throw new Error("cwd is required for a new session");
-    sessionManager = SessionManager.create(cwd, undefined);
+    // 强制使用 caller 指定的 sessionId(注册时绑到 tenants.active_session_id),
+    // 不让 pi engine 随机生成新的。这样 server / client 永远对得上。
+    sessionManager = SessionManager.create(cwd, sessionDir, { id: sessionId });
   }
   const sessionCwd = sessionManager.getCwd();
   const subagentResources = sessionFile

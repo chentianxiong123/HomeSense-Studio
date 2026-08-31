@@ -45,18 +45,19 @@ export async function POST(req: Request) {
       }, { status: 400 });
     }
 
-    // Use a one-time key so startRpcSession's lock doesn't conflict with real session ids
-    const { provider, modelId, toolNames, thinkingLevel, ...promptCommand } = command as { provider?: string; modelId?: string; toolNames?: string[]; thinkingLevel?: unknown; [key: string]: unknown };
+    // v3: 优先用 tenants.active_session_id(注册时绑定,一户一session);
+    // 兼容旧 caller:无 sessionId 时仍用 tempKey(临时,prompt 完成后 caller 应切到
+    // /api/agent/[sessionId] 继续)。
+    const { provider, modelId, toolNames, thinkingLevel, ...promptCommand } = command as { provider?: string; modelId?: string; toolNames?: string[]; thinkingLevel?: unknown; sessionId?: string; [key: string]: unknown };
     if ((provider && !modelId) || (!provider && modelId)) {
       throw new Error("provider and modelId must be provided together");
     }
     const explicitThinkingLevel = parseThinkingLevel(thinkingLevel);
-
-    // Must be unique per request: startRpcSession coalesces concurrent callers
-    // that share a key onto one session. Date.now() (ms resolution) collides for
-    // requests in the same millisecond, merging two new sessions into one.
-    const tempKey = `__new__${randomUUID()}`;
-    const { session, realSessionId } = await startRpcSession(tempKey, "", cwd, {
+    const callerSessionId = typeof promptCommand.sessionId === "string" && promptCommand.sessionId
+      ? promptCommand.sessionId
+      : null
+    const tempKey = callerSessionId ?? `__new__${randomUUID()}`;
+    const { session, realSessionId } = await startRpcSession(tempKey, undefined, cwd, {
       ...(toolNames ? { toolNames } : {}),
       ...(provider && modelId ? { initialModel: { provider, modelId } } : {}),
       ...(explicitThinkingLevel ? { thinkingLevel: explicitThinkingLevel } : {}),

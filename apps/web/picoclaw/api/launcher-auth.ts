@@ -30,6 +30,7 @@ export interface AuthMe {
   authenticated: boolean
   available: boolean
   user?: { userId: string; tenantId: string; username: string; displayName: string; role: string }
+  activeSessionId?: string | null
 }
 
 export async function getAuthStatus(): Promise<AuthStatus> {

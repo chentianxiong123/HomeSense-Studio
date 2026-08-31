@@ -17,6 +17,18 @@ import { readSubagentRun, SUBAGENT_META_TYPE } from "./subagents";
 
 export { getAgentDir };
 
+/**
+ * Phase 1.3: per-tenant session 根目录。
+ * 必须跟 rpc-manager.ts 里 resolveTenantAgentDir 同源,
+ * 保证写入和读取走同一目录(否则 404)。
+ */
+function resolveTenantSessionsDir(tenantId?: string): string {
+  if (!tenantId || tenantId === "default") {
+    return join(getAgentDir(), "sessions");
+  }
+  return join(process.cwd(), "data", tenantId, ".homesense", "agent", "sessions");
+}
+
 const SESSION_HEADER_MAX_BYTES = 64 * 1024;
 const SESSION_RELATION_MAX_BYTES = 256 * 1024;
 const SESSION_RELATION_MAX_LINES = 2;
@@ -140,8 +152,9 @@ export function mergeSessionLists(
   return [...byId.values()].sort((a, b) => b.modified.localeCompare(a.modified));
 }
 
-async function loadAllSessions(): Promise<SessionInfo[]> {
-  const piSessions: PiSessionInfo[] = await SessionManager.listAll();
+async function loadAllSessions(tenantId?: string): Promise<SessionInfo[]> {
+  const sessionDir = resolveTenantSessionsDir(tenantId);
+  const piSessions: PiSessionInfo[] = await SessionManager.listAll(sessionDir);
   const pathToId = new Map<string, string>();
   for (const s of piSessions) pathToId.set(sessionPathKey(s.path), s.id);
 
@@ -175,7 +188,9 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
   return attachSessionProjectInfo(sessions);
 }
 
-export async function listAllSessions(options: { force?: boolean } = {}): Promise<SessionInfo[]> {
+export async function listAllSessions(
+  options: { force?: boolean; tenantId?: string } = {},
+): Promise<SessionInfo[]> {
   if (options.force) invalidateSessionListCache();
   const generation = globalThis.__piSessionListGeneration ?? 0;
 
@@ -191,12 +206,13 @@ export async function listAllSessions(options: { force?: boolean } = {}): Promis
     return globalThis.__piSessionListPromise;
   }
 
-  const loadPromise = loadAllSessions().then((data) => {
+  const tenantId = options.tenantId;
+  const loadPromise = loadAllSessions(tenantId).then((data) => {
     // If a mutation invalidated this scan, make this caller join (or start) a
     // scan for the current generation. Returning the stale result here made a
     // refresh race indistinguishable from a successful refresh.
     if ((globalThis.__piSessionListGeneration ?? 0) !== generation) {
-      return listAllSessions();
+      return listAllSessions({ ...options, force: true });
     }
     globalThis.__piSessionListCache = { data, ts: Date.now() };
     return data;
@@ -228,8 +244,8 @@ declare global {
 const SESSION_LIST_CACHE_TTL_MS = 30_000;
 const SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
 
-function defaultSessionsDir(): string {
-  return join(getAgentDir(), "sessions");
+function defaultSessionsDir(tenantId?: string): string {
+  return resolveTenantSessionsDir(tenantId);
 }
 
 function resolvePathWithinDefaultSessions(
@@ -246,13 +262,16 @@ function resolvePathWithinDefaultSessions(
     : null;
 }
 
-async function findSessionPathById(sessionId: string): Promise<string | null> {
+async function findSessionPathById(
+  sessionId: string,
+  tenantId?: string,
+): Promise<string | null> {
   // The filename is only a candidate hint; the bounded header check remains
   // authoritative so future layouts and malformed files use the full fallback.
   if (!SESSION_ID_PATTERN.test(sessionId)) return null;
 
   let projectDirs: Dirent[];
-  const sessionsDir = resolvePath(defaultSessionsDir());
+  const sessionsDir = resolvePath(defaultSessionsDir(tenantId));
   try {
     projectDirs = await readdir(sessionsDir, { withFileTypes: true });
   } catch {
@@ -327,11 +346,16 @@ function getPathToIdCache(): Map<string, string> {
   return globalThis.__piPathToSessionIdCache;
 }
 
-export async function resolveSessionPath(sessionId: string): Promise<string | null> {
+export async function resolveSessionPath(
+  sessionId: string,
+  tenantId?: string,
+): Promise<string | null> {
   const cached = getPathCache().get(sessionId);
   if (cached) return cached;
 
-  const targetedPath = await findSessionPathById(sessionId);
+  // 直接在 per-tenant sessions 目录里按 id 找,
+  // 不再扫全局目录(否则会跨用户命中老 sessionId)。
+  const targetedPath = await findSessionPathById(sessionId, tenantId);
   if (targetedPath) {
     cacheSessionPath(sessionId, targetedPath);
     return getPathCache().get(sessionId) ?? null;
@@ -339,7 +363,8 @@ export async function resolveSessionPath(sessionId: string): Promise<string | nu
 
   // Unknown layouts, malformed candidates, and duplicate IDs retain the
   // existing authoritative catalogue scan instead of negative-caching a miss.
-  await listAllSessions();
+  // 也走 per-tenant,避免跨用户命中。
+  await listAllSessions({ tenantId });
   return getPathCache().get(sessionId) ?? null;
 }
 

@@ -27,12 +27,15 @@ export async function POST(
     // Fast path: already-running session
     const existing = getRpcSession(id);
     if (body.type === "set_tools") {
-      const filePath = existing?.sessionFile || await resolveSessionPath(id) || undefined;
+      const ctx = await resolveAuthFromRequest();
+      if (!ctx) {
+        return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+      }
+      const filePath = existing?.sessionFile || (await resolveSessionPath(id, ctx.tenantId)) || undefined;
       if (!existing?.isAlive() && !filePath) {
         return NextResponse.json({ error: "Session not found" }, { status: 404 });
       }
-      const ctx = await resolveAuthFromRequest();
-      const changed = await setRpcSessionTools(id, filePath, toolNames, ctx?.tenantId);
+      const changed = await setRpcSessionTools(id, filePath, toolNames, ctx.tenantId);
       return NextResponse.json({
         success: true,
         data: { sessionId: changed.sessionId, recreated: changed.recreated },
@@ -44,14 +47,18 @@ export async function POST(
       return NextResponse.json({ success: true, data: result });
     }
 
-    const filePath = await resolveSessionPath(id);
+    const ctx = await resolveAuthFromRequest();
+    if (!ctx) {
+      return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    }
+    const filePath = await resolveSessionPath(id, ctx.tenantId);
     if (!filePath) {
-      return NextResponse.json({
-        error: "Session not found",
-        ...(body.type === "prompt"
-          ? { code: "prompt_rejected", accepted: false }
-          : {}),
-      }, { status: 404 });
+      // 没 filePath 也 OK:startRpcSession 会用 SessionManager.create(cwd, sessionDir, {id})
+      // 强制用 caller 的 sessionId(就是 tenants.active_session_id)。
+      const { session } = await startRpcSession(id, undefined, process.cwd(), { tenantId: ctx.tenantId });
+      const result = await session.send(body);
+      promptAccepted = body.type === "prompt";
+      return NextResponse.json({ success: true, data: result });
     }
 
     const { session } = await startRpcSession(id, filePath, undefined, {
