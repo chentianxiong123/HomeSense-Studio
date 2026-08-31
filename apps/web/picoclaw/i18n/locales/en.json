@@ -264,7 +264,11 @@
     }
   },
   "models": {
-    "description": "Configure API keys for AI providers. Only configured models are available for chat.",
+    "description": "Models are configured by the administrator. Select the model to use for chat.",
+    "empty": "No models configured yet.",
+    "setDefault": "Use",
+    "defaultSelected": "In use",
+    "setDefaultSuccess": "Default model updated.",
     "defaultChangeSuccess": "Default model updated.",
     "unsavedPrompt": "This change has not been saved yet. Save to write it into the model configuration.",
     "restartHint": "Model configuration changes take effect after the gateway restarts.",

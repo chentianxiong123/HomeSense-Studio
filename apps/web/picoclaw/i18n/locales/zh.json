@@ -264,7 +264,11 @@
     }
   },
   "models": {
-    "description": "为 AI 服务商配置 API Key。只有已配置的模型可用于对话。",
+    "description": "模型由管理员统一配置。选择要用于对话的模型。",
+    "empty": "尚未配置任何模型。",
+    "setDefault": "使用",
+    "defaultSelected": "使用中",
+    "setDefaultSuccess": "默认模型已更新。",
     "defaultChangeSuccess": "默认模型已更新。",
     "unsavedPrompt": "当前修改尚未保存，保存后才会写入模型配置。",
     "restartHint": "模型配置保存后需要重启服务才能生效。",
