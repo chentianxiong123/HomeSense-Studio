@@ -4,30 +4,38 @@ import { ModelNotFoundError, setTenantDefaultModel } from "@/lib/models-lib";
 
 export const dynamic = "force-dynamic";
 
-// PUT /api/models/default-chain  body: { default_model: string; fallback_chain?: string[] }
-// models 页设置默认模型。与 /api/models/default 共用同一实现:
-// 写 per-tenant settings.json + 热切换运行中的 session。
-// 回退链不再使用(需求已删),body 里带 fallback_chain 只接收、忽略。
-export async function PUT(req: Request) {
+// POST /api/models/default  body: { model_name: string }
+// 首页对话页模型下拉框调用。与 /api/models/default-chain 共用同一实现:
+// 写 per-tenant settings.json + 热切换运行中的 session(超时 5s 内生效)。
+export async function POST(req: Request) {
   const auth = await resolveAuthFromRequest();
   if (!auth) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  let body: { default_model?: unknown; fallback_chain?: unknown };
+  let body: { model_name?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
     return NextResponse.json({ error: "bad_request", message: "invalid JSON" }, { status: 400 });
   }
-  const defaultModelName =
-    typeof body.default_model === "string" ? body.default_model.trim() : "";
+  const modelName =
+    typeof body.model_name === "string" ? body.model_name.trim() : "";
+  if (!modelName) {
+    return NextResponse.json(
+      { error: "bad_request", message: "model_name 不能为空" },
+      { status: 400 },
+    );
+  }
 
   try {
-    const result = await setTenantDefaultModel(auth.tenantId, defaultModelName);
+    const result = await setTenantDefaultModel(auth.tenantId, modelName);
     return NextResponse.json({
+      status: "ok",
+      index: -1,
       default_model: result.default_model,
-      fallback_chain: [],
+      provider: result.provider,
+      hot_switched: result.hotSwitched,
     });
   } catch (error) {
     if (error instanceof ModelNotFoundError) {
