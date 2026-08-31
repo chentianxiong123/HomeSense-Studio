@@ -117,6 +117,7 @@ type AgentSessionWrapperOptions = {
   chatOnly?: boolean;
   onAgentRunComplete?: AgentRunCompleteListener;
   suppressCompletionNotifications?: boolean;
+  tenantId?: string; // Phase 1.2: per-tenant timeline mirror. 必传,无则默认 default(老路径,过渡期允许)。
 };
 
 const IDLE_RESET_EVENT_TYPES = new Set([
@@ -142,6 +143,7 @@ export interface RpcSessionStartOptions {
   initialModel?: { provider: string; modelId: string };
   allowInitialModelFallback?: boolean;
   thinkingLevel?: ThinkingLevel;
+  tenantId?: string; // Phase 1.2: per-tenant memory extension (timeline_search). 调用方必须从 ctx 解析。
 }
 
 const CODING_TOOL_NAMES = ["read", "bash", "powershell", "edit", "write", "grep", "find", "ls"];
@@ -215,6 +217,7 @@ export class AgentSessionWrapper {
   private readonly chatOnly: boolean;
   private readonly onAgentRunComplete?: AgentRunCompleteListener;
   private readonly suppressCompletionNotifications: boolean;
+  private readonly tenantId: string;
   private unsubscribe: (() => void) | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private onDestroyCallback: (() => void) | null = null;
@@ -231,6 +234,7 @@ export class AgentSessionWrapper {
     this.chatOnly = options.chatOnly ?? false;
     this.onAgentRunComplete = options.onAgentRunComplete;
     this.suppressCompletionNotifications = options.suppressCompletionNotifications ?? false;
+    this.tenantId = options.tenantId ?? "default";
     this.installExactSystemPromptContinuation();
     this.applyExactSystemPrompt();
   }
@@ -278,7 +282,7 @@ export class AgentSessionWrapper {
         invalidateSessionListCache();
       }
       if (IDLE_RESET_EVENT_TYPES.has(event.type)) this.resetIdleTimer();
-      mirrorAgentEventToTimeline(this.sessionId, event);
+      mirrorAgentEventToTimeline(this.tenantId, this.sessionId, event);
       this.emit(event);
       if (event.type === "agent_settled") this.notifyAgentRunCompleteIfIdle();
     });
@@ -1675,6 +1679,7 @@ export async function setRpcSessionTools(
   sessionId: string,
   sessionFile: string | undefined,
   requestedToolNames: unknown,
+  tenantId?: string,
 ): Promise<SetRpcSessionToolsResult> {
   const toolNames = validateSessionToolSelection(requestedToolNames);
   const existing = getRpcSession(sessionId);
@@ -1687,7 +1692,9 @@ export async function setRpcSessionTools(
     }
     appendSessionToolSelection(manager, toolNames);
     invalidateSessionListCache();
-    const started = await startRpcSession(sessionId, sessionFile, undefined);
+    const started = await startRpcSession(sessionId, sessionFile, undefined, {
+      ...(tenantId ? { tenantId } : {}),
+    });
     return { session: started.session, sessionId: started.realSessionId, recreated: false };
   }
 
@@ -1717,7 +1724,9 @@ export async function setRpcSessionTools(
   await existing.shutdown();
 
   if (persistedFile) {
-    const started = await startRpcSession(sessionId, persistedFile, undefined);
+    const started = await startRpcSession(sessionId, persistedFile, undefined, {
+      ...(tenantId ? { tenantId } : {}),
+    });
     return { session: started.session, sessionId: started.realSessionId, recreated: true };
   }
 
@@ -1728,6 +1737,7 @@ export async function setRpcSessionTools(
     ...(currentThinkingLevel && THINKING_LEVEL_NAMES.has(currentThinkingLevel as ThinkingLevel)
       ? { thinkingLevel: currentThinkingLevel as ThinkingLevel }
       : {}),
+    ...(tenantId ? { tenantId } : {}),
   });
   return { session: started.session, sessionId: started.realSessionId, recreated: true };
 }
@@ -1857,7 +1867,7 @@ export async function startRpcSession(
   cwd: string | undefined,
   options: RpcSessionStartOptions = {},
 ): Promise<{ session: AgentSessionWrapper; realSessionId: string }> {
-  const { initialModel, allowInitialModelFallback, thinkingLevel } = options;
+  const { initialModel, allowInitialModelFallback, thinkingLevel, tenantId } = options;
   const requestedToolNames = options.toolNames === undefined
     ? undefined
     : validateSessionToolSelection(options.toolNames);
@@ -1958,7 +1968,7 @@ export async function startRpcSession(
                 () => listSubagentProfiles(sessionCwd),
                 isBuiltInSubagentsEnabled,
               ),
-              createHomeSenseMemoryExtension(),
+              createHomeSenseMemoryExtension(tenantId ?? "default"),
             ],
             // 会话启动时冻结注入跨会话记忆快照(与 hermes 一致,保前缀缓存)。
             appendSystemPrompt: [buildMemorySnapshot()].filter((s) => s !== ""),
@@ -2035,6 +2045,7 @@ export async function startRpcSession(
         });
       },
       suppressCompletionNotifications: Boolean(subagentResources),
+      tenantId,
     });
     const realSessionId = inner.sessionId as string;
     registerRpcWrapper(wrapper);

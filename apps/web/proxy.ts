@@ -65,10 +65,11 @@ export async function proxy(request: NextRequest) {
   }
 
   // 解析 token(失败/缺失 → 401)
-  // 例外:`/api/timeline` 允许无 token 访问(继续走默认租户,Phase 1.1
-  // 阶段保持向后兼容,Phase 1.2 再做 per-tenant timeline)。
-  const auth = await resolveAuthFromRequest();
-  if (!auth && pathname !== "/api/timeline") {
+  //
+  // 关键:必须把 request 传进去,proxy.ts 上下文里 next/headers 的 cookies()
+  // 拿不到当前请求的 cookie(Next 16 行为),会永远 401。
+  const auth = await resolveAuthFromRequest(request)
+  if (!auth) {
     return NextResponse.json(
       { error: "unauthenticated", message: "需要登录" },
       { status: 401 },

@@ -90,12 +90,12 @@ function collectSessionMessages(filePath: string): LegacyMessageRecord[] {
 }
 
 /** 把单个旧会话文件的消息追加进时间线(按文件内顺序)。 */
-function importSessionFile(filePath: string): number {
+function importSessionFile(tenantId: string, filePath: string): number {
   const records = collectSessionMessages(filePath)
   let imported = 0
   for (const record of records) {
     try {
-      appendTimelineMessage({
+      appendTimelineMessage(tenantId, {
         role: record.role,
         content: record.content,
         ts: record.timestamp || undefined,
@@ -114,16 +114,21 @@ function importSessionFile(filePath: string): number {
  * 幂等回填:仅在未标记完成时执行一次。
  * 顺序:按会话目录的 mtime 从旧到新,每条消息按时间线插入(时间线本身按 id 排序,
  * 这里顺序即为时间顺序)。
+ *
+ * Phase 1.2: tenantId 必传,只回填到当前租户自己的 db。
  */
-export function backfillLegacySessionsIfNeeded(): { imported: number; scanned: number } {
+export function backfillLegacySessionsIfNeeded(
+  tenantId: string,
+): { imported: number; scanned: number } {
+  if (!tenantId) throw new Error("backfillLegacySessionsIfNeeded: tenantId is required")
   const doneKey = `${BACKFILL_META_KEY}:${BACKFILL_VERSION}`
-  if (getTimelineMeta(doneKey)) {
+  if (getTimelineMeta(tenantId, doneKey)) {
     return { imported: 0, scanned: 0 }
   }
 
   const sessionDir = path.join(getAgentDir(), "sessions")
   if (!fs.existsSync(sessionDir)) {
-    setTimelineMeta(doneKey, new Date().toISOString())
+    setTimelineMeta(tenantId, doneKey, new Date().toISOString())
     return { imported: 0, scanned: 0 }
   }
 
@@ -150,14 +155,14 @@ export function backfillLegacySessionsIfNeeded(): { imported: number; scanned: n
   let scanned = 0
   for (const file of files) {
     try {
-      imported += importSessionFile(file)
+      imported += importSessionFile(tenantId, file)
       scanned += 1
     } catch (error) {
       console.error("[timeline] backfill failed for", file, error instanceof Error ? error.message : error)
     }
   }
 
-  setTimelineMeta(doneKey, new Date().toISOString())
-  console.log(`[timeline] legacy backfill: scanned ${scanned} sessions, imported ${imported} messages`)
+  setTimelineMeta(tenantId, doneKey, new Date().toISOString())
+  console.log(`[timeline] legacy backfill[${tenantId}]: scanned ${scanned} sessions, imported ${imported} messages`)
   return { imported, scanned }
 }

@@ -7,19 +7,32 @@ import {
   searchTimelineMessages,
   statsTimeline,
 } from "@/lib/timeline-db";
+import { resolveAuthFromRequest } from "@/lib/auth-resolve";
 
 export const dynamic = "force-dynamic";
 
 // GET /api/timeline?before=<cursor>&limit=<n>
 // GET /api/timeline?q=<query>
+//
+// Phase 1.2: 强制 token,走调用方 ctx.tenantId 路由到 per-tenant db。
+// 无 token → 401(由 proxy.ts 拦截;此函数仍防御性检查)。
 export async function GET(req: Request) {
   try {
-    backfillLegacySessionsIfNeeded();
+    const auth = await resolveAuthFromRequest();
+    if (!auth) {
+      return NextResponse.json(
+        { error: "unauthenticated", message: "需要登录" },
+        { status: 401, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    const tenantId = auth.tenantId;
+
+    backfillLegacySessionsIfNeeded(tenantId);
     const url = new URL(req.url);
     const query = url.searchParams.get("q")?.trim() ?? "";
 
     if (query) {
-      const results = searchTimelineMessages(query);
+      const results = searchTimelineMessages(tenantId, query);
       return NextResponse.json(
         { results, count: results.length },
         { headers: { "Cache-Control": "no-store" } },
@@ -31,14 +44,14 @@ export async function GET(req: Request) {
     const limitRaw = url.searchParams.get("limit");
     const limit = limitRaw && /^\d+$/.test(limitRaw) ? Number(limitRaw) : undefined;
 
-    const { messages, hasMore } = listTimelineMessages({ beforeId, limit });
+    const { messages, hasMore } = listTimelineMessages(tenantId, { beforeId, limit });
     return NextResponse.json(
       {
         messages,
         hasMore,
-        title: getTimelineTitle(),
-        activeSessionId: getActiveEngineSession(),
-        stats: statsTimeline(),
+        title: getTimelineTitle(tenantId),
+        activeSessionId: getActiveEngineSession(tenantId),
+        stats: statsTimeline(tenantId),
       },
       { headers: { "Cache-Control": "no-store" } },
     );

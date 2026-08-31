@@ -10,13 +10,13 @@
 //
 // 驱动：Node 22.5+ 内置 node:sqlite（零 native 依赖）。
 //
-// 多租户(Phase 1.1):本模块的函数当前仍保持无 tenantId 签名,内部走默认租户
-// `default`,以兼容历史调用方。Phase 1.2 会批量加 tenantId 参数并对接到
-// per-tenant 库。新用户/新租户数据走 createTenant() 独立 db,不受本模块影响。
+// 多租户(Phase 1.2):getTimelineDb(tenantId) 必传,内部走 per-tenant db 文件。
+// 调用方负责解析 request ctx(详见 lib/auth-resolve.ts),不允许走 default 兜底。
 // 详见 lib/tenant-store.ts + docs/v3/CLOUD-EDGE-BLUEPRINT.md §5.3。
 
 import type { DatabaseSync } from "node:sqlite"
-import { DEFAULT_TENANT_ID, getTenantDb } from "./tenant-store"
+import { createHash } from "node:crypto"
+import { getTenantDb } from "./tenant-store"
 
 const ACTIVE_ENGINE_SESSION_KEY = "active_engine_session"
 const TIMELINE_TITLE_KEY = "timeline_title"
@@ -30,20 +30,26 @@ export interface TimelineMessage {
   engineId: string | null
 }
 
-export function getTimelineDb(): DatabaseSync {
-  // 旧签名(无 tenantId):固定走默认租户。Phase 1.2 引入 per-tenant 调用。
-  return getTenantDb(DEFAULT_TENANT_ID)
+/** per-tenant 时间线 db。tenantId 必传,绝不兜底 default。 */
+export function getTimelineDb(tenantId: string): DatabaseSync {
+  if (!tenantId || typeof tenantId !== "string") {
+    throw new Error("getTimelineDb: tenantId is required")
+  }
+  return getTenantDb(tenantId)
 }
 
 /** 幂等追加一条消息。engineId 相同则跳过（返回既有行 id）。 */
-export function appendTimelineMessage(input: {
-  role: "user" | "assistant"
-  content: string
-  ts?: string | number
-  model?: string
-  engineId?: string
-}): number {
-  const target = getTimelineDb()
+export function appendTimelineMessage(
+  tenantId: string,
+  input: {
+    role: "user" | "assistant"
+    content: string
+    ts?: string | number
+    model?: string
+    engineId?: string
+  },
+): number {
+  const target = getTimelineDb(tenantId)
   const ts =
     typeof input.ts === "number"
       ? new Date(input.ts < 1e12 ? input.ts * 1000 : input.ts).toISOString()
@@ -71,18 +77,18 @@ export function appendTimelineMessage(input: {
 }
 
 function hashEngineId(engineId: string): string {
-  // sha256 → base64url slice 32 (与原实现保持一致)
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const crypto = require("node:crypto") as typeof import("node:crypto")
-  return crypto.createHash("sha256").update(engineId).digest("base64url").slice(0, 32)
+  return createHash("sha256").update(engineId).digest("base64url").slice(0, 32)
 }
 
 /** 分页读最近消息（QQ 式上拉加载更早历史）。beforeId 为空时取最新。 */
-export function listTimelineMessages(options: {
-  beforeId?: number
-  limit?: number
-}): { messages: TimelineMessage[]; hasMore: boolean } {
-  const target = getTimelineDb()
+export function listTimelineMessages(
+  tenantId: string,
+  options: {
+    beforeId?: number
+    limit?: number
+  },
+): { messages: TimelineMessage[]; hasMore: boolean } {
+  const target = getTimelineDb(tenantId)
   const limit = Math.max(1, Math.min(200, options.limit ?? 30))
 
   let rows: Array<{
@@ -144,10 +150,11 @@ export interface TimelineSearchResult {
 
 /** 子串全文检索（LIKE）。按时间倒序返回命中。 */
 export function searchTimelineMessages(
+  tenantId: string,
   query: string,
   limit = 10,
 ): TimelineSearchResult[] {
-  const target = getTimelineDb()
+  const target = getTimelineDb(tenantId)
   const cleaned = query.trim().slice(0, 200)
   if (!cleaned) return []
 
@@ -184,15 +191,15 @@ export function searchTimelineMessages(
   }))
 }
 
-export function getTimelineMeta(key: string): string | null {
-  const row = getTimelineDb()
+export function getTimelineMeta(tenantId: string, key: string): string | null {
+  const row = getTimelineDb(tenantId)
     .prepare("SELECT value FROM timeline_meta WHERE key = ?")
     .get(key) as { value: string } | undefined
   return row?.value ?? null
 }
 
-export function setTimelineMeta(key: string, value: string): void {
-  getTimelineDb()
+export function setTimelineMeta(tenantId: string, key: string, value: string): void {
+  getTimelineDb(tenantId)
     .prepare(
       "INSERT INTO timeline_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
     )
@@ -200,31 +207,31 @@ export function setTimelineMeta(key: string, value: string): void {
 }
 
 /** 当前 pi 引擎会话 id（min hui恢复/压缩分裂时跟随最新）。 */
-export function getActiveEngineSession(): string | null {
-  return getTimelineMeta(ACTIVE_ENGINE_SESSION_KEY)
+export function getActiveEngineSession(tenantId: string): string | null {
+  return getTimelineMeta(tenantId, ACTIVE_ENGINE_SESSION_KEY)
 }
 
-export function setActiveEngineSession(sessionId: string): void {
-  setTimelineMeta(ACTIVE_ENGINE_SESSION_KEY, sessionId)
+export function setActiveEngineSession(tenantId: string, sessionId: string): void {
+  setTimelineMeta(tenantId, ACTIVE_ENGINE_SESSION_KEY, sessionId)
 }
 
 /** 自动标题（首条 user 消息摘取，空则用占位）。 */
-export function getTimelineTitle(): string {
-  const stored = getTimelineMeta(TIMELINE_TITLE_KEY)
+export function getTimelineTitle(tenantId: string): string {
+  const stored = getTimelineMeta(tenantId, TIMELINE_TITLE_KEY)
   if (stored) return stored
-  const first = getTimelineDb()
+  const first = getTimelineDb(tenantId)
     .prepare(
       "SELECT content FROM messages WHERE role = 'user' ORDER BY id ASC LIMIT 1",
     )
     .get() as { content: string } | undefined
   if (!first) return "家庭对话"
   const title = first.content.trim().slice(0, 24)
-  setTimelineMeta(TIMELINE_TITLE_KEY, title)
+  setTimelineMeta(tenantId, TIMELINE_TITLE_KEY, title)
   return title
 }
 
-export function statsTimeline(): { count: number; lastId: number | null } {
-  const row = getTimelineDb()
+export function statsTimeline(tenantId: string): { count: number; lastId: number | null } {
+  const row = getTimelineDb(tenantId)
     .prepare("SELECT COUNT(*) AS count, MAX(id) AS last_id FROM messages")
     .get() as { count: number; last_id: number | null }
   return { count: Number(row.count), lastId: row.last_id == null ? null : Number(row.last_id) }
