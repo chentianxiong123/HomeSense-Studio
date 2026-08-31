@@ -1,4 +1,6 @@
-import { IconChevronRight } from "@tabler/icons-react"
+import {
+  IconChevronRight,
+} from "@tabler/icons-react"
 import {
   IconAtom,
   IconChevronsDown,
@@ -8,6 +10,7 @@ import {
   IconMessageCircle,
   IconSearch,
   IconSettings,
+  IconShield,
   IconSparkles,
   IconTools,
 } from "@tabler/icons-react"
@@ -33,6 +36,7 @@ import {
   useSidebar,
 } from "@pico/components/ui/sidebar"
 import { useSidebarChannels } from "@pico/hooks/use-sidebar-channels"
+import { isAdmin, useCurrentUser } from "@pico/hooks/use-current-user"
 
 interface NavItem {
   title: string
@@ -71,6 +75,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const routerState = useRouterState()
   const { i18n, t } = useTranslation()
   const { isMobile, setOpenMobile } = useSidebar()
+  const { me } = useCurrentUser()
+  const showAdmin = isAdmin(me)
   const currentPath = routerState.location.pathname
   const {
     channelItems,
@@ -116,6 +122,16 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             icon: IconKey,
             translateTitle: true,
           },
+          ...(showAdmin
+            ? [
+                {
+                  title: "navigation.admin",
+                  url: "/admin",
+                  icon: IconShield,
+                  translateTitle: true,
+                },
+              ]
+            : []),
         ],
       },
       {

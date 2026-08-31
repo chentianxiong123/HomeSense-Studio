@@ -22,6 +22,7 @@ import { Route as ChannelsNameRouteImport } from '@pico/routes/channels/$name'
 import { Route as AgentToolsRouteImport } from '@pico/routes/agent/tools'
 import { Route as AgentSkillsRouteImport } from '@pico/routes/agent/skills'
 import { Route as AgentHubRouteImport } from '@pico/routes/agent/hub'
+import { Route as AdminRouteImport } from '@pico/routes/admin'
 
 const ModelsRoute = ModelsRouteImport.update({
   id: '/models',
@@ -56,6 +57,11 @@ const AgentRoute = AgentRouteImport.update({
 const ChannelsRouteRoute = ChannelsRouteRouteImport.update({
   id: '/channels',
   path: '/channels',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -192,6 +198,7 @@ export interface RootRouteChildren {
   LauncherLoginRoute: typeof LauncherLoginRoute
   LogsRoute: typeof LogsRoute
   ModelsRoute: typeof ModelsRoute
+  AdminRoute: typeof AdminRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -250,6 +257,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/config/raw': {
@@ -336,6 +350,7 @@ const rootRouteChildren: RootRouteChildren = {
   LauncherLoginRoute: LauncherLoginRoute,
   LogsRoute: LogsRoute,
   ModelsRoute: ModelsRoute,
+  AdminRoute: AdminRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
