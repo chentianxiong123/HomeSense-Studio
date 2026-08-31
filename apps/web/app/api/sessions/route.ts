@@ -9,14 +9,19 @@ import {
   getRpcSessionInfos,
   getRunningRpcSessionIds,
 } from "@/lib/rpc-manager";
+import { resolveAuthFromRequest } from "@/lib/auth-resolve";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   try {
+    const auth = await resolveAuthFromRequest();
+    if (!auth) {
+      return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    }
     const force = new URL(req.url).searchParams.get("force") === "1";
     const [persistedSessions, runtimeSessions] = await Promise.all([
-      listAllSessions({ force }),
+      listAllSessions({ force, tenantId: auth.tenantId }),
       attachSessionProjectInfo(getRpcSessionInfos()),
     ]);
     const sessions = mergeSessionLists(persistedSessions, runtimeSessions);
