@@ -3,6 +3,12 @@
 // 借鉴 hermes 的 memory_tool：agent 通过 memory 工具维护两个文件，
 // 作为跨会话的持久记忆。会话启动时冻结快照注入 system prompt。
 // 存成普通 Markdown 文件,用户可直接编辑。
+//
+// Phase 1.3: per-tenant 隔离。MEMORY.md / USER.md 按 tenantId 分目录,
+// 防止多用户共用 server 时互相看到对方的笔记 / 画像。
+// 路径: data/<tenantId>/.homesense/agent/memories/{MEMORY,USER}.md
+// (跟 pi 引擎的 getAgentDir() 推到 ~/.homesense/agent 的派生方式对齐,
+//  保持跟 v2 单机部署的 mental model 一致。)
 
 import fs from "node:fs"
 import path from "node:path"
@@ -19,16 +25,26 @@ const MEMORY_BLOCK_HEADERS: Record<MemoryTarget, string> = {
 export const ENTRY_DELIMITER = "\n§\n"
 export const MEMORY_CHAR_LIMIT = 6000
 
-export function getMemoriesDir(): string {
+/**
+ * 记忆根目录。tenantId 必传:
+ *   - 真实用户(从 ctx 解析出来): data/<tenantId>/.homesense/agent/memories
+ *   - 老路径兜底(无 tenantId,过渡期): getAgentDir()/memories
+ * 调用方必须主动传 tenantId;无参走 fallback,仅用于 backward-compat 测试。
+ */
+export function getMemoriesDir(tenantId?: string): string {
+  if (tenantId && typeof tenantId === "string" && tenantId !== "default") {
+    // 跟 tenant-store.ts 里 db_path 同根(data/)
+    return path.join(process.cwd(), "data", tenantId, ".homesense", "agent", "memories")
+  }
   return path.join(getAgentDir(), "memories")
 }
 
-function memoryFilePath(target: MemoryTarget): string {
-  return path.join(getMemoriesDir(), target === "memory" ? "MEMORY.md" : "USER.md")
+function memoryFilePath(tenantId: string | undefined, target: MemoryTarget): string {
+  return path.join(getMemoriesDir(tenantId), target === "memory" ? "MEMORY.md" : "USER.md")
 }
 
-export function readMemoryEntries(target: MemoryTarget): string[] {
-  const filePath = memoryFilePath(target)
+export function readMemoryEntries(tenantId: string, target: MemoryTarget): string[] {
+  const filePath = memoryFilePath(tenantId, target)
   if (!fs.existsSync(filePath)) return []
   const raw = fs.readFileSync(filePath, "utf8").trim()
   if (!raw) return []
@@ -38,8 +54,8 @@ export function readMemoryEntries(target: MemoryTarget): string[] {
     .filter(Boolean)
 }
 
-function writeMemoryEntries(target: MemoryTarget, entries: string[]): void {
-  const filePath = memoryFilePath(target)
+function writeMemoryEntries(tenantId: string, target: MemoryTarget, entries: string[]): void {
+  const filePath = memoryFilePath(tenantId, target)
   fs.mkdirSync(path.dirname(filePath), { recursive: true })
   const content = entries.filter(Boolean).join(ENTRY_DELIMITER)
   // 原子写,避免中途崩溃损坏
@@ -48,36 +64,42 @@ function writeMemoryEntries(target: MemoryTarget, entries: string[]): void {
   fs.renameSync(tmp, filePath)
 }
 
-export function memoryCharCount(target: MemoryTarget): number {
-  return readMemoryEntries(target).join(ENTRY_DELIMITER).length
+export function memoryCharCount(tenantId: string, target: MemoryTarget): number {
+  return readMemoryEntries(tenantId, target).join(ENTRY_DELIMITER).length
 }
 
-export function isMemoryFull(target: MemoryTarget): boolean {
-  return memoryCharCount(target) >= MEMORY_CHAR_LIMIT
+export function isMemoryFull(tenantId: string, target: MemoryTarget): boolean {
+  return memoryCharCount(tenantId, target) >= MEMORY_CHAR_LIMIT
 }
 
 /** memory 工具核心:add / replace / remove,基于短唯一子串匹配。 */
-export function memoryAction(input: {
-  action: "add" | "replace" | "remove"
-  target: MemoryTarget
-  content: string
-}): { ok: boolean; message: string } {
+export function memoryAction(
+  tenantId: string,
+  input: {
+    action: "add" | "replace" | "remove"
+    target: MemoryTarget
+    content: string
+  },
+): { ok: boolean; message: string } {
+  if (!tenantId) {
+    return { ok: false, message: "memoryAction: tenantId is required" }
+  }
   const { action, target } = input
   const content = (input.content ?? "").trim()
   if (!content) return { ok: false, message: "content 不能为空" }
 
-  const entries = readMemoryEntries(target)
+  const entries = readMemoryEntries(tenantId, target)
 
   switch (action) {
     case "add": {
       if (entries.some((entry) => entry.includes(content))) {
         return { ok: false, message: "该记忆已存在,无需重复添加" }
       }
-      if (memoryCharCount(target) + content.length > MEMORY_CHAR_LIMIT) {
+      if (memoryCharCount(tenantId, target) + content.length > MEMORY_CHAR_LIMIT) {
         return { ok: false, message: `记忆已满(${MEMORY_CHAR_LIMIT} 字符)。请先 remove 或 replace 精简。` }
       }
       entries.push(content)
-      writeMemoryEntries(target, entries)
+      writeMemoryEntries(tenantId, target, entries)
       return { ok: true, message: `已添加到 ${MEMORY_BLOCK_HEADERS[target]} (共 ${entries.length} 条)` }
     }
     case "replace": {
@@ -86,7 +108,7 @@ export function memoryAction(input: {
         return { ok: false, message: "未找到要替换的记忆(用内容唯一子串指定)" }
       }
       const next = entries.map((entry) => (entry === match ? content : entry))
-      writeMemoryEntries(target, next)
+      writeMemoryEntries(tenantId, target, next)
       return { ok: true, message: `已替换 1 条 ${MEMORY_BLOCK_HEADERS[target]} 记忆` }
     }
     case "remove": {
@@ -95,7 +117,7 @@ export function memoryAction(input: {
         return { ok: false, message: "未找到要删除的记忆(用内容唯一子串指定)" }
       }
       const next = entries.filter((entry) => entry !== match)
-      writeMemoryEntries(target, next)
+      writeMemoryEntries(tenantId, target, next)
       return { ok: true, message: `已删除 1 条 ${MEMORY_BLOCK_HEADERS[target]} 记忆` }
     }
     default:
@@ -104,10 +126,11 @@ export function memoryAction(input: {
 }
 
 /** 会话启动时的冻结快照,注入 system prompt。 */
-export function buildMemorySnapshot(): string {
+export function buildMemorySnapshot(tenantId: string): string {
+  if (!tenantId) return ""
   const blocks: string[] = []
   for (const target of ["memory", "user"] as const) {
-    const entries = readMemoryEntries(target)
+    const entries = readMemoryEntries(tenantId, target)
     if (entries.length === 0) continue
     blocks.push(`${MEMORY_BLOCK_HEADERS[target]}:\n${entries.join(ENTRY_DELIMITER)}`)
   }

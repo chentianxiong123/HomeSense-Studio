@@ -1971,7 +1971,7 @@ export async function startRpcSession(
               createHomeSenseMemoryExtension(tenantId ?? "default"),
             ],
             // 会话启动时冻结注入跨会话记忆快照(与 hermes 一致,保前缀缓存)。
-            appendSystemPrompt: [buildMemorySnapshot()].filter((s) => s !== ""),
+            appendSystemPrompt: [buildMemorySnapshot(tenantId ?? "default")].filter((s) => s !== ""),
             extensionsOverride: (base) => preferUserBashExtension(preferPiWebSubagentExtension(base)),
           },
       ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),

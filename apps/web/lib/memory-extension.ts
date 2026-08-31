@@ -110,7 +110,7 @@ export function createHomeSenseMemoryExtension(tenantId: string): InlineExtensio
           }),
           executionMode: "sequential",
           async execute(_toolCallId, params) {
-            const result = memoryAction({
+            const result = memoryAction(tenantId, {
               action: params.action as "add" | "replace" | "remove",
               target: memoryTargetOf(params.target),
               content: params.content,
