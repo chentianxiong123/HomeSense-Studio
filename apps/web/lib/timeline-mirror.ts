@@ -59,23 +59,31 @@ function messageSignature(
 /**
  * 把引擎事件镜像进时间线。只在 message_end（最终内容）落库；
  * 中间 message_start/message_update 不写，避免流式增量污染。
+ *
+ * Phase 1.2: tenantId 必传,写 per-tenant db。无 tenantId → 抛错(防止
+ * default 库污染,新数据必须走调用方 ctx 解析出来的 tenant)。
  */
 export function mirrorAgentEventToTimeline(
+  tenantId: string,
   engineSessionId: string,
   event: AgentEvent,
 ): void {
+  if (!tenantId) {
+    console.error("[timeline] mirrorAgentEventToTimeline: missing tenantId, dropping event", event.type)
+    return
+  }
   try {
     if (event.type === "message_end") {
       const msg = event.message as MessageLike | undefined
       if (!isUserOrAssistant(msg)) return
-      appendTimelineMessage({
+      appendTimelineMessage(tenantId, {
         role: msg.role,
         content: textOfMessage(msg),
         ts: timeOfMessage(msg),
         model: msg.model,
         engineId: messageSignature(engineSessionId, msg),
       })
-      setActiveEngineSession(engineSessionId)
+      setActiveEngineSession(tenantId, engineSessionId)
     }
   } catch (error) {
     // 镜像失败不阻断 chat（时间线是尽力而为的补充存储）。

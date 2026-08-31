@@ -1,18 +1,11 @@
 /** Normalize URL pathname for comparisons (trailing slashes, empty). */
-export function normalizePathname(p: string): string {
+export function normalizePathname(p: string): boolean {
+  // Compat shim: launcher-setup 已删除,统一在 /launcher-login 处理登录/注册双 tab
   const t = p.replace(/\/+$/, "")
-  return t === "" ? "/" : t
+  const normalized = t === "" ? "/" : t
+  return normalized === "/launcher-login" || normalized === "/launcher-setup"
 }
 
-export function isLauncherLoginPathname(pathname: string): boolean {
-  return normalizePathname(pathname) === "/launcher-login"
-}
-
-export function isLauncherSetupPathname(pathname: string): boolean {
-  return normalizePathname(pathname) === "/launcher-setup"
-}
-
-/** True for any page that is part of the auth flow (login or setup). */
-export function isLauncherAuthPathname(pathname: string): boolean {
-  return isLauncherLoginPathname(pathname) || isLauncherSetupPathname(pathname)
+export function isLauncherAuthPathname(p: string): boolean {
+  return normalizePathname(p)
 }

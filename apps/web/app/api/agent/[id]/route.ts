@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { resolveSessionPath } from "@/lib/session-reader";
 import { startRpcSession, getRpcSession, setRpcSessionTools } from "@/lib/rpc-manager";
+import { resolveAuthFromRequest } from "@/lib/auth-resolve";
 
 // POST /api/agent/[id] - Send a command to an existing session
 export async function POST(
@@ -30,7 +31,8 @@ export async function POST(
       if (!existing?.isAlive() && !filePath) {
         return NextResponse.json({ error: "Session not found" }, { status: 404 });
       }
-      const changed = await setRpcSessionTools(id, filePath, toolNames);
+      const ctx = await resolveAuthFromRequest();
+      const changed = await setRpcSessionTools(id, filePath, toolNames, ctx?.tenantId);
       return NextResponse.json({
         success: true,
         data: { sessionId: changed.sessionId, recreated: changed.recreated },
@@ -54,6 +56,7 @@ export async function POST(
 
     const { session } = await startRpcSession(id, filePath, undefined, {
       ...(toolNames !== undefined ? { toolNames } : {}),
+      tenantId: (await resolveAuthFromRequest())?.tenantId ?? "default",
     });
     const result = await session.send(body);
     promptAccepted = body.type === "prompt";

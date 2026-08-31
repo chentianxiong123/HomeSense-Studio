@@ -16,7 +16,7 @@ import { Link } from "@tanstack/react-router"
 import * as React from "react"
 import { useTranslation } from "react-i18next"
 
-import { postLauncherDashboardLogout } from "@pico/api/launcher-auth"
+import { getAuthMe, postLogout } from "@pico/api/launcher-auth"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,6 +32,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@pico/components/ui/dropdown-menu"
 import { Separator } from "@pico/components/ui/separator"
@@ -43,6 +45,14 @@ import {
 } from "@pico/components/ui/tooltip"
 import { useGateway } from "@pico/hooks/use-gateway"
 import { useTheme } from "@pico/hooks/use-theme"
+
+interface CurrentUser {
+  userId: string
+  tenantId: string
+  username: string
+  displayName: string
+  role: string
+}
 
 export function AppHeader({
   expanded,
@@ -65,6 +75,26 @@ export function AppHeader({
     error: gwError,
   } = useGateway()
 
+  const [currentUser, setCurrentUser] = React.useState<CurrentUser | null>(null)
+
+  React.useEffect(() => {
+    let cancelled = false
+    void getAuthMe()
+      .then((me) => {
+        if (cancelled) return
+        if (me.authenticated && me.user) setCurrentUser(me.user)
+      })
+      .catch(() => {
+        /* unauthenticated or network error */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const [showStopDialog, setShowStopDialog] = React.useState(false)
+  const [showLogoutDialog, setShowLogoutDialog] = React.useState(false)
+
   const isRunning = gwState === "running"
   const isStarting = gwState === "starting"
   const isRestarting = gwState === "restarting"
@@ -76,11 +106,8 @@ export function AppHeader({
     canStart &&
     (gwState === "stopped" || gwState === "error")
 
-  const [showStopDialog, setShowStopDialog] = React.useState(false)
-  const [showLogoutDialog, setShowLogoutDialog] = React.useState(false)
-
   const handleLogout = async () => {
-    await postLauncherDashboardLogout()
+    await postLogout()
     globalThis.location.assign("/launcher-login")
   }
 
@@ -327,21 +354,66 @@ export function AppHeader({
 
         <Separator className="mx-2 my-2" orientation="vertical" />
 
-        {/* Logout */}
-        <Tooltip delayDuration={700}>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-8"
-              onClick={() => setShowLogoutDialog(true)}
-              aria-label={t("header.logout.tooltip")}
-            >
-              <IconLogout className="size-4.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t("header.logout.tooltip")}</TooltipContent>
-        </Tooltip>
+        {/* User chip + dropdown (sign out, show username) */}
+        {currentUser ? (
+          <DropdownMenu>
+            <Tooltip delayDuration={700}>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-muted-foreground hover:text-foreground h-8 gap-2 px-2"
+                    data-testid="user-chip"
+                  >
+                    <span className="bg-foreground/10 text-foreground/80 flex size-6 items-center justify-center rounded-full text-xs font-semibold">
+                      {currentUser.displayName.slice(0, 1).toUpperCase()}
+                    </span>
+                    <span className="hidden text-sm font-medium sm:inline">
+                      {currentUser.displayName}
+                    </span>
+                  </Button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent>{currentUser.displayName}</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end" className="min-w-48">
+              <DropdownMenuLabel className="font-normal">
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-foreground text-sm font-medium">
+                    {currentUser.displayName}
+                  </span>
+                  <span className="text-muted-foreground text-xs">
+                    @{currentUser.username}
+                  </span>
+                </div>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => setShowLogoutDialog(true)}
+                className="text-destructive focus:text-destructive gap-2"
+              >
+                <IconLogout className="size-4" />
+                {t("header.logout.tooltip")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <Tooltip delayDuration={700}>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8"
+                onClick={() => setShowLogoutDialog(true)}
+                aria-label={t("header.logout.tooltip")}
+              >
+                <IconLogout className="size-4.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("header.logout.tooltip")}</TooltipContent>
+          </Tooltip>
+        )}
       </div>
 
       {/* Center: collapse handle (always at the same spot the

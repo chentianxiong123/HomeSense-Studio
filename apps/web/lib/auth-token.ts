@@ -1,7 +1,9 @@
 // HomeSense v3 — 会话令牌 (HS256 JWT, node:crypto, 零外部依赖)
 //
 // 用途: 浏览器 cookie 存 token,proxy.ts 解析 → 注入 TenantContext → 所有 API 用 ctx 路由到对应租户库。
-// 私钥: 进程启动时随机生成(每次重启会失效,生产环境应改成持久 secret,见 Phase 1.1 后补)。
+// 私钥: 默认固定 dev key(dev server hot-reload 会重启进程,随机密钥会导致
+//       旧 cookie 全部失效,用户体验崩溃)。生产环境必须通过 HOMESENSE_JWT_SECRET
+//       覆盖,否则 dev/prod 切换会吊销所有用户。
 // 寿命: 默认 30 天,支持 refresh(本版本先不实现)。
 
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
@@ -9,7 +11,10 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 const TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60
 const TOKEN_VERSION = "v1"
 
-const secret = process.env.HOMESENSE_JWT_SECRET || randomBytes(32).toString("base64url")
+// 固定 dev secret:避免 Next dev hot-reload 进程重启时密钥变化导致旧 cookie 失效
+const DEV_JWT_SECRET = "homesense-v3-dev-secret-do-not-use-in-prod-32b"
+const secret = process.env.HOMESENSE_JWT_SECRET
+  || (process.env.NODE_ENV === "production" ? randomBytes(32).toString("base64url") : DEV_JWT_SECRET)
 if (!process.env.HOMESENSE_JWT_SECRET && process.env.NODE_ENV === "production") {
   console.warn("[auth] HOMESENSE_JWT_SECRET 未设置,使用进程内随机密钥(重启后旧 token 失效)")
 }

@@ -44,7 +44,7 @@ function formatTimelineResults(
     .join("\n\n---\n\n")
 }
 
-export function createHomeSenseMemoryExtension(): InlineExtension {
+export function createHomeSenseMemoryExtension(tenantId: string): InlineExtension {
   return {
     name: HOME_SENSE_MEMORY_EXTENSION_NAME,
     hidden: true,
@@ -68,7 +68,7 @@ export function createHomeSenseMemoryExtension(): InlineExtension {
           }),
           executionMode: "parallel",
           async execute(_toolCallId, params) {
-            const results = searchTimelineMessages(params.query, 8)
+            const results = searchTimelineMessages(tenantId, params.query, 8)
             return {
               content: [{ type: "text", text: formatTimelineResults(results) }],
               details: {

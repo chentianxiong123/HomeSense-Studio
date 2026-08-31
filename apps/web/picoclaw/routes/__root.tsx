@@ -1,20 +1,16 @@
 import { Outlet, createRootRoute, useRouterState } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 
-import { getLauncherAuthStatus } from "@pico/api/launcher-auth"
 import { AppLayout } from "@pico/components/app-layout"
 import { initializeChatStore } from "@pico/features/chat/controller"
 import { isLauncherAuthPathname } from "@pico/lib/launcher-login-path"
 
 const RootLayout = () => {
-  // Prefer the real address bar path: stale embedded bundles may not register
-  // /launcher-login or /launcher-setup in the route tree, which would otherwise
-  // keep AppLayout + gateway polling → 401 → launcherFetch redirect loop.
+  // 当前路径只信任 routerState.pathname(响应式),
+  // windowPath 留给初次渲染时 globalThis 兜底,避免 useRouterState 渲染抖动
+  // 把 isAuthPage 拉到 effect 依赖里导致无限循环。
   const routerState = useRouterState({
-    select: (s) => ({
-      pathname: s.location.pathname,
-      matches: s.matches,
-    }),
+    select: (s) => ({ pathname: s.location.pathname }),
   })
 
   const windowPath =
@@ -22,45 +18,49 @@ const RootLayout = () => {
       ? globalThis.location.pathname || "/"
       : routerState.pathname
 
-  const isAuthPage =
-    isLauncherAuthPathname(windowPath) ||
-    isLauncherAuthPathname(routerState.pathname) ||
-    routerState.matches.some(
-      (m) => m.routeId === "/launcher-login" || m.routeId === "/launcher-setup",
-    )
+  // 只信任 routerState.pathname(字符串稳定,React 按值比较不会无限重渲染)
+  const isAuthPage = isLauncherAuthPathname(routerState.pathname)
 
   const [authError, setAuthError] = useState<string | null>(null)
 
-  // Session guard: proactively check auth status on every page load.
+  // Session guard: 检查 token,没 token 跳登录页。
+  // 只在 path 变化时跑一次;使用 AbortController 取消上一次的 fetch
+  // 避免多次 effect 跑时前一个未 resolve 的 promise 触发错误跳转。
   useEffect(() => {
     if (isAuthPage) return
-    void getLauncherAuthStatus()
-      .then((s) => {
-        // Launcher auth not implemented (no /api/auth/* in this Next.js app):
-        // don't redirect to login/setup, just use the app.
+    const ac = new AbortController()
+    let mounted = true
+
+    Promise.all([
+      fetch("/api/auth/status", { credentials: "same-origin", signal: ac.signal }).then((r) => r.json()),
+      fetch("/api/auth/me", { credentials: "same-origin", signal: ac.signal }).then((r) => r.json()),
+    ])
+      .then(([s, me]) => {
+        if (!mounted) return
         if (!s.available) return
-        if (!s.initialized) {
-          globalThis.location.assign("/launcher-setup")
-        } else if (!s.authenticated) {
+        if (!me.authenticated) {
           globalThis.location.assign("/launcher-login")
         }
       })
       .catch((err: unknown) => {
-        // On 401/403, redirect to login — the session is invalid.
-        // On 5xx (e.g. 503 when the auth store is unavailable) or network errors,
-        // do NOT redirect: a subsequent successful login would loop straight back here.
-        // launcherFetch handles 401 on real API calls regardless.
+        if (!mounted) return
+        if (err instanceof DOMException && err.name === "AbortError") return
         if (err instanceof Error && /^status 40[13]$/.test(err.message)) {
           globalThis.location.assign("/launcher-login")
         } else {
           setAuthError(
             err instanceof Error
               ? err.message
-              : "Auth service unavailable. Reset dashboard password storage and restart the application.",
+              : "Auth service unavailable. Restart the application.",
           )
         }
       })
-  }, [isAuthPage])
+
+    return () => {
+      mounted = false
+      ac.abort()
+    }
+  }, [isAuthPage, windowPath])
 
   useEffect(() => {
     if (isAuthPage) {
