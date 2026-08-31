@@ -1930,11 +1930,9 @@ export async function startRpcSession(
   const starting = (async () => {
     // Some extensions access the SDK's global theme even outside the terminal UI.
     if (!chatOnly) initTheme();
-    // Phase 1.3: per-tenant agent root.
-    // 原本调 getAgentDir() (→ ~/.homesense/agent,所有用户共享),现在按 tenantId
-    // 推到 data/<tenantId>/.homesense/agent,sessions/ memories/ project-trust/ skills/
-    // plugins/ 等所有派生路径全部跟着隔离。tenantId 来自调用方 (startRpcSession options)。
-    const agentDir = resolveTenantAgentDir(tenantId);
+    // 模型配置(admin 在 /admin 维护的全局 models.json)全局共享,所有用户都能用;
+    // session/memory 仍然 per-tenant(见 line 1901 sessionDir / memory-store.ts)。
+    const agentDir = getAgentDir();
 
     // Determine which tools to pass based on requested toolNames.
     // Since v0.68.0, session creation expects string[] tool names instead of Tool[] instances.

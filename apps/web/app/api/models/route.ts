@@ -10,6 +10,7 @@ import {
 } from "@/lib/models-cache";
 import { resolveVisibleModels, selectInitialModelScope } from "@/lib/model-scope";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
+import { resolveAuthFromRequest } from "@/lib/auth-resolve";
 import { projectTrustReloadOptions } from "@/lib/project-trust";
 
 export const dynamic = "force-dynamic";
@@ -98,6 +99,12 @@ const EMPTY_MODELS: ModelsData = {
 };
 
 export async function GET(req: Request) {
+  const auth = await resolveAuthFromRequest()
+  if (!auth) {
+    return Response.json({ error: "unauthorized" }, { status: 401 })
+  }
+  const tenantId = auth.tenantId
+
   const requestedCwd = new URL(req.url).searchParams.get("cwd") || process.cwd();
   const cwd = resolve(requestedCwd);
 
@@ -110,7 +117,7 @@ export async function GET(req: Request) {
   if (!cwdStat.isDirectory()) {
     return Response.json({ error: `Not a directory: ${cwd}` }, { status: 400 });
   }
-  const allowedRoots = await getAllowedFileRoots();
+  const allowedRoots = await getAllowedFileRoots(tenantId);
   if (!isExistingFilePathAllowed(cwd, allowedRoots)) {
     return Response.json({ error: "Access denied" }, { status: 403 });
   }
