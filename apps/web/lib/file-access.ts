@@ -17,12 +17,14 @@ declare global {
 
 const ALLOWED_ROOTS_TTL_MS = 5_000;
 
-export async function getAllowedFileRoots(): Promise<Set<string>> {
+export async function getAllowedFileRoots(tenantId?: string): Promise<Set<string>> {
   const now = Date.now();
   const cached = globalThis.__piAllowedRootsCache;
-  if (cached && cached.expiresAt > now) return cached.roots;
+  // 缓存是全局共享的,tenantId 不同时不能用旧缓存(roots 集合不同)
+  if (cached && cached.expiresAt > now && !tenantId) return cached.roots;
 
-  const sessions = await listAllSessions();
+  // 按租户扫 session cwd(per-tenant 隔离后,全局 sessions 已空,必须按 tenantId 扫)
+  const sessions = await listAllSessions({ tenantId });
   const roots = new Set<string>();
   for (const s of sessions) {
     if (s.cwd) roots.add(normalizeSlashes(s.cwd));
@@ -43,6 +45,9 @@ export async function getAllowedFileRoots(): Promise<Set<string>> {
   }
 
   for (const root of getAdditionalAllowedRoots()) roots.add(root);
+
+  // 应用根目录永远可读(/api/models 默认 cwd 就是 process.cwd())
+  roots.add(normalizeSlashes(process.cwd()));
 
   globalThis.__piAllowedRootsCache = { roots, expiresAt: now + ALLOWED_ROOTS_TTL_MS };
   return roots;
