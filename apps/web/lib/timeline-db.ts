@@ -1,4 +1,4 @@
-// HomeSense v3 — 永续时间线存储（SQLite）
+// HomeSense v3 — 永续时间线存储（SQLite,多租户）
 //
 // 单一会话：UI 永远是一条时间线，聊天永不结束。
 // - messages 是唯一真相的 append-only 时间线，绝不物理删除。
@@ -9,15 +9,14 @@
 //   量级下 LIKE 全表扫描足够快；将来量级大了再换分词。
 //
 // 驱动：Node 22.5+ 内置 node:sqlite（零 native 依赖）。
+//
+// 多租户(Phase 1.1):本模块的函数当前仍保持无 tenantId 签名,内部走默认租户
+// `default`,以兼容历史调用方。Phase 1.2 会批量加 tenantId 参数并对接到
+// per-tenant 库。新用户/新租户数据走 createTenant() 独立 db,不受本模块影响。
+// 详见 lib/tenant-store.ts + docs/v3/CLOUD-EDGE-BLUEPRINT.md §5.3。
 
-import { DatabaseSync } from "node:sqlite"
-import fs from "node:fs"
-import path from "node:path"
-import crypto from "node:crypto"
-
-const DEFAULT_DB_PATH = path.resolve(process.cwd(), "data/homesense-timeline.db")
-const DB_PATH =
-  process.env.HOMESENSE_DB_PATH || process.env.DB_PATH || DEFAULT_DB_PATH
+import type { DatabaseSync } from "node:sqlite"
+import { DEFAULT_TENANT_ID, getTenantDb } from "./tenant-store"
 
 const ACTIVE_ENGINE_SESSION_KEY = "active_engine_session"
 const TIMELINE_TITLE_KEY = "timeline_title"
@@ -31,40 +30,9 @@ export interface TimelineMessage {
   engineId: string | null
 }
 
-let db: DatabaseSync | null = null
-
 export function getTimelineDb(): DatabaseSync {
-  if (db) return db
-
-  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true })
-  db = new DatabaseSync(DB_PATH)
-  db.exec("PRAGMA journal_mode = WAL")
-  db.exec("PRAGMA busy_timeout = 5000")
-  applyTimelineSchema(db)
-  return db
-}
-
-function applyTimelineSchema(target: DatabaseSync): void {
-  target.exec(`
-    CREATE TABLE IF NOT EXISTS messages (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      role TEXT NOT NULL,
-      content TEXT NOT NULL,
-      ts TEXT NOT NULL,
-      model TEXT,
-      engine_id TEXT UNIQUE
-    )
-  `)
-  target.exec(`
-    CREATE TABLE IF NOT EXISTS timeline_meta (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    )
-  `)
-}
-
-function hashEngineId(engineId: string): string {
-  return crypto.createHash("sha256").update(engineId).digest("base64url").slice(0, 32)
+  // 旧签名(无 tenantId):固定走默认租户。Phase 1.2 引入 per-tenant 调用。
+  return getTenantDb(DEFAULT_TENANT_ID)
 }
 
 /** 幂等追加一条消息。engineId 相同则跳过（返回既有行 id）。 */
@@ -100,6 +68,13 @@ export function appendTimelineMessage(input: {
     engineId,
   )
   return Number(result.lastInsertRowid)
+}
+
+function hashEngineId(engineId: string): string {
+  // sha256 → base64url slice 32 (与原实现保持一致)
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const crypto = require("node:crypto") as typeof import("node:crypto")
+  return crypto.createHash("sha256").update(engineId).digest("base64url").slice(0, 32)
 }
 
 /** 分页读最近消息（QQ 式上拉加载更早历史）。beforeId 为空时取最新。 */
@@ -255,4 +230,4 @@ export function statsTimeline(): { count: number; lastId: number | null } {
   return { count: Number(row.count), lastId: row.last_id == null ? null : Number(row.last_id) }
 }
 
-export { ACTIVE_ENGINE_SESSION_KEY, TIMELINE_TITLE_KEY, DB_PATH }
+export { ACTIVE_ENGINE_SESSION_KEY, TIMELINE_TITLE_KEY }
