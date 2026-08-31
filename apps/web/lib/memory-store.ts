@@ -33,7 +33,7 @@ export const MEMORY_CHAR_LIMIT = 6000
  */
 export function getMemoriesDir(tenantId?: string): string {
   if (tenantId && typeof tenantId === "string" && tenantId !== "default") {
-    // 跟 tenant-store.ts 里 db_path 同根(data/)
+    // 跟 rpc-manager.ts 里 resolveTenantAgentDir 同源
     return path.join(process.cwd(), "data", tenantId, ".homesense", "agent", "memories")
   }
   return path.join(getAgentDir(), "memories")

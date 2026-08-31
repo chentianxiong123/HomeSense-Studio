@@ -3,6 +3,7 @@ import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
 import { existsSync, realpathSync, writeFileSync } from "fs";
+import { join } from "path";
 import { resolve } from "path";
 import { validateAgentImages } from "./image-attachments";
 import { invalidateModelsCache } from "./models-cache";
@@ -53,6 +54,23 @@ import { buildMemorySnapshot } from "./memory-store";
 // ============================================================================
 // Types
 // ============================================================================
+
+/**
+ * 把 tenantId 解析成 per-tenant 的 pi agent 根目录。
+ * 路径: data/<tenantId>/.homesense/agent
+ * 这与 tenant-store.ts 里 SQLite db 的根 (data/) 对齐,
+ * 也跟 memory-store.ts 的 getMemoriesDir(tenantId) 同源,
+ * 保证 sessions / memories / project-trust / skills / plugins 全部
+ * 跟用户绑定。无 tenantId 兜底用全局 getAgentDir() (向后兼容)。
+ */
+function resolveTenantAgentDir(tenantId?: string): string {
+  if (!tenantId || tenantId === "default") {
+    return getAgentDir();
+  }
+  // 跟 apps/web 是 cwd 假设一致 (data/ 在 apps/web/data/)。
+  // 显式绝对路径避免 cwd 变化踩雷。
+  return join(process.cwd(), "data", tenantId, ".homesense", "agent");
+}
 
 export interface AgentEvent {
   type: string;
@@ -1561,7 +1579,7 @@ export class AgentSessionWrapper {
   }
 
   private syncProjectTrust(): void {
-    const status = getProjectTrustStatus(this.cwd, getAgentDir());
+    const status = getProjectTrustStatus(this.cwd, resolveTenantAgentDir(this.tenantId));
     this.inner.settingsManager.setProjectTrusted(status.trusted);
   }
 }
@@ -1908,7 +1926,11 @@ export async function startRpcSession(
   const starting = (async () => {
     // Some extensions access the SDK's global theme even outside the terminal UI.
     if (!chatOnly) initTheme();
-    const agentDir = getAgentDir();
+    // Phase 1.3: per-tenant agent root.
+    // 原本调 getAgentDir() (→ ~/.homesense/agent,所有用户共享),现在按 tenantId
+    // 推到 data/<tenantId>/.homesense/agent,sessions/ memories/ project-trust/ skills/
+    // plugins/ 等所有派生路径全部跟着隔离。tenantId 来自调用方 (startRpcSession options)。
+    const agentDir = resolveTenantAgentDir(tenantId);
 
     // Determine which tools to pass based on requested toolNames.
     // Since v0.68.0, session creation expects string[] tool names instead of Tool[] instances.
