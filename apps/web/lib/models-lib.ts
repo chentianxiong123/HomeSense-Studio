@@ -10,6 +10,10 @@ import { withModelRuntimeError, type ModelsData } from "@/lib/models-cache";
 import { resolveVisibleModels, selectInitialModelScope } from "@/lib/model-scope";
 import { projectTrustReloadOptions } from "@/lib/project-trust";
 import { resolveTenantAgentDir } from "@/lib/tenant-paths";
+import { getTenant } from "@/lib/tenant-store";
+import { getRpcSession } from "@/lib/rpc-manager";
+
+export class ModelNotFoundError extends Error {}
 
 const modelNameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
@@ -83,4 +87,53 @@ export async function loadModels(cwd: string, tenantId?: string): Promise<Models
     },
     modelError,
   );
+}
+
+/**
+ * 设置租户默认模型(写 per-tenant settings.json),并立即热切换到运行中的 session。
+ * /api/models/default 与 /api/models/default-chain 共用此逻辑(统一入口)。
+ */
+export async function setTenantDefaultModel(
+  tenantId: string,
+  modelName: string,
+): Promise<{ default_model: string; provider: string; hotSwitched: boolean }> {
+  const cwd = process.cwd();
+  const data = await loadModels(cwd, tenantId);
+  const target = data.modelList.find(
+    (m) => (m.name || m.id) === modelName || m.id === modelName,
+  );
+  if (!target) {
+    throw new ModelNotFoundError(`模型不存在: ${modelName}`);
+  }
+
+  const settingsManager = SettingsManager.create(
+    cwd,
+    resolveTenantAgentDir(tenantId),
+  );
+  settingsManager.setDefaultModelAndProvider(target.provider, target.id);
+  await settingsManager.flush();
+
+  // 热切换:把新模型推给该租户正在运行的 session。pi 单进程多 session、
+  // 每个 session 各自带模型,set_model RPC 就是运行时换模型的现成入口。
+  let hotSwitched = false;
+  const tenant = getTenant(tenantId);
+  const sessionId = tenant?.activeSessionId ?? null;
+  if (sessionId) {
+    const existing = getRpcSession(sessionId);
+    if (existing?.isAlive()) {
+      hotSwitched = await existing
+        .send({ type: "set_model", provider: target.provider, modelId: target.id })
+        .then(() => true)
+        .catch((err) => {
+          console.error(`[hot-switch] 热切换 ${target.provider}/${target.id} 失败:`, err);
+          return false;
+        });
+    }
+  }
+
+  return {
+    default_model: target.name || target.id,
+    provider: target.provider,
+    hotSwitched,
+  };
 }
