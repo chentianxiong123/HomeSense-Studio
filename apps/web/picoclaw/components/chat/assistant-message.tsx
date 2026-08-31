@@ -34,6 +34,7 @@ import {
 
 interface AssistantMessageProps {
   content: string
+  thinking?: string
   attachments?: ChatAttachment[]
   kind?: AssistantMessageKind
   modelName?: string
@@ -43,6 +44,7 @@ interface AssistantMessageProps {
 
 export const AssistantMessage = memo(function AssistantMessage({
   content,
+  thinking = "",
   attachments = [],
   kind = "normal",
   modelName,
@@ -51,9 +53,8 @@ export const AssistantMessage = memo(function AssistantMessage({
 }: AssistantMessageProps) {
   const { t } = useTranslation()
   const { copy, isCopied } = useCopyToClipboard()
-  const isThought = kind === "thought"
   const isToolCalls = kind === "tool_calls"
-  const isCollapsedBlock = isThought || isToolCalls
+  const hasThinking = thinking.trim().length > 0
   const hasText = content.trim().length > 0
   const hasToolCalls = toolCalls.length > 0
   const imageAttachments = attachments.filter(
@@ -62,12 +63,10 @@ export const AssistantMessage = memo(function AssistantMessage({
   const fileAttachments = attachments.filter(
     (attachment) => attachment.type !== "image",
   )
-  const [isExpanded, setIsExpanded] = useState(true)
+  const [isThinkingExpanded, setIsThinkingExpanded] = useState(true)
+  const [isToolCallsExpanded, setIsToolCallsExpanded] = useState(true)
   const formattedTimestamp =
     timestamp !== "" ? formatMessageTime(timestamp) : ""
-  const collapsedLabel = isThought
-    ? t("chat.reasoningLabel")
-    : t("chat.toolCallsLabel")
   const copyMessageLabel = isCopied
     ? t("chat.copiedLabel")
     : t("chat.copyMessage")
@@ -75,7 +74,7 @@ export const AssistantMessage = memo(function AssistantMessage({
 
   return (
     <div className="group flex w-full flex-col gap-1.5">
-      {!isCollapsedBlock && (
+      {kind !== "thought" && kind !== "tool_calls" && (
           <div className="text-muted-foreground/60 flex items-center justify-between gap-2 px-1 text-xs opacity-70">
           <div className="flex items-center gap-2">
             <span>HomeSense</span>
@@ -95,45 +94,81 @@ export const AssistantMessage = memo(function AssistantMessage({
         </div>
       )}
 
-      {(hasText || isCollapsedBlock || hasToolCalls) && (
+      {hasThinking && (
         <div
-          className={cn(
-            "relative overflow-hidden rounded-xl border",
-            isCollapsedBlock
-              ? "border-border/30 bg-muted/20 text-muted-foreground dark:border-border/20 dark:bg-muted/10"
-              : "bg-card text-card-foreground border-border/60",
-          )}
+          className="border-border/30 bg-muted/20 text-muted-foreground dark:border-border/20 dark:bg-muted/10 relative overflow-hidden rounded-xl border"
         >
-          {isCollapsedBlock && (
-            <div
-              className="text-muted-foreground/60 hover:text-muted-foreground/80 flex cursor-pointer items-center justify-between px-3 py-2 text-[12px] font-medium transition-colors select-none"
-              onClick={() => setIsExpanded(!isExpanded)}
-            >
-              <div className="flex items-center gap-1.5">
-                {isThought ? (
-                  <IconBrain className="size-3.5" />
-                ) : (
-                  <IconTool className="size-3.5" />
+          <div
+            className="text-muted-foreground/60 hover:text-muted-foreground/80 flex cursor-pointer items-center justify-between px-3 py-2 text-[12px] font-medium transition-colors select-none"
+            onClick={() => setIsThinkingExpanded(!isThinkingExpanded)}
+          >
+            <div className="flex items-center gap-1.5">
+              <IconBrain className="size-3.5" />
+              <span>{t("chat.reasoningLabel")}</span>
+              {trimmedModelName && (
+                <span className="text-muted-foreground/45">{trimmedModelName}</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {formattedTimestamp && (
+                <span className="opacity-50">{formattedTimestamp}</span>
+              )}
+              <IconChevronDown
+                className={cn(
+                  "size-3.5 opacity-0 transition-all duration-200 group-hover:opacity-100",
+                  isThinkingExpanded ? "rotate-180" : "",
                 )}
-                <span>{collapsedLabel}</span>
-                {trimmedModelName && (
-                  <span className="text-muted-foreground/45">{trimmedModelName}</span>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                {formattedTimestamp && (
-                  <span className="opacity-50">{formattedTimestamp}</span>
-                )}
-                <IconChevronDown
-                  className={cn(
-                    "size-3.5 opacity-0 transition-all duration-200 group-hover:opacity-100",
-                    isExpanded ? "rotate-180" : "",
-                  )}
-                />
-              </div>
+              />
+            </div>
+          </div>
+          {isThinkingExpanded && (
+            <div className="prose dark:prose-invert prose-p:my-1.5 prose-p:whitespace-pre-wrap max-w-none px-3 pt-0 pb-3 text-[13px] leading-relaxed opacity-70 [overflow-wrap:anywhere] break-words">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[
+                  rehypeRaw,
+                  rehypeSanitize,
+                  rehypeHighlight,
+                ]}
+                components={{
+                  pre: MarkdownCodeBlock,
+                }}
+              >
+                {thinking}
+              </ReactMarkdown>
             </div>
           )}
-          {(!isCollapsedBlock || isExpanded) && isToolCalls && hasToolCalls && (
+        </div>
+      )}
+
+      {isToolCalls && hasToolCalls && (
+        <div
+          className="border-border/30 bg-muted/20 text-muted-foreground dark:border-border/20 dark:bg-muted/10 relative overflow-hidden rounded-xl border"
+        >
+          <div
+            className="text-muted-foreground/60 hover:text-muted-foreground/80 flex cursor-pointer items-center justify-between px-3 py-2 text-[12px] font-medium transition-colors select-none"
+            onClick={() => setIsToolCallsExpanded(!isToolCallsExpanded)}
+          >
+            <div className="flex items-center gap-1.5">
+              <IconTool className="size-3.5" />
+              <span>{t("chat.toolCallsLabel")}</span>
+              {trimmedModelName && (
+                <span className="text-muted-foreground/45">{trimmedModelName}</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {formattedTimestamp && (
+                <span className="opacity-50">{formattedTimestamp}</span>
+              )}
+              <IconChevronDown
+                className={cn(
+                  "size-3.5 opacity-0 transition-all duration-200 group-hover:opacity-100",
+                  isToolCallsExpanded ? "rotate-180" : "",
+                )}
+              />
+            </div>
+          </div>
+          {isToolCallsExpanded && (
             <div className="space-y-3 px-3 pt-0 pb-3">
               {toolCalls.map((toolCall, index) => {
                 const explanation =
@@ -210,28 +245,38 @@ export const AssistantMessage = memo(function AssistantMessage({
               })}
             </div>
           )}
-          {(!isCollapsedBlock || isExpanded) && !isToolCalls && hasText && (
-            <div
-              className={cn(
-                "prose dark:prose-invert prose-pre:my-2 prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:border prose-pre:bg-zinc-100 prose-pre:p-0 prose-pre:text-zinc-900 dark:prose-pre:bg-zinc-950 dark:prose-pre:text-zinc-100 max-w-none [overflow-wrap:anywhere] break-words",
-                isThought
-                  ? "prose-p:my-1.5 prose-p:whitespace-pre-wrap px-3 pt-0 pb-3 text-[13px] leading-relaxed opacity-70"
-                  : "prose-p:my-2 prose-p:whitespace-pre-wrap p-4 text-[15px] leading-relaxed",
-              )}
-            >
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeRaw, rehypeSanitize, rehypeHighlight]}
-                components={{
-                  pre: MarkdownCodeBlock,
-                }}
-              >
-                {content}
-              </ReactMarkdown>
-            </div>
-          )}
+        </div>
+      )}
 
-          {!isCollapsedBlock && hasText && (
+      {hasText && (
+        <div
+          className={cn(
+            "relative overflow-hidden rounded-xl border",
+            isToolCalls
+              ? "border-border/30 bg-muted/20 text-muted-foreground dark:border-border/20 dark:bg-muted/10"
+              : "bg-card text-card-foreground border-border/60",
+          )}
+        >
+          <div
+            className={cn(
+              "prose dark:prose-invert prose-pre:my-2 prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:border prose-pre:bg-zinc-100 prose-pre:p-0 prose-pre:text-zinc-900 dark:prose-pre:bg-zinc-950 dark:prose-pre:text-zinc-100 max-w-none [overflow-wrap:anywhere] break-words",
+              isToolCalls
+                ? "prose-p:my-1.5 prose-p:whitespace-pre-wrap px-3 pt-0 pb-3 text-[13px] leading-relaxed opacity-70"
+                : "prose-p:my-2 prose-p:whitespace-pre-wrap p-4 text-[15px] leading-relaxed",
+            )}
+          >
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeRaw, rehypeSanitize, rehypeHighlight]}
+              components={{
+                pre: MarkdownCodeBlock,
+              }}
+            >
+              {content}
+            </ReactMarkdown>
+          </div>
+
+          {!isToolCalls && (
             <Button
               variant="ghost"
               size="icon"

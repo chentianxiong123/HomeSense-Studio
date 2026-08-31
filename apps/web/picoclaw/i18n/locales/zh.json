@@ -200,6 +200,7 @@
   },
   "credentials": {
     "description": "管理已支持服务商的 OAuth 与 Token 凭据。",
+    "placeholder": "无需凭据。模型由管理员统一配置。",
     "loading": "正在加载凭据...",
     "providers": {
       "openai": {

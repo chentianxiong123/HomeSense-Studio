@@ -200,6 +200,7 @@
   },
   "credentials": {
     "description": "Manage OAuth and token-based credentials for supported providers.",
+    "placeholder": "No credentials needed. Models are configured by the administrator.",
     "loading": "Loading credentials...",
     "providers": {
       "openai": {
