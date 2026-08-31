@@ -31,6 +31,7 @@ export const MessageList = memo(function MessageList({
             {msg.role === "assistant" ? (
               <AssistantMessage
                 content={msg.content}
+                thinking={msg.thinking}
                 attachments={msg.attachments}
                 kind={msg.kind}
                 modelName={msg.modelName}

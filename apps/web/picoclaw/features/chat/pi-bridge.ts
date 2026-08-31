@@ -78,14 +78,24 @@ function textOfMessage(msg: PiMessage | undefined): string {
         if ((block as { type?: string }).type === "text") {
           return (block as { text?: string }).text ?? ""
         }
-        if ((block as { type?: string }).type === "thinking") {
-          return (block as { thinking?: string }).thinking ?? ""
-        }
         return ""
       })
       .join("")
   }
   return ""
+}
+
+function thinkingOfMessage(msg: PiMessage | undefined): string {
+  if (!msg || !Array.isArray(msg.content)) return ""
+  return msg.content
+    .map((block) => {
+      if (!block || typeof block !== "object") return ""
+      if ((block as { type?: string }).type === "thinking") {
+        return (block as { thinking?: string }).thinking ?? ""
+      }
+      return ""
+    })
+    .join("")
 }
 
 function toolCallsOfMessage(msg: PiMessage | undefined): ChatToolCall[] | undefined {
@@ -112,8 +122,13 @@ function toolCallsOfMessage(msg: PiMessage | undefined): ChatToolCall[] | undefi
 
 function kindOfMessage(msg: PiMessage | undefined): "normal" | "thought" | "tool_calls" | undefined {
   if (!msg || !Array.isArray(msg.content)) return undefined
-  const blocks = msg.content as { type?: string }[]
+  const blocks = msg.content as { type?: string; text?: string; thinking?: string }[]
   if (blocks.some((b) => b.type === "toolCall")) return "tool_calls"
+  const hasText = blocks.some(
+    (b) => b.type === "text" && typeof b.text === "string" && b.text.trim().length > 0,
+  )
+  // 有正文时按 normal 渲染(思考单独折叠展示),只有思考块(工具轮中间步骤)才标 thought。
+  if (hasText) return "normal"
   if (blocks.some((b) => b.type === "thinking")) return "thought"
   return "normal"
 }
@@ -124,12 +139,14 @@ export function toChatMessage(
   fallbackId?: string,
 ): ChatMessage {
   const content = textOfMessage(msg)
+  const thinking = thinkingOfMessage(msg)
   const toolCalls = toolCallsOfMessage(msg)
   const kind = kindOfMessage(msg)
   return {
     id: fallbackId ?? newId(),
     role: msg.role === "user" ? "user" : "assistant",
     content,
+    thinking: thinking || undefined,
     kind: msg.role === "assistant" ? kind ?? "normal" : undefined,
     modelName: msg.model,
     toolCalls: kind === "tool_calls" ? toolCalls : undefined,
@@ -141,7 +158,7 @@ export function toChatMessage(
 // SSE 事件 → PicoClaw 消息合并
 // ---------------------------------------------------------------------------
 
-const streamingMessageState = new Map<string, string>()
+const streamingMessageState = new Map<string, { content: string; thinking: string }>()
 
 function handleSseEvent(event: PiSseEvent) {
   if (event.sessionId && event.sessionId !== activeSessionId) return
@@ -161,7 +178,10 @@ function handleSseEvent(event: PiSseEvent) {
       // user 消息由 sendChatMessage 乐观插入,这里跳过避免重复气泡。
       if (!msg || msg.role === "user") break
       const key = newId("mid")
-      streamingMessageState.set(key, textOfMessage(msg))
+      streamingMessageState.set(key, {
+        content: textOfMessage(msg),
+        thinking: thinkingOfMessage(msg),
+      })
       updateChatStore((prev) => ({
         messages: [...prev.messages, toChatMessage(msg, key)],
         isTyping: true,
@@ -180,31 +200,45 @@ function handleSseEvent(event: PiSseEvent) {
       if (!lastAssistant) break
       const key = lastAssistant.id
 
-      let current = streamingMessageState.get(key) ?? lastAssistant.content
+      const current = streamingMessageState.get(key) ?? {
+        content: lastAssistant.content,
+        thinking: lastAssistant.thinking ?? "",
+      }
       const delta = ev as { type?: string; delta?: string; content?: string; text?: string }
-      if (
-        (delta.type === "text_delta" ||
-          delta.type === "text_start" ||
-          delta.type === "text_end" ||
-          delta.type === "thinking_delta" ||
-          delta.type === "thinking_start") &&
-        typeof delta.delta === "string"
-      ) {
-        if (delta.type === "text_start" || delta.type === "thinking_start") {
-          current = delta.delta
-        } else {
-          current += delta.delta
-        }
-      } else if (delta.type === "text_end") {
-        current = delta.content ?? current
-      } else if (delta.type === "thinking_end") {
-        current = delta.content ?? current
+
+      switch (delta.type) {
+        case "text_start":
+          current.content = delta.delta ?? ""
+          break
+        case "text_delta":
+          current.content += delta.delta ?? ""
+          break
+        case "text_end":
+          current.content = delta.content ?? current.content
+          break
+        case "thinking_start":
+          current.thinking = delta.delta ?? ""
+          break
+        case "thinking_delta":
+          current.thinking += delta.delta ?? ""
+          break
+        case "thinking_end":
+          current.thinking = delta.content ?? current.thinking
+          break
+        default:
+          break
       }
       streamingMessageState.set(key, current)
 
       updateChatStore((prev) => ({
         messages: prev.messages.map((m) =>
-          m.id === key ? { ...m, content: current } : m,
+          m.id === key
+            ? {
+              ...m,
+              content: current.content,
+              thinking: current.thinking || undefined,
+            }
+            : m,
         ),
       }))
       break

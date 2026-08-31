@@ -42,6 +42,8 @@ export interface ChatMessage {
   id: string
   role: "user" | "assistant"
   content: string
+  /** 模型思考内容(与正文分开存储,渲染时独立折叠块展示)。 */
+  thinking?: string
   timestamp: number | string
   kind?: AssistantMessageKind
   modelName?: string
