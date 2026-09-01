@@ -12,8 +12,8 @@ import { useTranslation } from "react-i18next"
 
 import { ChatComposer, type ChatInputDisabledReason } from "@pico/components/chat/chat-composer"
 import { ChatEmptyState } from "@pico/components/chat/chat-empty-state"
+import { GoModelSelector } from "@pico/components/chat/go-model-selector"
 import { MessageList } from "@pico/components/chat/message-list"
-import { ModelSelector } from "@pico/components/chat/model-selector"
 import { TypingIndicator } from "@pico/components/chat/typing-indicator"
 import { PageHeader } from "@pico/components/page-header"
 import {
@@ -334,14 +334,7 @@ export function ChatPage() {
         }`}
         titleExtra={
           hasAvailableModels && (
-            <ModelSelector
-              defaultModelName={defaultModelName}
-              apiKeyModels={apiKeyModels}
-              oauthModels={oauthModels}
-              localModels={localModels}
-              disabled={settingDefault}
-              onValueChange={handleSetDefault}
-            />
+            <GoModelSelector disabled={settingDefault} />
           )
         }
       >

@@ -1371,6 +1371,12 @@ func (c *PicoChannel) handleMessageSend(pc *picoConn, msg PicoMessage) {
 		"session_id": sessionID,
 		"conn_id":    pc.id,
 	}
+	// 用户侧热切换：前端选的模型 id 随消息带来，agent 本条约用它覆盖默认模型。
+	if modelName, ok := msg.Payload["model"].(string); ok {
+		if trimmed := strings.TrimSpace(modelName); trimmed != "" {
+			metadata["model_name"] = trimmed
+		}
+	}
 
 	logger.DebugCF("pico", "Received message", map[string]any{
 		"session_id": sessionID,
