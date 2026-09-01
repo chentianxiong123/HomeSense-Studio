@@ -721,7 +721,18 @@ func (s *picoStreamer) Finalize(ctx context.Context, content string) error {
 func (s *picoStreamer) FinalizeWithContext(ctx context.Context, content string, contextUsage *bus.ContextUsage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.updateLocked(ctx, content, true, contextUsage)
+	err := s.updateLocked(ctx, content, true, contextUsage)
+	// ASCII metering: 计费是控制面的事，这里只记录真实 token 用量到本租户库。
+	if s.turnInputTokens > 0 || s.turnOutputTokens > 0 {
+		sessionID := strings.TrimPrefix(s.chatID, "pico:")
+		if s.channel != nil && s.channel.history != nil {
+			_ = s.channel.history.RecordUsage(
+				context.Background(), sessionID, s.modelName,
+				s.turnInputTokens, s.turnOutputTokens,
+			)
+		}
+	}
+	return err
 }
 
 func (s *picoStreamer) UpdateReasoning(ctx context.Context, content string) error {
