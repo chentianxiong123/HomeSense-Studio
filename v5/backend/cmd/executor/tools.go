@@ -7,6 +7,10 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sipeed/picoclaw/pkg/capabilities/adb"
+	"github.com/sipeed/picoclaw/pkg/capabilities/alist"
+	"github.com/sipeed/picoclaw/pkg/capabilities/media"
+	"github.com/sipeed/picoclaw/pkg/capabilities/mi"
 )
 
 var server = mcp.NewServer(&mcp.Implementation{
@@ -77,9 +81,21 @@ func registerTools() {
 		Name:        "executor_info",
 		Description: "返回执行端自身信息（宿主名/系统/能力清单/运行时长）。只读、无任何命令执行能力。",
 	}, getInfo)
+
+	miCap := mi.NewCapability()
+	mcp.AddTool(server, miCap.MCPTool(), miCap.Handler)
+
+	alistCap := alist.NewCapability()
+	mcp.AddTool(server, alistCap.MCPTool(), alistCap.Handler)
+
+	adbCap := adb.NewCapability()
+	mcp.AddTool(server, adbCap.MCPTool(), adbCap.Handler)
+
+	mediaCap := media.NewCapability()
+	mcp.AddTool(server, mediaCap.MCPTool(), mediaCap.Handler)
 }
 
 func registeredToolNames() []string {
-	names := []string{"executor_info"}
+	names := []string{"executor_info", "mi_device", "netdisk_sync", "adb_cmd", "media_ctl"}
 	return names
 }
