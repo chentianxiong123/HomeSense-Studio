@@ -110,8 +110,12 @@ type PicoChannel struct {
 	broadcastFn func(chatID string, msg PicoMessage) error
 	// history persists per-session chat messages to SQLite when configured.
 	history *PicoHistoryStore
+	// idleTimer fires when no connections exist for IdleShutdownMinutes,
+	// triggering a graceful gateway shutdown (on-demand lifecycle).
+	idleTimer *time.Timer
+	// shutdownFn is invoked (from the timer goroutine) to request gateway exit.
+	shutdownFn func()
 }
-
 // NewPicoChannel creates a new Pico Protocol channel.
 func NewPicoChannel(
 	bc *config.Channel,
@@ -162,6 +166,44 @@ func NewPicoChannel(
 	return ch, nil
 }
 
+// SetIdleShutdownFunc registers a callback invoked when the channel has been
+// idle (zero connections) for IdleShutdownMinutes. The gateway wires this to a
+// graceful shutdown so on-demand tenants release resources when unused.
+func (c *PicoChannel) SetIdleShutdownFunc(fn func()) {
+	c.connsMu.Lock()
+	defer c.connsMu.Unlock()
+	c.shutdownFn = fn
+}
+
+// scheduleIdleShutdown starts the idle countdown if enabled and there are no
+// active connections. Must be called with connsMu held.
+func (c *PicoChannel) scheduleIdleShutdown() {
+	if c.idleTimer != nil {
+		return
+	}
+	minutes := c.config.IdleShutdownMinutes
+	if minutes <= 0 || c.shutdownFn == nil {
+		return
+	}
+	if len(c.connections) > 0 {
+		return
+	}
+	logger.Infof("pico: no active connections, scheduling idle shutdown in %d minute(s)", minutes)
+	c.idleTimer = time.AfterFunc(time.Duration(minutes)*time.Minute, func() {
+		logger.Info("pico: idle timeout reached, shutting down gateway")
+		c.shutdownFn()
+	})
+}
+
+// cancelIdleShutdown stops the idle countdown (called when a connection appears).
+// Must be called with connsMu held.
+func (c *PicoChannel) cancelIdleShutdown() {
+	if c.idleTimer != nil {
+		c.idleTimer.Stop()
+		c.idleTimer = nil
+	}
+}
+
 // createAndAddConnection checks MaxConnections and registers a connection atomically.
 func (c *PicoChannel) createAndAddConnection(conn *websocket.Conn, sessionID string, maxConns int) (*picoConn, error) {
 	c.connsMu.Lock()
@@ -192,6 +234,7 @@ func (c *PicoChannel) createAndAddConnection(conn *websocket.Conn, sessionID str
 	}
 	bySession[pc.id] = pc
 
+	c.cancelIdleShutdown()
 	return pc, nil
 }
 
@@ -213,6 +256,9 @@ func (c *PicoChannel) removeConnection(connID string) *picoConn {
 		}
 	}
 
+	if len(c.connections) == 0 {
+		c.scheduleIdleShutdown()
+	}
 	return pc
 }
 
@@ -260,6 +306,11 @@ func (c *PicoChannel) Start(ctx context.Context) error {
 	logger.InfoC("pico", "Starting Pico Protocol channel")
 	c.ctx, c.cancel = context.WithCancel(ctx)
 	c.SetRunning(true)
+	// 启动时就可能没有任何连接(按需冷启动的常态):先调度一次 idle 倒计时,
+	// 后续连接增删时在 createAndAddConnection/removeConnection 里继续维护。
+	c.connsMu.Lock()
+	c.scheduleIdleShutdown()
+	c.connsMu.Unlock()
 	logger.InfoC("pico", "Pico Protocol channel started")
 	return nil
 }

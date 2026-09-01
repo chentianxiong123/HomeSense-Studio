@@ -681,6 +681,12 @@ type PicoSettings struct {
 	// When set, the pico channel owns history storage and serves it at
 	// GET /pico/history?session_id=...  (the frontend reads history from Go).
 	DBPath string `json:"db_path,omitempty" yaml:"-"`
+	// IdleShutdownMinutes is the number of minutes the gateway stays up with
+	// zero active pico connections before shutting itself down gracefully.
+	// <= 0 disables the idle shutdown (gateway runs until stopped manually).
+	// This powers on-demand startup: the gateway cold-starts when a user
+	// connects and exits when nobody is using it.
+	IdleShutdownMinutes int `json:"idle_shutdown_minutes,omitempty" yaml:"-"`
 }
 
 // SetToken sets the Pico token and marks it as dirty for security saving

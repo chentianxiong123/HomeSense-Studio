@@ -44,6 +44,8 @@ export interface TenantRecord {
   /** 该租户云大脑 gateway 的端口与 pico token（每租户独立进程）。 */
   gatewayPort: number | null
   gatewayToken: string | null
+  /** tenant-brain.sh 的租户目录名（DATA_DIR/<gatewayDir>/）。 */
+  gatewayDir: string | null
 }
 
 export interface TenantUserRecord {
@@ -87,7 +89,8 @@ function applyIndexSchema(target: DatabaseSync): void {
       owner_user_id TEXT,
       active_session_id TEXT,
       gateway_port INTEGER,
-      gateway_token TEXT
+      gateway_token TEXT,
+      gateway_dir TEXT
     )
   `)
   // 兼容老 schema(没有 active_session_id 列的旧库)
@@ -104,6 +107,11 @@ function applyIndexSchema(target: DatabaseSync): void {
   }
   try {
     target.exec(`ALTER TABLE tenants ADD COLUMN gateway_token TEXT`)
+  } catch {
+    /* 列已存在 */
+  }
+  try {
+    target.exec(`ALTER TABLE tenants ADD COLUMN gateway_dir TEXT`)
   } catch {
     /* 列已存在 */
   }
@@ -185,7 +193,7 @@ export function listTenants(): TenantRecord[] {
     .prepare(
       `SELECT id, name, db_path AS dbPath, created_at AS createdAt, owner_user_id AS ownerUserId,
               active_session_id AS activeSessionId,
-              gateway_port AS gatewayPort, gateway_token AS gatewayToken
+              gateway_port AS gatewayPort, gateway_token AS gatewayToken, gateway_dir AS gatewayDir
        FROM tenants ORDER BY created_at ASC`,
     )
     .all() as unknown as TenantRecord[]
@@ -196,7 +204,7 @@ export function getTenant(tenantId: string): TenantRecord | null {
     .prepare(
       `SELECT id, name, db_path AS dbPath, created_at AS createdAt, owner_user_id AS ownerUserId,
               active_session_id AS activeSessionId,
-              gateway_port AS gatewayPort, gateway_token AS gatewayToken
+              gateway_port AS gatewayPort, gateway_token AS gatewayToken, gateway_dir AS gatewayDir
        FROM tenants WHERE id = ?`,
     )
     .get(tenantId) as TenantRecord | undefined
@@ -301,6 +309,7 @@ export function createTenant(input: CreateTenantInput): {
       activeSessionId,
       gatewayPort: null,
       gatewayToken: null,
+      gatewayDir: null,
     },
     user: {
       tenantId,
@@ -348,8 +357,22 @@ export function ensureDefaultTenant(): TenantRecord | null {
   return getTenant(DEFAULT_TENANT_ID)
 }
 
-export function getUserView(tenantId: string, userId: string): TenantUserView | null {
-  const row = getTenantDb(tenantId)
+export interface GatewayMapping {
+  gatewayPort: number
+  gatewayToken: string
+  gatewayDir: string
+}
+
+/** 记录某租户的云大脑 gateway 映射（端口/token/目录）。幂等，只写索引库。 */
+export function setTenantGateway(tenantId: string, mapping: GatewayMapping): void {
+  getIndexDb()
+    .prepare(
+      `UPDATE tenants SET gateway_port = ?, gateway_token = ?, gateway_dir = ? WHERE id = ?`,
+    )
+    .run(mapping.gatewayPort, mapping.gatewayToken, mapping.gatewayDir, tenantId)
+}
+
+export function getUserView(tenantId: string, userId: string): TenantUserView | null {  const row = getTenantDb(tenantId)
     .prepare(
       `SELECT id AS userId, username, display_name AS displayName, role
        FROM users WHERE id = ?`,

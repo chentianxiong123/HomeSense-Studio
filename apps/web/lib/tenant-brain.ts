@@ -1,0 +1,130 @@
+// HomeSense v5 — 租户云大脑按需冷启动。
+//
+// 每个租户一个独立 gateway 进程（tenant-brain.sh 管理，独立 workspace / db /
+// token / port / PICOCLAW_HOME）。这里提供"按需拉起"逻辑：
+//   - ensureTenantBrain(): 若租户还没分配 gateway → 挑端口/生成 token/建目录；
+//     若进程没在跑 → 启动并等 /ready；返回 { port, token }。
+// Go 网关侧配置了 idle_shutdown_minutes：无活跃连接一段时间后自动退出，
+// 下次用户再来时由这里重新冷启动。这样"用户用的时候才启动"。
+
+import { execFile } from "node:child_process"
+import net from "node:net"
+import crypto from "node:crypto"
+import { getTenant, setTenantGateway } from "@/lib/tenant-store"
+
+const BRAIN_SCRIPT =
+  process.env.HS_BRAIN_SCRIPT ??
+  "/home/a1/HomeSense-Studio-v3/v5/scripts/tenant-brain.sh"
+const DATA_DIR = process.env.HS_BRAIN_DATA ?? "/tmp/opencode/hs-brain"
+const PORT_RANGE_START = 18800
+const PORT_RANGE_END = 18950
+const READY_TIMEOUT_MS = 30_000
+const READY_POLL_MS = 500
+
+export interface EnsureBrainResult {
+  gatewayPort: number
+  gatewayToken: string
+  gatewayDir: string
+  coldStarted: boolean
+}
+
+function runScript(args: string[], timeoutMs = 60_000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      BRAIN_SCRIPT,
+      args,
+      { timeout: timeoutMs, env: { ...process.env, HS_BRAIN_DATA: DATA_DIR } },
+      (err, stdout, stderr) => {
+        if (err) {
+          reject(new Error(`${BRAIN_SCRIPT} ${args.join(" ")}: ${stderr || err.message}`))
+          return
+        }
+        resolve(stdout.trim())
+      },
+    )
+  })
+}
+
+async function isPortFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const srv = net.createServer()
+    srv.once("error", () => resolve(false))
+    srv.listen(port, "127.0.0.1", () => {
+      srv.close(() => resolve(true))
+    })
+  })
+}
+
+async function pickPort(): Promise<number> {
+  for (let p = PORT_RANGE_START; p <= PORT_RANGE_END; p++) {
+    if (await isPortFree(p)) return p
+  }
+  throw new Error("no free gateway port in range")
+}
+
+async function isReady(port: number): Promise<boolean> {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/ready`, {
+      signal: AbortSignal.timeout(2000),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+async function waitReady(port: number): Promise<boolean> {
+  const deadline = Date.now() + READY_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    if (await isReady(port)) return true
+    await new Promise((r) => setTimeout(r, READY_POLL_MS))
+  }
+  return false
+}
+
+/** gateway 目录名：新租户一律 ten_<tenantId>；老数据兼容（已有端口则沿用）。 */
+function gatewayDirFor(tenantId: string): string {
+  if (tenantId.startsWith("ten_")) return tenantId
+  return `ten_${tenantId}`
+}
+
+/**
+ * 保证某租户的云大脑 gateway 可用：
+ *  1. 无映射 → 分配端口 + 生成 token + tenant-brain.sh create
+ *  2. 进程未运行 → tenant-brain.sh start + 等 /ready
+ * 返回 { port, token, dir, coldStarted }。
+ */
+export async function ensureTenantBrain(tenantId: string): Promise<EnsureBrainResult> {
+  let tenant = getTenant(tenantId)
+  if (!tenant) throw new Error(`tenant not found: ${tenantId}`)
+
+  const dir = tenant.gatewayDir ?? gatewayDirFor(tenantId)
+  const port = tenant.gatewayPort
+  const token = tenant.gatewayToken
+  const created = tenant.gatewayPort == null
+
+  if (created) {
+    const newPort = await pickPort()
+    const newToken = crypto.randomBytes(16).toString("hex")
+    await runScript(["create", dir, String(newPort), newToken])
+    setTenantGateway(tenantId, {
+      gatewayPort: newPort,
+      gatewayToken: newToken,
+      gatewayDir: dir,
+    })
+    tenant = getTenant(tenantId)!
+    await runScript(["start", dir])
+    const ok = await waitReady(newPort)
+    if (!ok) throw new Error(`tenant brain ${dir} did not become ready on :${newPort}`)
+    return { gatewayPort: newPort, gatewayToken: newToken, gatewayDir: dir, coldStarted: true }
+  }
+
+  if (await isReady(port!)) {
+    return { gatewayPort: port!, gatewayToken: token!, gatewayDir: dir, coldStarted: false }
+  }
+
+  await runScript(["start", dir])
+  const ok = await waitReady(port!)
+  if (!ok) throw new Error(`tenant brain ${dir} did not become ready on :${port}`)
+  return { gatewayPort: port!, gatewayToken: token!, gatewayDir: dir, coldStarted: true }
+}

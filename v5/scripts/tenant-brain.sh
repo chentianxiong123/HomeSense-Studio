@@ -8,9 +8,10 @@
 #   - port        : 各自独立
 #
 # 用法:
-#   tenant-brain.sh create <tenantId> <port> <token>
+#   tenant-brain.sh create <tenantId> <port> <token> [idleShutdownMinutes]
 #   tenant-brain.sh start  <tenantId>
 #   tenant-brain.sh stop   <tenantId>
+#   tenant-brain.sh status <tenantId>
 #   tenant-brain.sh list
 
 set -euo pipefail
@@ -18,8 +19,9 @@ set -euo pipefail
 DATA_DIR="${HS_BRAIN_DATA:-/tmp/opencode/hs-brain}"
 BIN="${HS_BRAIN_BIN:-$DATA_DIR/picoclaw}"
 GATEWAY_PORT="${HS_BRAIN_PROBE_PORT:-18790}"
+IDLE_MINUTES="${HS_BRAIN_IDLE_MINUTES:-5}"
 
-usage() { echo "usage: $0 {create|start|stop|list} ..."; exit 1; }
+usage() { echo "usage: $0 {create|start|stop|status|list} ..."; exit 1; }
 
 tenant_dir() { echo "$DATA_DIR/$1"; }
 tenant_config() { echo "$DATA_DIR/$1/config.json"; }
@@ -34,7 +36,7 @@ need_bin() {
 }
 
 cmd_create() {
-  local id="$1" port="$2" token="$3"
+  local id="$1" port="$2" token="$3" idle="${4:-$IDLE_MINUTES}"
   [ -z "$id" ] || [ -z "$port" ] || [ -z "$token" ] && { echo "create requires tenantId port token"; exit 1; }
   local dir; dir="$(tenant_dir "$id")"
   mkdir -p "$dir/workspace"
@@ -84,7 +86,8 @@ cmd_create() {
         "ping_interval": 30,
         "read_timeout": 60,
         "max_connections": 100,
-        "db_path": "$dir/pico-history.db"
+        "db_path": "$dir/pico-history.db",
+        "idle_shutdown_minutes": $idle
       }
     }
   },
@@ -95,7 +98,7 @@ cmd_create() {
   }
 }
 EOF
-  echo "created tenant brain: $id (port=$port token=$token dir=$dir)"
+  echo "created tenant brain: $id (port=$port token=$token idle=$idle dir=$dir)"
 }
 
 cmd_start() {
@@ -144,6 +147,22 @@ cmd_stop() {
   echo "tenant $id not running"
 }
 
+cmd_status() {
+  local id="$1"
+  local pidfile; pidfile="$(tenant_pid "$id")"
+  local port; port="$(grep -o '"port": *[0-9]*' "$(tenant_config "$id")" 2>/dev/null | head -1 | grep -o '[0-9]*' || true)"
+  if [ -f "$pidfile" ]; then
+    local pid
+    pid="$(cat "$pidfile" 2>/dev/null || true)"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      echo "running pid=$pid port=$port"
+      return 0
+    fi
+    rm -f "$pidfile"
+  fi
+  echo "stopped port=$port"
+}
+
 cmd_list() {
   for d in "$DATA_DIR"/*/; do
     [ -d "$d" ] || continue
@@ -160,9 +179,10 @@ cmd_list() {
 
 cmd="${1:-}"
 case "$cmd" in
-  create) cmd_create "${2:-}" "${3:-}" "${4:-}" ;;
+  create) cmd_create "${2:-}" "${3:-}" "${4:-}" "${5:-}" ;;
   start) cmd_start "${2:-}" ;;
   stop) cmd_stop "${2:-}" ;;
+  status) cmd_status "${2:-}" ;;
   list) cmd_list ;;
   *) usage ;;
 esac
