@@ -42,7 +42,47 @@ CREATE TABLE IF NOT EXISTS pico_messages (
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_pico_messages_session ON pico_messages(session_id, id);
+CREATE TABLE IF NOT EXISTS pico_usage (
+	id              INTEGER PRIMARY KEY AUTOINCREMENT,
+	session_id      TEXT NOT NULL,
+	model           TEXT NOT NULL DEFAULT '',
+	input_tokens    INTEGER NOT NULL DEFAULT 0,
+	output_tokens   INTEGER NOT NULL DEFAULT 0,
+	total_tokens    INTEGER NOT NULL DEFAULT 0,
+	created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_pico_usage_created ON pico_usage(created_at);
+CREATE INDEX IF NOT EXISTS idx_pico_usage_model ON pico_usage(model);
 `
+
+// PicoUsageRecord is one LLM usage row persisted per turn.
+type PicoUsageRecord struct {
+	ID           int64  `json:"id"`
+	SessionID    string `json:"session_id"`
+	Model        string `json:"model"`
+	InputTokens  int    `json:"input_tokens"`
+	OutputTokens int    `json:"output_tokens"`
+	TotalTokens  int    `json:"total_tokens"`
+	CreatedAt    string `json:"created_at"`
+}
+
+// PicoUsageSummary aggregates usage for a period, grouped by model.
+type PicoUsageSummary struct {
+	Model        string `json:"model"`
+	Requests     int    `json:"requests"`
+	InputTokens  int    `json:"input_tokens"`
+	OutputTokens int    `json:"output_tokens"`
+	TotalTokens  int    `json:"total_tokens"`
+}
+
+// PicoUsageTotals are the grand totals for a period.
+type PicoUsageTotals struct {
+	Requests     int               `json:"requests"`
+	InputTokens  int               `json:"input_tokens"`
+	OutputTokens int               `json:"output_tokens"`
+	TotalTokens  int               `json:"total_tokens"`
+	ByModel      []PicoUsageSummary `json:"by_model"`
+}
 
 // NewPicoHistoryStore opens (or creates) a SQLite database at path and
 // ensures the pico message schema exists.
@@ -92,6 +132,79 @@ func (s *PicoHistoryStore) Append(
 		return 0, err
 	}
 	return res.LastInsertId()
+}
+
+// RecordUsage persists one real LLM usage row (metering; billing is the
+// control plane's job, never done here). Safe for concurrent callers.
+func (s *PicoHistoryStore) RecordUsage(
+	ctx context.Context,
+	sessionID, model string,
+	inputTokens, outputTokens int,
+) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	if inputTokens <= 0 && outputTokens <= 0 {
+		return nil
+	}
+	total := inputTokens + outputTokens
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.ExecContext(
+		ctx,
+		`INSERT INTO pico_usage (session_id, model, input_tokens, output_tokens, total_tokens, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		sessionID, model, inputTokens, outputTokens, total,
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	return err
+}
+
+// MonthUsage aggregates this tenant's usage since the start of the current
+// UTC month, grouped by model. This is the metering data the control plane
+// reads to bill/enforce quotas.
+func (s *PicoHistoryStore) MonthUsage(ctx context.Context, now time.Time) (PicoUsageTotals, error) {
+	var totals PicoUsageTotals
+	if s == nil || s.db == nil {
+		return totals, nil
+	}
+	monthStart := time.Date(now.UTC().Year(), now.UTC().Month(), 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT model,
+		        COUNT(*),
+		        COALESCE(SUM(input_tokens), 0),
+		        COALESCE(SUM(output_tokens), 0),
+		        COALESCE(SUM(total_tokens), 0)
+		 FROM pico_usage
+		 WHERE created_at >= ?
+		 GROUP BY model
+		 ORDER BY model`,
+		monthStart,
+	)
+	if err != nil {
+		return totals, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var m PicoUsageSummary
+		if err := rows.Scan(&m.Model, &m.Requests, &m.InputTokens, &m.OutputTokens, &m.TotalTokens); err != nil {
+			return totals, err
+		}
+		totals.ByModel = append(totals.ByModel, m)
+		totals.Requests += m.Requests
+		totals.InputTokens += m.InputTokens
+		totals.OutputTokens += m.OutputTokens
+		totals.TotalTokens += m.TotalTokens
+	}
+	if err := rows.Err(); err != nil {
+		return totals, err
+	}
+	return totals, nil
 }
 
 // List returns messages for a session ordered oldest->newest.
