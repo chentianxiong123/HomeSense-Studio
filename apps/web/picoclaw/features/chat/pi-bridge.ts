@@ -345,7 +345,10 @@ export function initializeChatStore() {
       /* me 不可用 */
     }
 
-    const sessionId = storedSessionId || serverSessionId
+    // v3 一户一 session:租户级 activeSessionId 是权威会话。
+    // 已登录时优先用服务端返回的 session(旧历史已按它迁移进 Go SQLite),
+    // 未登录/无服务端值时再回退 localStorage。
+    const sessionId = serverSessionId || storedSessionId
     let messages: ChatMessage[] = []
     if (sessionId) {
       try {
