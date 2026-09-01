@@ -125,7 +125,8 @@ export function handlePicoMessage(
           {
             id: messageId,
             role: "assistant",
-            content,
+            content: kind === "thought" ? "" : content,
+            ...(kind === "thought" ? { thinking: content } : {}),
             kind,
             ...(modelName ? { modelName } : {}),
             ...(toolCalls ? { toolCalls } : {}),
@@ -170,7 +171,8 @@ export function handlePicoMessage(
             return {
               ...msg,
               id: messageId,
-              content,
+              content: kind === "thought" ? "" : content,
+              ...(kind === "thought" ? { thinking: content } : {}),
               kind,
               toolCalls,
               ...(modelName ? { modelName } : {}),
@@ -189,7 +191,8 @@ export function handlePicoMessage(
             {
               id: messageId,
               role: "assistant" as const,
-              content,
+              content: kind === "thought" ? "" : content,
+              ...(kind === "thought" ? { thinking: content } : {}),
               kind,
               toolCalls,
               ...(modelName ? { modelName } : {}),
