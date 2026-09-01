@@ -90,6 +90,20 @@ type Request struct {
 	Duration int    `json:"duration,omitempty"`
 	SrcFile  string `json:"src_file,omitempty"`
 	DestFile string `json:"dest_file,omitempty"`
+	// scrcpy streaming
+	Profile     string `json:"profile,omitempty"`
+	Audio       bool   `json:"audio,omitempty"`
+	Window      bool   `json:"window,omitempty"`
+	Playback    bool   `json:"playback,omitempty"`
+	MaxSize     int    `json:"max_size,omitempty"`
+	BitRate     int    `json:"bit_rate,omitempty"`
+	MaxFPS      int    `json:"max_fps,omitempty"`
+	VideoCodec  string `json:"video_codec,omitempty"`
+	DisplayID   int    `json:"display_id,omitempty"`
+	Record      string `json:"record,omitempty"`
+	V4L2Sink    string `json:"v4l2_sink,omitempty"`
+	IncludeOvw  bool   `json:"include_overview,omitempty"`
+	ExtraArgs   string `json:"extra_args,omitempty"`
 }
 
 func keyEvent(name string) int {
