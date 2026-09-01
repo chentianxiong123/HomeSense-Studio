@@ -28,7 +28,7 @@ import (
 	_ "github.com/sipeed/picoclaw/pkg/channels/maixcam"
 	_ "github.com/sipeed/picoclaw/pkg/channels/mqtt"
 	_ "github.com/sipeed/picoclaw/pkg/channels/onebot"
-	_ "github.com/sipeed/picoclaw/pkg/channels/pico"
+	"github.com/sipeed/picoclaw/pkg/channels/pico"
 	_ "github.com/sipeed/picoclaw/pkg/channels/qq"
 	_ "github.com/sipeed/picoclaw/pkg/channels/slack"
 	_ "github.com/sipeed/picoclaw/pkg/channels/slack_webhook"
@@ -496,6 +496,23 @@ func setupAndStartServices(
 		listenAddr,
 		runningServices.HealthServer,
 	)
+
+	// Wire pico channel idle shutdown: when the gateway has zero active pico
+	// connections for IdleShutdownMinutes, it signals itself to shut down
+	// gracefully (the same path as SIGTERM). This is the on-demand half of
+	// the lifecycle — the Next.js side cold-starts the tenant gateway on use.
+	// Must happen BEFORE StartAll so the countdown can begin on Start when the
+	// gateway boots with zero connections (the on-demand default).
+	if picoCh, ok := runningServices.ChannelManager.GetChannel(config.ChannelPico); ok {
+		if typed, ok := picoCh.(*pico.PicoChannel); ok {
+			typed.SetIdleShutdownFunc(func() {
+				logger.Info("pico idle timeout: requesting gateway shutdown")
+				if p, err := os.FindProcess(os.Getpid()); err == nil {
+					_ = p.Signal(syscall.SIGTERM)
+				}
+			})
+		}
+	}
 
 	if err = runningServices.ChannelManager.StartAll(context.Background()); err != nil {
 		return nil, fmt.Errorf("error starting channels: %w", err)

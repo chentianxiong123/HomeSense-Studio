@@ -329,9 +329,10 @@ export function initializeChatStore() {
   if (initialized) return
   initialized = true
 
-  // Go 云大脑常驻:连接状态直接 connected,输入框可用
+  // Go 云大脑按需冷启动:先 ensure(拉起当前租户的 gateway 进程),
+  // 拿到端口/token 后再连 WS。空闲时网关会自动退出,下次再来时这里重新拉起。
   updateChatStore({
-    connectionState: "connected",
+    connectionState: "connecting",
     isTyping: false,
     hasHydratedActiveSession: true,
   })
@@ -351,20 +352,34 @@ export function initializeChatStore() {
           if (typeof me.activeSessionId === "string" && me.activeSessionId) {
             serverSessionId = me.activeSessionId
           }
-          // 该租户独立云大脑进程 → 动态切换 WS/HTTP 地址
-          if (
-            me.brain &&
-            typeof me.brain.gatewayPort === "number" &&
-            me.brain.gatewayPort > 0 &&
-            typeof me.brain.gatewayToken === "string" &&
-            me.brain.gatewayToken
-          ) {
-            applyBrainGateway(me.brain.gatewayPort, me.brain.gatewayToken)
-          }
         }
       }
     } catch {
       /* me 不可用 */
+    }
+
+    // 该租户独立云大脑进程 → 先 ensure(冷启动)再动态切 WS/HTTP 地址
+    try {
+      const ensureRes = await fetch("/api/gateway/ensure", {
+        method: "POST",
+        credentials: "same-origin",
+      })
+      if (ensureRes.ok) {
+        const data = (await ensureRes.json()) as {
+          brain?: { gatewayPort?: number | null; gatewayToken?: string | null }
+        }
+        if (
+          data.brain &&
+          typeof data.brain.gatewayPort === "number" &&
+          data.brain.gatewayPort > 0 &&
+          typeof data.brain.gatewayToken === "string" &&
+          data.brain.gatewayToken
+        ) {
+          applyBrainGateway(data.brain.gatewayPort, data.brain.gatewayToken)
+        }
+      }
+    } catch {
+      /* ensure 不可用,回退默认地址 */
     }
 
     // v3 一户一 session:租户级 activeSessionId 是权威会话。
