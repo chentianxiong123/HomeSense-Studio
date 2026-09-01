@@ -250,6 +250,11 @@ func registerSharedTools(
 			agent.Tools.Register(sendFileTool)
 		}
 
+		// Memory tool — always enabled: lets the agent persist long-term memory
+		// (MEMORY.md) and daily notes into its own workspace. The content is
+		// re-injected into the prompt each turn via ContextBuilder.
+		agent.Tools.Register(NewMemoryTool(agent.Workspace))
+
 		if ttsProvider != nil {
 			agent.Tools.Register(tools.NewSendTTSTool(ttsProvider, nil))
 		}
