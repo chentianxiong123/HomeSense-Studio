@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-DATA_DIR="${HS_BRAIN_DATA:-/tmp/opencode/hs-brain}"
+DATA_DIR="${HS_BRAIN_DATA:-/home/a1/HomeSense-Studio-v3/.hs-brain}"
 BIN="${HS_BRAIN_BIN:-$DATA_DIR/picoclaw}"
 GATEWAY_PORT="${HS_BRAIN_PROBE_PORT:-18790}"
 IDLE_MINUTES="${HS_BRAIN_IDLE_MINUTES:-5}"
