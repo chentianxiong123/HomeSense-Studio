@@ -76,13 +76,18 @@ func mockPEM(kind, body string) string {
 
 func findMoonlightBin() string {
 	moonlightBinOnce.Do(func() {
-		// Try multiple locations
+		exe, _ := os.Executable()
+		// Prefer vendor-built binary next to the Go executable
 		candidates := []string{
-			"moonlight",
-			"moonlight-embedded",
-			"moonlight-qt",
-			os.Getenv("MOONLIGHT_BIN"),
-			filepath.Join(os.Getenv("HOME"), ".local", "bin", "moonlight"),
+			filepath.Join(filepath.Dir(exe), "pkg", "capabilities", "moonlight", "vendor", "bin", "moonlight"),
+			filepath.Join(filepath.Dir(exe), "moonlight"),
+		}
+		// Then try PATH and standard locations
+		for _, name := range []string{"moonlight", "moonlight-embedded", "moonlight-qt", os.Getenv("MOONLIGHT_BIN"), filepath.Join(os.Getenv("HOME"), ".local", "bin", "moonlight")} {
+			if name == "" {
+				continue
+			}
+			candidates = append(candidates, name)
 		}
 		for _, name := range candidates {
 			if name == "" {
@@ -92,8 +97,14 @@ func findMoonlightBin() string {
 				moonlightBin = p
 				return
 			}
+			if strings.HasPrefix(name, "/") {
+				if _, err := os.Stat(name); err == nil {
+					moonlightBin = name
+					return
+				}
+			}
 		}
-		// Return the first name even if not found (for error messages)
+		moonlightBin = "moonlight"
 		moonlightBin = "moonlight"
 	})
 	return moonlightBin
@@ -528,6 +539,11 @@ func isRealBin(bin string) bool {
 
 func runMoonlight(bin string, args ...string) (string, string, int) {
 	cmd := exec.Command(bin, args...)
+	// Set LD_LIBRARY_PATH from nearby vendor/bin if binary is there
+	if strings.Contains(bin, "vendor") || strings.HasSuffix(bin, "/bin/moonlight") {
+		soDir := filepath.Join(filepath.Dir(bin), "..", "vendor", "bin")
+		cmd.Env = append(os.Environ(), "LD_LIBRARY_PATH="+soDir+":"+os.Getenv("LD_LIBRARY_PATH"))
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
