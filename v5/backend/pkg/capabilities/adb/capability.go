@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
+	"os"
 	"strings"
 	"time"
 
@@ -21,7 +23,7 @@ func (c *Capability) MCPTool() *mcp.Tool {
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
-				"action": {"type": "string", "description": "操作名：list_devices / connect / disconnect / overview / list_files / read_file / remove_files / copy_files / pull_file / push_file / mkdir / screenshot / tap / swipe / input_text / press_key / back / home / enter / volume_up / volume_down / power / launch_app / get_current_app / list_packages / check_package / get_display_size / capabilities"},
+				"action": {"type": "string", "description": "操作名：list_devices / connect / disconnect / overview / list_files / read_file / remove_files / copy_files / pull_file / push_file / mkdir / screenshot / tap / swipe / input_text / press_key / back / home / enter / volume_up / volume_down / power / launch_app / get_current_app / list_packages / check_package / get_display_size / scrcpy_status / scrcpy_probe / scrcpy_command / capabilities"},
 				"device": {"type": "string", "description": "设备序列号或 IP:port（如 192.168.1.100:5555）"},
 				"path":   {"type": "string", "description": "设备端路径"},
 				"dir":    {"type": "string", "description": "设备端目录（list_files/mkdir 使用）"},
@@ -36,7 +38,20 @@ func (c *Capability) MCPTool() *mcp.Tool {
 				"src_file": {"type": "string", "description": "源文件（push/pull/copy）"},
 				"dest_file": {"type": "string", "description": "目标文件"},
 				"radius":  {"type": "integer", "description": "滑动半径"},
-				"duration":{"type": "integer", "description": "滑动时长(ms)"}
+				"duration":{"type": "integer", "description": "滑动时长(ms)"},
+				"profile": {"type": "string", "description": "scrcpy 配置：browser_bridge/desktop/window/headless"},
+				"audio": {"type": "boolean", "description": "scrcpy 音频开关"},
+				"window": {"type": "boolean", "description": "scrcpy 窗口模式"},
+				"playback": {"type": "boolean", "description": "scrcpy 回放模式"},
+				"max_size": {"type": "integer", "description": "scrcpy 最大分辨率"},
+				"bit_rate": {"type": "integer", "description": "scrcpy 视频码率"},
+				"max_fps": {"type": "integer", "description": "scrcpy 最大帧率"},
+				"video_codec": {"type": "string", "description": "scrcpy 视频编码"},
+				"display_id": {"type": "integer", "description": "scrcpy 显示器 ID"},
+				"record": {"type": "string", "description": "scrcpy 录制文件路径"},
+				"v4l2_sink": {"type": "string", "description": "scrcpy V4L2 接收器"},
+				"include_overview": {"type": "boolean", "description": "scrcpy_probe 包含 overview"},
+				"extra_args": {"type": "string", "description": "scrcpy 额外参数"}
 			},
 			"required": ["action"]
 		}`),
@@ -130,6 +145,12 @@ func (c *Capability) dispatch(req Request) map[string]any {
 		return c.handleCheckPackage(req)
 	case "capabilities":
 		return c.handleCapabilities()
+	case "scrcpy_status", "screen_stream_status":
+		return c.handleScrcpyStatus(req)
+	case "scrcpy_probe", "screen_stream_probe":
+		return c.handleScrcpyProbe(req)
+	case "scrcpy_command", "scrcpy_build_command", "screen_stream_command":
+		return c.handleScrcpyCommand(req)
 	default:
 		return fail("ACTION_NOT_FOUND", fmt.Sprintf("unknown action: %q", req.Action))
 	}
@@ -428,6 +449,148 @@ func (c *Capability) handleCheckPackage(req Request) map[string]any {
 	return map[string]any{"status": "success", "data": map[string]any{"package": req.Package, "exists": false}}
 }
 
+// ─── scrcpy streaming ────────────────────────────────────────────────────────
+
+func scrcpyExecutable() string {
+	bin, err := exec.LookPath("scrcpy")
+	if err != nil {
+		return "scrcpy"
+	}
+	return bin
+}
+
+func (c *Capability) handleScrcpyStatus(req Request) map[string]any {
+	bin := scrcpyExecutable()
+	cmd := exec.Command(bin, "--version")
+	cmd.Env = append(os.Environ(), "ADB_PATH="+bin)
+	out, errOut, code := run(Command{Bin: bin, Args: []string{"--version"}, Timeout: 5 * time.Second})
+	if code != 0 {
+		return map[string]any{"status": "error", "error": "SCRCPY_NOT_FOUND", "data": map[string]any{"available": false, "path": bin, "message": errOut}}
+	}
+	version := ""
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToLower(line), "scrcpy") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				version = parts[1]
+			}
+			break
+		}
+	}
+	return map[string]any{"status": "success", "data": map[string]any{
+		"available": code == 0, "path": bin, "version": version,
+		"raw": out, "return_code": code,
+	}}
+}
+
+func (c *Capability) handleScrcpyProbe(req Request) map[string]any {
+	timeout := req.Timeout
+	if timeout == 0 {
+		timeout = 5
+	}
+	status := c.handleScrcpyStatus(req)
+	if status["error"] != "" {
+		return status
+	}
+	display := c.handleGetDisplaySize(req)
+	device := req.Device
+	if device == "" {
+		devices := c.handleListDevices()
+		if devs, ok := devices["data"].([]Device); ok && len(devs) > 0 {
+			device = devs[0].Serial
+		}
+	}
+	profile := req.Profile
+	if profile == "" {
+		profile = "browser_bridge"
+	}
+	cmd := c.scrcpyCommandSpec(req, device, profile, false, false, false)
+	ready := status["data"].(map[string]any)["available"] == true && display["status"] == "success"
+	return map[string]any{
+		"status":    map[bool]string{true: "success", false: "error"}[ready],
+		"error":     nil,
+		"data":      cmd["data"],
+		"ready":     ready,
+		"blockers": func() []string {
+			var blockers []string
+			if status["error"] != "" {
+				blockers = append(blockers, "SCRCPY_UNAVAILABLE")
+			}
+			if display["status"] != "success" {
+				blockers = append(blockers, "DISPLAY_PROBE_FAILED")
+			}
+			return blockers
+		}(),
+	}
+}
+
+func (c *Capability) handleScrcpyCommand(req Request) map[string]any {
+	device := req.Device
+	if device == "" {
+		devices := c.handleListDevices()
+		if devs, ok := devices["data"].([]Device); ok && len(devs) > 0 {
+			device = devs[0].Serial
+		}
+	}
+	profile := req.Profile
+	if profile == "" {
+		profile = "browser_bridge"
+	}
+	return c.scrcpyCommandSpec(req, device, profile, req.Audio, req.Window, req.Playback)
+}
+
+func (c *Capability) scrcpyCommandSpec(req Request, device, profile string, audio, window, playback bool) map[string]any {
+	bin := scrcpyExecutable()
+	args := []string{}
+	if device != "" {
+		args = append(args, "-s", device)
+	}
+	args = scrcpyAppend(args, req.MaxSize > 0, "--max-size", fmt.Sprint(req.MaxSize))
+	args = scrcpyAppend(args, req.BitRate > 0, "--video-bit-rate", fmt.Sprint(req.BitRate))
+	args = scrcpyAppend(args, req.MaxFPS > 0, "--max-fps", fmt.Sprint(req.MaxFPS))
+	args = scrcpyAppend(args, req.VideoCodec != "", "--video-codec", req.VideoCodec)
+	args = scrcpyAppend(args, req.DisplayID > 0, "--display-id", fmt.Sprint(req.DisplayID))
+	if !audio {
+		args = append(args, "--no-audio")
+	}
+	if !window {
+		args = append(args, "--no-window")
+	}
+	args = scrcpyAppend(args, req.Record != "", "--record", req.Record)
+	args = scrcpyAppend(args, req.V4L2Sink != "", "--v4l2-sink", req.V4L2Sink)
+	if req.ExtraArgs != "" {
+		args = append(args, strings.Fields(req.ExtraArgs)...)
+	}
+	cmd := bin + " " + strings.Join(args, " ")
+	return map[string]any{
+		"status":        "success",
+		"data":          map[string]any{
+			"executable":   bin,
+			"args":         args,
+			"command_line": cmd,
+			"device":       device,
+			"profile":      profile,
+			"headless":     !window,
+			"window":       window,
+			"audio":        audio,
+			"control":      true,
+			"requires_backend_bridge": profile == "browser_bridge" || profile == "web",
+		},
+		"notes": []string{
+			"scrcpy starts a device-side server over ADB and opens video/audio/control sockets.",
+			"For browser delivery, use a backend bridge or standalone raw stream session.",
+		},
+	}
+}
+
+func scrcpyAppend(args []string, cond bool, flag, value string) []string {
+	if cond {
+		return append(args, flag, value)
+	}
+	return args
+}
+
 func (c *Capability) handleCapabilities() map[string]any {
 	actions := []string{
 		"list_devices", "connect", "disconnect", "overview",
@@ -437,6 +600,7 @@ func (c *Capability) handleCapabilities() map[string]any {
 		"tap", "swipe", "input_text", "press_key",
 		"back", "home", "enter", "volume_up", "volume_down", "power",
 		"launch_app", "get_current_app", "list_packages", "check_package",
+		"scrcpy_status", "scrcpy_probe", "scrcpy_command",
 	}
 	return map[string]any{
 		"status":  "success",

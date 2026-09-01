@@ -11,6 +11,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/capabilities/alist"
 	"github.com/sipeed/picoclaw/pkg/capabilities/media"
 	"github.com/sipeed/picoclaw/pkg/capabilities/mi"
+	"github.com/sipeed/picoclaw/pkg/capabilities/moonlight"
 )
 
 var server = mcp.NewServer(&mcp.Implementation{
@@ -93,9 +94,12 @@ func registerTools() {
 
 	mediaCap := media.NewCapability()
 	mcp.AddTool(server, mediaCap.MCPTool(), mediaCap.Handler)
+
+	moonlightCap := moonlight.NewCapability()
+	mcp.AddTool(server, moonlightCap.MCPTool(), moonlightCap.Handler)
 }
 
 func registeredToolNames() []string {
-	names := []string{"executor_info", "mi_device", "netdisk_sync", "adb_cmd", "media_ctl"}
+	names := []string{"executor_info", "mi_device", "netdisk_sync", "adb_cmd", "media_ctl", "moonlight_ctl"}
 	return names
 }
