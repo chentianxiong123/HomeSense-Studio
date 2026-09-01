@@ -313,7 +313,27 @@ func (al *AgentLoop) selectCandidates(
 	agent *AgentInstance,
 	userMsg string,
 	history []providers.Message,
+	requestedModel ...string,
 ) (candidates []providers.FallbackCandidate, model string, usedLight bool) {
+	// 用户侧热切换：前端随消息带的 model id 只覆盖这一条，不改变云端全局默认。
+	if len(requestedModel) > 0 {
+		if name := strings.TrimSpace(requestedModel[0]); name != "" {
+			cfg := al.GetConfig()
+			if cfg != nil {
+				if next := resolveModelCandidates(cfg, cfg.Agents.Defaults.Provider, name, agent.Fallbacks); len(next) > 0 {
+					logger.InfoCF("agent", "Per-message model override",
+						map[string]any{
+							"agent_id":  agent.ID,
+							"model":     name,
+							"candidates": len(next),
+						})
+					return next, resolvedCandidateModel(next, name), false
+				}
+				logger.WarnCF("agent", "Per-message model override not found, falling back to default",
+					map[string]any{"agent_id": agent.ID, "model": name})
+			}
+		}
+	}
 	if agent.Router == nil || len(agent.LightCandidates) == 0 {
 		return agent.Candidates, resolvedCandidateModel(agent.Candidates, agent.Model), false
 	}
@@ -446,7 +466,7 @@ func (al *AgentLoop) askSideQuestion(
 	}
 	messages = resolveMediaRefs(messages, al.mediaStore, maxMediaSize, currentTurnStart)
 
-	activeCandidates, activeModel, usedLight := al.selectCandidates(agent, question, messages)
+	activeCandidates, activeModel, usedLight := al.selectCandidates(agent, question, messages, requestedModelFromOptions(opts))
 	selectedModelName := sideQuestionModelName(agent, usedLight)
 
 	llmOpts := map[string]any{

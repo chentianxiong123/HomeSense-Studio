@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"strings"
+
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/routing"
 	"github.com/sipeed/picoclaw/pkg/session"
@@ -48,6 +50,15 @@ func cloneInboundContext(ctx *bus.InboundContext) *bus.InboundContext {
 	cloned.ReplyHandles = cloneStringMap(ctx.ReplyHandles)
 	cloned.Raw = cloneStringMap(ctx.Raw)
 	return &cloned
+}
+
+// requestedModelFromOptions returns the per-message model override carried by
+// the inbound message (frontend sends `model` alongside message), or "".
+func requestedModelFromOptions(opts *processOptions) string {
+	if opts == nil || opts.Dispatch.InboundContext == nil {
+		return ""
+	}
+	return strings.TrimSpace(opts.Dispatch.InboundContext.Raw["model_name"])
 }
 
 func cloneStringMap(src map[string]string) map[string]string {

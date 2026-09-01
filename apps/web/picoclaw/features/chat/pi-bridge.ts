@@ -24,6 +24,7 @@ import {
   updateChatStore,
 } from "@pico/store/chat"
 import { readStoredSessionId, writeStoredSessionId } from "@pico/features/chat/state"
+import { getStoredChatModel } from "@/lib/chat-model-pref"
 import {
   type PicoMessage,
   handlePicoMessage,
@@ -235,6 +236,7 @@ export function sendChatMessage({ content, attachments = [] }: SendChatMessageIn
     payload: {
       content: normalizedContent,
       media: attachments.map((a) => a.url),
+      ...(getStoredChatModel() ? { model: getStoredChatModel() } : {}),
     },
   })
 
