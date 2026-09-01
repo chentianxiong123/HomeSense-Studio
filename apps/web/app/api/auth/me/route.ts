@@ -19,5 +19,9 @@ export async function GET() {
       role: auth.role,
     },
     activeSessionId: tenant?.activeSessionId ?? null,
+    brain: {
+      gatewayPort: tenant?.gatewayPort ?? null,
+      gatewayToken: tenant?.gatewayToken ?? null,
+    },
   })
 }

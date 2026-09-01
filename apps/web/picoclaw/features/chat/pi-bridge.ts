@@ -30,16 +30,16 @@ import {
 } from "@pico/features/chat/protocol"
 
 // ---------------------------------------------------------------------------
-// Go 云大脑地址
+// Go 云大脑地址（按租户动态）
 // ---------------------------------------------------------------------------
-// 浏览器直连 Go gateway (CORS 全开放, 带 token 鉴权)。
-const PICO_WS_URL =
+// 默认值用于未配置 gateway 时的兜底（开发/单租户）。登录后 initializeChatStore
+// 会从 /api/auth/me 读该租户的 brain.gatewayPort/gatewayToken，调用
+// applyBrainGateway() 动态替换为当前租户自己的云大脑进程。
+let PICO_WS_URL =
   process.env.NEXT_PUBLIC_PICO_WS_URL ??
   "ws://127.0.0.1:18790/pico/ws?token=hs-brain-dev-token"
 
-// 与 WS 同源的历史 REST 端点。优先用 env 显式指定;否则从 WS URL 推导:
-//   ws://host:port/pico/ws?token=… → http://host:port/pico
-const PICO_HTTP_URL = (() => {
+let PICO_HTTP_URL = (() => {
   const env = process.env.NEXT_PUBLIC_PICO_HTTP_URL
   if (env) return env
   try {
@@ -52,6 +52,12 @@ const PICO_HTTP_URL = (() => {
     return "http://127.0.0.1:18790/pico"
   }
 })()
+
+/** 切换到指定租户的云大脑 gateway（端口 + pico token）。 */
+function applyBrainGateway(port: number, token: string): void {
+  PICO_WS_URL = `ws://127.0.0.1:${port}/pico/ws?token=${encodeURIComponent(token)}`
+  PICO_HTTP_URL = `http://127.0.0.1:${port}/pico`
+}
 
 const DEFAULT_CWD = "/home/a1/HomeSense-Studio-v3"
 
@@ -336,9 +342,25 @@ export function initializeChatStore() {
     try {
       const meRes = await fetch("/api/auth/me", { credentials: "same-origin" })
       if (meRes.ok) {
-        const me = (await meRes.json()) as { authenticated?: boolean; activeSessionId?: string | null }
-        if (me.authenticated && typeof me.activeSessionId === "string" && me.activeSessionId) {
-          serverSessionId = me.activeSessionId
+        const me = (await meRes.json()) as {
+          authenticated?: boolean
+          activeSessionId?: string | null
+          brain?: { gatewayPort?: number | null; gatewayToken?: string | null }
+        }
+        if (me.authenticated) {
+          if (typeof me.activeSessionId === "string" && me.activeSessionId) {
+            serverSessionId = me.activeSessionId
+          }
+          // 该租户独立云大脑进程 → 动态切换 WS/HTTP 地址
+          if (
+            me.brain &&
+            typeof me.brain.gatewayPort === "number" &&
+            me.brain.gatewayPort > 0 &&
+            typeof me.brain.gatewayToken === "string" &&
+            me.brain.gatewayToken
+          ) {
+            applyBrainGateway(me.brain.gatewayPort, me.brain.gatewayToken)
+          }
         }
       }
     } catch {
