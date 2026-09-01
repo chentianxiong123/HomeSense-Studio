@@ -23,7 +23,7 @@ import {
   getChatState,
   updateChatStore,
 } from "@pico/store/chat"
-import { writeStoredSessionId } from "@pico/features/chat/state"
+import { readStoredSessionId, writeStoredSessionId } from "@pico/features/chat/state"
 import {
   type PicoMessage,
   handlePicoMessage,
@@ -36,6 +36,22 @@ import {
 const PICO_WS_URL =
   process.env.NEXT_PUBLIC_PICO_WS_URL ??
   "ws://127.0.0.1:18790/pico/ws?token=hs-brain-dev-token"
+
+// 与 WS 同源的历史 REST 端点。优先用 env 显式指定;否则从 WS URL 推导:
+//   ws://host:port/pico/ws?token=… → http://host:port/pico
+const PICO_HTTP_URL = (() => {
+  const env = process.env.NEXT_PUBLIC_PICO_HTTP_URL
+  if (env) return env
+  try {
+    const u = new URL(PICO_WS_URL)
+    u.protocol = u.protocol === "wss:" ? "https:" : "http:"
+    u.pathname = "/pico"
+    u.search = ""
+    return u.toString().replace(/\/$/, "")
+  } catch {
+    return "http://127.0.0.1:18790/pico"
+  }
+})()
 
 const DEFAULT_CWD = "/home/a1/HomeSense-Studio-v3"
 
@@ -255,25 +271,28 @@ export async function newChatSession() {
 
 interface TimelineMessageDto {
   id: number
+  session_id: string
   role: "user" | "assistant"
   content: string
-  ts: string
   model: string | null
+  kind: "normal" | "thought" | "tool_calls"
+  created_at: string
 }
 
 interface TimelinePageDto {
   messages?: TimelineMessageDto[]
-  title?: string
+  hasMore?: boolean
   activeSessionId?: string | null
-  stats?: { count: number; lastId: number | null }
 }
 
-async function fetchTimelinePage(beforeId?: number): Promise<TimelinePageDto> {
-  const qs = beforeId ? `?before=${beforeId}` : ""
-  const res = await fetch(`/api/timeline${qs}`, {
-    headers: { "Cache-Control": "no-cache" },
-  })
-  if (!res.ok) throw new Error(`Failed to fetch timeline: ${res.status}`)
+async function fetchTimelinePage(
+  sessionId: string,
+  beforeId?: number,
+): Promise<TimelinePageDto> {
+  const params = new URLSearchParams({ session_id: sessionId })
+  if (beforeId) params.set("before", String(beforeId))
+  const res = await fetch(`${PICO_HTTP_URL}/history?${params.toString()}`)
+  if (!res.ok) throw new Error(`Failed to fetch history: ${res.status}`)
   return (await res.json()) as TimelinePageDto
 }
 
@@ -281,16 +300,21 @@ function timelineMessageToChatMessage(dto: TimelineMessageDto): ChatMessage {
   return {
     id: `tl-${dto.id}`,
     role: dto.role,
-    content: dto.content,
+    content: dto.kind === "thought" ? "" : dto.content,
+    ...(dto.kind === "thought" ? { thinking: dto.content } : {}),
+    kind: dto.kind,
     modelName: dto.model ?? undefined,
-    timestamp: dto.ts ? Date.parse(dto.ts) : Date.now(),
+    timestamp: dto.created_at ? Date.parse(dto.created_at) : Date.now(),
     timelineId: dto.id,
   }
 }
 
 /** 上拉加载更早的历史消息；返回是否有更早数据。 */
-export async function loadEarlierTimeline(beforeId: number): Promise<ChatMessage[]> {
-  const page = await fetchTimelinePage(beforeId)
+export async function loadEarlierTimeline(
+  sessionId: string,
+  beforeId: number,
+): Promise<ChatMessage[]> {
+  const page = await fetchTimelinePage(sessionId, beforeId)
   if (!page.messages) return []
   return page.messages.map(timelineMessageToChatMessage)
 }
@@ -307,6 +331,7 @@ export function initializeChatStore() {
   })
 
   void (async () => {
+    const storedSessionId = readStoredSessionId()
     let serverSessionId = ""
     try {
       const meRes = await fetch("/api/auth/me", { credentials: "same-origin" })
@@ -317,32 +342,25 @@ export function initializeChatStore() {
         }
       }
     } catch {
-      /* me 不可用就走 timeline */
+      /* me 不可用 */
     }
 
-    if (!serverSessionId) {
-      try {
-        const tl = await fetch("/api/timeline", { credentials: "same-origin" })
-        if (tl.ok) {
-          const tj = (await tl.json()) as { activeSessionId?: string | null }
-          if (typeof tj.activeSessionId === "string" && tj.activeSessionId) {
-            serverSessionId = tj.activeSessionId
-          }
-        }
-      } catch { /* ignore */ }
-    }
-
+    const sessionId = storedSessionId || serverSessionId
     let messages: ChatMessage[] = []
-    try {
-      const page = await fetchTimelinePage()
-      messages = (page.messages ?? []).map(timelineMessageToChatMessage)
-    } catch { /* 时间线不可用,继续 */ }
+    if (sessionId) {
+      try {
+        const page = await fetchTimelinePage(sessionId)
+        messages = (page.messages ?? []).map(timelineMessageToChatMessage)
+      } catch {
+        /* 历史不可用,继续 */
+      }
+    }
 
-    if (serverSessionId) {
-      activeSessionId = serverSessionId
+    if (sessionId) {
+      activeSessionId = sessionId
       shouldMaintainConnection = true
       updateChatStore({
-        activeSessionId: serverSessionId,
+        activeSessionId: sessionId,
         messages,
         hasHydratedActiveSession: true,
         connectionState: "connected",

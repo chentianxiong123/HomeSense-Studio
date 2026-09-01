@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -107,6 +108,8 @@ type PicoChannel struct {
 	deleteMessageFn    func(context.Context, string, string) error
 	// broadcastFn lets tests intercept outbound broadcasts. nil → broadcastToSession.
 	broadcastFn func(chatID string, msg PicoMessage) error
+	// history persists per-session chat messages to SQLite when configured.
+	history *PicoHistoryStore
 }
 
 // NewPicoChannel creates a new Pico Protocol channel.
@@ -149,6 +152,13 @@ func NewPicoChannel(
 	}
 	ch.progress = channels.NewToolFeedbackAnimator(ch.EditMessage)
 	ch.deleteMessageFn = ch.DeleteMessage
+	if dbPath := strings.TrimSpace(cfg.DBPath); dbPath != "" {
+		store, err := NewPicoHistoryStore(dbPath)
+		if err != nil {
+			return nil, fmt.Errorf("pico history store: %w", err)
+		}
+		ch.history = store
+	}
 	return ch, nil
 }
 
@@ -285,6 +295,8 @@ func (c *PicoChannel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch path {
 	case "/ws", "/ws/":
 		c.handleWebSocket(w, r)
+	case "/history":
+		c.handleHistory(w, r)
 	default:
 		if strings.HasPrefix(path, "/media/") {
 			c.handleMediaDownload(w, r)
@@ -292,6 +304,68 @@ func (c *PicoChannel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		http.NotFound(w, r)
 	}
+}
+
+// handleHistory serves persisted chat history for a pico session.
+//   GET /pico/history?session_id=<id>[&before=<cursor>&limit=<n>]
+//
+// Response mirrors the legacy Next.js timeline shape so the frontend keeps
+// its existing loader: { messages, hasMore, activeSessionId }.
+func (c *PicoChannel) handleHistory(w http.ResponseWriter, r *http.Request) {
+	// The frontend lives on a different origin (e.g. the Next.js dev server),
+	// so allow cross-origin reads. GET is a simple request; handle the
+	// preflight too for completeness.
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+	w.Header().Set("Vary", "Origin")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if c.history == nil {
+		http.Error(w, `{"error":"history_disabled","message":"pico db_path not configured"}`, http.StatusServiceUnavailable)
+		return
+	}
+	q := r.URL.Query()
+	sessionID := strings.TrimSpace(q.Get("session_id"))
+	if sessionID == "" {
+		http.Error(w, `{"error":"missing_session_id"}`, http.StatusBadRequest)
+		return
+	}
+	var beforeID int64
+	if raw := q.Get("before"); raw != "" {
+		if v, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			beforeID = v
+		}
+	}
+	limit := 30
+	if raw := q.Get("limit"); raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+			limit = v
+		}
+	}
+
+	messages, err := c.history.List(r.Context(), sessionID, beforeID, limit)
+	if err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+	hasMore := false
+	if len(messages) > 0 {
+		hasMore, err = c.history.HasMore(r.Context(), sessionID, messages[0].ID)
+		if err != nil {
+			hasMore = false
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	json.NewEncoder(w).Encode(map[string]any{
+		"messages":        messages,
+		"hasMore":         hasMore,
+		"activeSessionId": sessionID,
+	})
 }
 
 // Send implements Channel — sends a message to the appropriate WebSocket connection.
@@ -327,7 +401,8 @@ func (c *PicoChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]stri
 		PayloadKeyContent: content,
 		"message_id":      msgID,
 	}
-	if modelName := strings.TrimSpace(msg.Context.Raw[PayloadKeyModelName]); modelName != "" {
+	modelName := strings.TrimSpace(msg.Context.Raw[PayloadKeyModelName])
+	if modelName != "" {
 		payload[PayloadKeyModelName] = modelName
 	}
 	switch {
@@ -350,6 +425,20 @@ func (c *PicoChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]stri
 
 	if err := c.broadcastToSession(msg.ChatID, outMsg); err != nil {
 		return nil, err
+	}
+	if c.history != nil && !isToolFeedback {
+		sessionID := strings.TrimPrefix(msg.ChatID, "pico:")
+		kind := "normal"
+		if isThought {
+			kind = "thought"
+		} else if isToolCalls {
+			kind = "tool_calls"
+		}
+		if _, err := c.history.Append(
+			context.Background(), sessionID, "assistant", content, modelName, kind,
+		); err != nil {
+			logger.WarnCF("pico", "history append(assistant) failed", map[string]any{"error": err.Error()})
+		}
 	}
 	if isToolFeedback {
 		c.RecordToolFeedbackMessage(msg.ChatID, msgID, msg.Content)
@@ -1219,6 +1308,12 @@ func (c *PicoChannel) handleMessageSend(pc *picoConn, msg PicoMessage) {
 
 	chatID := "pico:" + sessionID
 	senderID := "pico-user"
+
+	if c.history != nil {
+		if _, err := c.history.Append(context.Background(), sessionID, "user", content, "", ""); err != nil {
+			logger.WarnCF("pico", "history append(user) failed", map[string]any{"error": err.Error()})
+		}
+	}
 
 	metadata := map[string]string{
 		"platform":   "pico",

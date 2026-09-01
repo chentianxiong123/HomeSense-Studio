@@ -26,12 +26,14 @@ export function useTimelineHistory() {
     if (loadingRef.current) return
     const beforeId = oldestTimelineId()
     if (beforeId === undefined) return
+    const sessionId = getChatState().activeSessionId
+    if (!sessionId) return
 
     loadingRef.current = true
     setIsLoadingMore(true)
     setLoadError(false)
     try {
-      const older = await loadEarlierTimeline(beforeId)
+      const older = await loadEarlierTimeline(sessionId, beforeId)
       if (older.length === 0) {
         setHasMore(false)
         return

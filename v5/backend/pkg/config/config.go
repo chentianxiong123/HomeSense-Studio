@@ -677,6 +677,10 @@ type PicoSettings struct {
 	ReadTimeout     int             `json:"read_timeout,omitempty"      yaml:"-"`
 	WriteTimeout    int             `json:"write_timeout,omitempty"     yaml:"-"`
 	MaxConnections  int             `json:"max_connections,omitempty"   yaml:"-"`
+	// DBPath enables per-session SQLite persistence of pico chat history.
+	// When set, the pico channel owns history storage and serves it at
+	// GET /pico/history?session_id=...  (the frontend reads history from Go).
+	DBPath string `json:"db_path,omitempty" yaml:"-"`
 }
 
 // SetToken sets the Pico token and marks it as dirty for security saving
