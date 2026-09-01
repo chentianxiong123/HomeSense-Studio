@@ -9,6 +9,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sipeed/picoclaw/pkg/capabilities/adb"
 	"github.com/sipeed/picoclaw/pkg/capabilities/alist"
+	"github.com/sipeed/picoclaw/pkg/capabilities/bilibili"
+	"github.com/sipeed/picoclaw/pkg/capabilities/dlna"
 	"github.com/sipeed/picoclaw/pkg/capabilities/media"
 	"github.com/sipeed/picoclaw/pkg/capabilities/mi"
 	"github.com/sipeed/picoclaw/pkg/capabilities/moonlight"
@@ -96,6 +98,12 @@ func registerTools() {
 	mediaCap := media.NewCapability()
 	mcp.AddTool(server, mediaCap.MCPTool(), mediaCap.Handler)
 
+	biliCap := bilibili.NewCapability()
+	mcp.AddTool(server, biliCap.MCPTool(), biliCap.Handler)
+
+	dlnaCap := dlna.NewCapability()
+	mcp.AddTool(server, dlnaCap.MCPTool(), dlnaCap.Handler)
+
 	moonlightCap := moonlight.NewCapability()
 	mcp.AddTool(server, moonlightCap.MCPTool(), moonlightCap.Handler)
 
@@ -104,6 +112,6 @@ func registerTools() {
 }
 
 func registeredToolNames() []string {
-	names := []string{"executor_info", "mi_device", "netdisk_sync", "adb_cmd", "media_ctl", "moonlight_ctl", "remote_desktop"}
+	names := []string{"executor_info", "mi_device", "netdisk_sync", "adb_cmd", "moonlight_ctl", "remote_desktop", "bilibili_ctl", "dlna_ctl", "media_sniff"}
 	return names
 }

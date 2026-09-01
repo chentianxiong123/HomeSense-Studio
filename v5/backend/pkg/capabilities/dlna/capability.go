@@ -1,6 +1,8 @@
-package media
+package dlna
 
 import (
+	"context"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -10,7 +12,20 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+type Request struct {
+	Action      string `json:"action"`
+	URL         string `json:"url,omitempty"`
+	Location    string `json:"location,omitempty"`
+	Title       string `json:"title,omitempty"`
+	ContentType string `json:"content_type,omitempty"`
+	Control     string `json:"control,omitempty"`
+	TargetIP    string `json:"target_ip,omitempty"`
+	Timeout     int    `json:"timeout,omitempty"`
+}
 
 type DLNADevice struct {
 	ID       string `json:"id"`
@@ -19,7 +34,7 @@ type DLNADevice struct {
 	Location string `json:"location"`
 	IP       string `json:"ip"`
 	Port     int    `json:"port"`
-	DevType  string `json:"device_type"`
+	DevType  string `json:"devtype"`
 	Server   string `json:"server"`
 }
 
@@ -35,6 +50,71 @@ type UPnPDevice struct {
 	Services     []UPnPService  `xml:"deviceList>device>serviceList>service"`
 }
 
+type DLNAController struct {
+	Location    string
+	avTransport bool
+}
+
+type Capability struct{}
+
+func NewCapability() *Capability { return &Capability{} }
+
+func (c *Capability) MCPTool() *mcp.Tool {
+	return &mcp.Tool{
+		Name:        "dlna_ctl",
+		Description: "DLNA/UPnP 投屏控制：局域网设备发现、播放投屏、播放控制（play/pause/stop/resume）、状态查询。",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"action": {"type": "string", "description": "操作名：discover / play_url / control / status / health"},
+				"url": {"type": "string", "description": "投屏资源 URL"},
+				"location": {"type": "string", "description": "DLNA 设备 UPnP 描述 URL"},
+				"title": {"type": "string", "description": "投屏标题"},
+				"content_type": {"type": "string", "description": "投屏内容类型"},
+				"control": {"type": "string", "description": "控制命令：play / pause / stop / resume"},
+				"target_ip": {"type": "string", "description": "DLNA 搜索目标 IP（单播）"},
+				"timeout": {"type": "integer", "description": "发现超时秒数（1-10）"}
+			},
+			"required": ["action"]
+		}`),
+	}
+}
+
+func (c *Capability) Handler(ctx context.Context, req *mcp.CallToolRequest, _ any) (*mcp.CallToolResult, any, error) {
+	var in Request
+	if req.Params != nil && len(req.Params.Arguments) > 0 {
+		_ = json.Unmarshal(req.Params.Arguments, &in)
+	}
+	start := time.Now()
+	result := c.dispatch(in)
+	elapsed := time.Since(start)
+	text := fmt.Sprintf("dlna_ctl %s: %s", in.Action, result["status"])
+	if msg, ok := result["message"].(string); ok && msg != "" {
+		text += " | " + msg
+	}
+	return &mcp.CallToolResult{
+		Content:         []mcp.Content{&mcp.TextContent{Text: text}},
+		StructuredContent: map[string]any{"status": result["status"], "error": result["error"], "message": result["message"], "data": result["data"], "action": in.Action, "elapsed_ms": elapsed.Milliseconds()},
+	}, result, nil
+}
+
+func (c *Capability) dispatch(req Request) map[string]any {
+	switch req.Action {
+	case "discover", "dlna_discover":
+		return dlnaDiscover(req)
+	case "play_url", "dlna_play_url":
+		return dlnaPlayURL(req)
+	case "control", "dlna_control":
+		return dlnaControl(req)
+	case "status", "dlna_status":
+		return dlnaStatus(req)
+	case "health":
+		return ok(map[string]any{"name": "dlna_ctl", "providers": []string{"dlna"}, "actions": []string{"discover", "play_url", "control", "status"}})
+	default:
+		return fail("ACTION_NOT_FOUND", fmt.Sprintf("unknown action: %q", req.Action))
+	}
+}
+
 func ssdpSearch(timeoutSec int, targetIP string) ([]DLNADevice, error) {
 	conn, err := net.ListenUDP("udp4", nil)
 	if err != nil {
@@ -42,14 +122,9 @@ func ssdpSearch(timeoutSec int, targetIP string) ([]DLNADevice, error) {
 	}
 	defer conn.Close()
 
-	msearch := `M-SEARCH * HTTP/1.1
-HOST: 239.255.255.250:1900
-MAN: "ssdp:disrupt"
-MX: 3
-ST: upnp:rootdevice
-`
+	msearch := "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:disrupt\"\r\nMX: 3\r\nST: upnp:rootdevice\r\n\r\n"
 	if targetIP != "" {
-		msearch = fmt.Sprintf("HOST: %s:1900\nMX: 3\nST: upnp:rootdevice\n\n", targetIP)
+		msearch = fmt.Sprintf("M-SEARCH * HTTP/1.1\r\nHOST: %s:1900\r\nMX: 3\r\nST: upnp:rootdevice\r\n\r\n", targetIP)
 	}
 	conn.SetWriteDeadline(time.Now().Add(time.Second))
 	conn.Write([]byte(msearch))
@@ -150,42 +225,15 @@ func dlnaDiscover(req Request) map[string]any {
 	deviceMaps := []map[string]any{}
 	for _, d := range devices {
 		deviceMaps = append(deviceMaps, map[string]any{
-			"id":       d.ID,
-			"udn":      d.UDN,
-			"name":     d.Name,
-			"location": d.Location,
-			"ip":       d.IP,
-			"port":     d.Port,
-			"devtype":  d.DevType,
-			"server":   d.Server,
+			"id": d.ID, "udn": d.UDN, "name": d.Name,
+			"location": d.Location, "ip": d.IP, "port": d.Port,
+			"devtype": d.DevType, "server": d.Server,
 		})
 	}
 	return ok(map[string]any{"devices": deviceMaps, "count": len(deviceMaps)})
 }
 
-func enrichDevice(location string) *DLNADevice {
-	resp, err := http.Get(location)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	var root UPnPDevice
-	if err := xml.Unmarshal(raw, &root); err != nil {
-		return nil
-	}
-	return &DLNADevice{
-		Name:     root.FriendlyName,
-		Location: location,
-	}
-}
-
-type DLNAController struct {
-	Location    string
-	avTransport string
-}
-
-func _createController(location string) (*DLNAController, error) {
+func fetchUPnPDesc(location string) (*DLNAController, error) {
 	resp, err := http.Get(location)
 	if err != nil {
 		return nil, fmt.Errorf("dlna description fetch: %w", err)
@@ -199,7 +247,7 @@ func _createController(location string) (*DLNAController, error) {
 	ctrl := &DLNAController{Location: location}
 	for _, s := range root.Services {
 		if strings.Contains(s.ServiceType, "AVTransport") {
-			ctrl.avTransport = location
+			ctrl.avTransport = true
 		}
 	}
 	return ctrl, nil
@@ -218,16 +266,16 @@ func dlnaPlayURL(req Request) map[string]any {
 	if title == "" {
 		title = "HomeSense Media"
 	}
-	_, err := _createController(location)
+	_, err := fetchUPnPDesc(location)
 	if err != nil {
 		return fail("DLNA_CONTROLLER_FAILED", err.Error())
 	}
 	return ok(map[string]any{
-		"location":      location,
-		"url":           playURL,
-		"title":         title,
-		"content_type":  strings.TrimSpace(req.ContentType),
-		"message":       "DLNA play requested (full SOAP implementation pending)",
+		"location":     location,
+		"url":          playURL,
+		"title":        title,
+		"content_type": strings.TrimSpace(req.ContentType),
+		"message":      "DLNA play requested (full SOAP implementation pending)",
 	})
 }
 
@@ -240,7 +288,7 @@ func dlnaControl(req Request) map[string]any {
 	if action == "" {
 		return fail("INVALID_PARAMS", "control is required")
 	}
-	_, err := _createController(location)
+	_, err := fetchUPnPDesc(location)
 	if err != nil {
 		return fail("DLNA_CONTROLLER_FAILED", err.Error())
 	}
@@ -248,11 +296,7 @@ func dlnaControl(req Request) map[string]any {
 	if !validActions[action] {
 		return fail("INVALID_PARAMS", fmt.Sprintf("unknown control: %s", action))
 	}
-	return ok(map[string]any{
-		"location": location,
-		"action":   action,
-		"message":  fmt.Sprintf("DLNA %s requested", action),
-	})
+	return ok(map[string]any{"location": location, "action": action, "message": fmt.Sprintf("DLNA %s requested", action)})
 }
 
 func dlnaStatus(req Request) map[string]any {
@@ -260,87 +304,27 @@ func dlnaStatus(req Request) map[string]any {
 	if location == "" {
 		return fail("INVALID_PARAMS", "location is required")
 	}
-	ctrl, err := _createController(location)
+	ctrl, err := fetchUPnPDesc(location)
 	if err != nil {
 		return fail("DLNA_CONTROLLER_FAILED", err.Error())
 	}
-	return ok(map[string]any{
-		"location":        ctrl.Location,
-		"has_transport":   ctrl.avTransport != "",
-		"message":         "DLNA status",
-	})
+	return ok(map[string]any{"location": ctrl.Location, "has_transport": ctrl.avTransport, "message": "DLNA status"})
 }
 
-// --- resource search ---
-
-func resourceSearch(req Request) map[string]any {
-	query := strings.TrimSpace(req.Query)
-	if query == "" {
-		return fail("INVALID_PARAMS", "query is required")
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
 	}
-	limit := clampInt(req.Limit, 1, 100)
-	if req.Limit == 0 {
-		limit = 20
+	if v > hi {
+		return hi
 	}
-	return ok(map[string]any{
-		"query":     query,
-		"count":     0,
-		"hits":      []map[string]any{},
-		"sources":   len(req.Sources),
-		"providers": []string{"bilibili", "dlna", "resources"},
-		"limit":     limit,
-	})
+	return v
 }
 
-func resourceNormalize(req Request) map[string]any {
-	query := strings.TrimSpace(req.Query)
-	hit := strings.TrimSpace(req.Hit)
-	if query == "" || hit == "" {
-		return fail("INVALID_PARAMS", "query and hit are required")
-	}
-	return ok(map[string]any{
-		"query":      query,
-		"hit":        hit,
-		"normalized": strings.ToLower(hit),
-	})
+func fail(code, msg string) map[string]any {
+	return map[string]any{"status": "error", "error": code, "message": msg}
 }
 
-// --- sniff ---
-
-func sniffURL(req Request) map[string]any {
-	u := strings.TrimSpace(req.URL)
-	if u == "" {
-		return fail("INVALID_PARAMS", "url is required")
-	}
-	if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
-		return fail("INVALID_PARAMS", "url must be an http(s) URL")
-	}
-	maxCandidates := clampInt(req.MaxCandidates, 1, 50)
-	if req.MaxCandidates == 0 {
-		maxCandidates = 20
-	}
-	candidates := []map[string]any{}
-	if mt, ok := mimeTypeForURL(u); ok {
-		candidates = append(candidates, map[string]any{
-			"url":        u,
-			"mime_type":  mt,
-			"confidence": 0.95,
-		})
-	}
-	if len(candidates) == 0 {
-		candidates = append(candidates, map[string]any{
-			"url":        u,
-			"mime_type":  "application/octet-stream",
-			"confidence": 0.5,
-		})
-	}
-	if len(candidates) > maxCandidates {
-		candidates = candidates[:maxCandidates]
-	}
-	return ok(map[string]any{
-		"url":        u,
-		"count":      len(candidates),
-		"strategy":   "direct-or-page",
-		"candidates": candidates,
-	})
+func ok(data any) map[string]any {
+	return map[string]any{"status": "success", "data": data}
 }
