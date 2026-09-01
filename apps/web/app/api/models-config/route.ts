@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { readModelsConfig, writeModelsConfig } from "@/lib/models-config-store";
 import { resolveAuthFromRequest } from "@/lib/auth-resolve";
+import { syncModelsToAllTenants } from "@/lib/model-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,9 @@ export async function PUT(req: Request) {
   try {
     const body = (await req.json()) as Record<string, unknown>;
     writeModelsConfig(body);
-    return NextResponse.json({ success: true });
+    // 把全局模型配置下发生成每个租户 Go 网关的 model_list 并热生效
+    const sync = await syncModelsToAllTenants();
+    return NextResponse.json({ success: true, sync });
   } catch (error) {
     return NextResponse.json(
       { error: "bad_request", message: String(error) },
