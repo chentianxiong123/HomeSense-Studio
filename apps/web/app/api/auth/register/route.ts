@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
 import { AUTH_COOKIE_NAME, AUTH_COOKIE_MAX_AGE, signToken } from "@/lib/auth-token"
-import { createTenant } from "@/lib/tenant-store"
+import { createTenant, getTenant } from "@/lib/tenant-store"
+import { provisionTenantBrain } from "@/lib/tenant-brain"
 
 export const dynamic = "force-dynamic"
 
@@ -35,6 +36,15 @@ export async function POST(req: Request) {
       password,
       ...(displayName ? { displayName } : {}),
     })
+    // 注册即分配专属云大脑（挑端口/生成 token/建目录/回填），进程暂不启动，首用再冷启动
+    let brain = null
+    try {
+      const p = await provisionTenantBrain(tenant.id)
+      brain = { gatewayPort: p.gatewayPort, gatewayToken: p.gatewayToken }
+    } catch (e) {
+      console.error("provision brain failed:", e)
+    }
+    const finalTenant = getTenant(tenant.id)
     const token = signToken({ sub: user.userId, tid: user.tenantId, uname: user.username })
     const c = await cookies()
     c.set({
@@ -45,7 +55,7 @@ export async function POST(req: Request) {
       path: "/",
       maxAge: AUTH_COOKIE_MAX_AGE,
     })
-    return NextResponse.json({ ok: true, tenant, user, token })
+    return NextResponse.json({ ok: true, tenant: finalTenant ?? tenant, user, token, brain })
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     const status = message.includes("已存在") ? 409 : 500

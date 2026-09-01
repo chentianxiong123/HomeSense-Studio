@@ -89,42 +89,51 @@ function gatewayDirFor(tenantId: string): string {
 }
 
 /**
+ * 为新租户分配专属云大脑：挑端口、生成 token、tenant-brain.sh create 建目录、
+ * 回填 tenants 表。只分配 **不启动** 进程（保持"用户用的时候才启动"的弹性）。
+ * 已分配的租户直接返回现有映射。幂等。
+ */
+export async function provisionTenantBrain(tenantId: string): Promise<EnsureBrainResult> {
+  const tenant = getTenant(tenantId)
+  if (!tenant) throw new Error(`tenant not found: ${tenantId}`)
+
+  if (tenant.gatewayPort != null && tenant.gatewayToken && tenant.gatewayDir) {
+    return {
+      gatewayPort: tenant.gatewayPort,
+      gatewayToken: tenant.gatewayToken,
+      gatewayDir: tenant.gatewayDir,
+      coldStarted: false,
+    }
+  }
+
+  const dir = gatewayDirFor(tenantId)
+  const newPort = await pickPort()
+  const newToken = crypto.randomBytes(16).toString("hex")
+  await runScript(["create", dir, String(newPort), newToken])
+  setTenantGateway(tenantId, {
+    gatewayPort: newPort,
+    gatewayToken: newToken,
+    gatewayDir: dir,
+  })
+  return { gatewayPort: newPort, gatewayToken: newToken, gatewayDir: dir, coldStarted: false }
+}
+
+/**
  * 保证某租户的云大脑 gateway 可用：
  *  1. 无映射 → 分配端口 + 生成 token + tenant-brain.sh create
  *  2. 进程未运行 → tenant-brain.sh start + 等 /ready
  * 返回 { port, token, dir, coldStarted }。
  */
 export async function ensureTenantBrain(tenantId: string): Promise<EnsureBrainResult> {
-  let tenant = getTenant(tenantId)
-  if (!tenant) throw new Error(`tenant not found: ${tenantId}`)
+  const provisioned = await provisionTenantBrain(tenantId)
+  const { gatewayPort, gatewayToken, gatewayDir } = provisioned
 
-  const dir = tenant.gatewayDir ?? gatewayDirFor(tenantId)
-  const port = tenant.gatewayPort
-  const token = tenant.gatewayToken
-  const created = tenant.gatewayPort == null
-
-  if (created) {
-    const newPort = await pickPort()
-    const newToken = crypto.randomBytes(16).toString("hex")
-    await runScript(["create", dir, String(newPort), newToken])
-    setTenantGateway(tenantId, {
-      gatewayPort: newPort,
-      gatewayToken: newToken,
-      gatewayDir: dir,
-    })
-    tenant = getTenant(tenantId)!
-    await runScript(["start", dir])
-    const ok = await waitReady(newPort)
-    if (!ok) throw new Error(`tenant brain ${dir} did not become ready on :${newPort}`)
-    return { gatewayPort: newPort, gatewayToken: newToken, gatewayDir: dir, coldStarted: true }
+  if (await isReady(gatewayPort)) {
+    return { ...provisioned, coldStarted: false }
   }
 
-  if (await isReady(port!)) {
-    return { gatewayPort: port!, gatewayToken: token!, gatewayDir: dir, coldStarted: false }
-  }
-
-  await runScript(["start", dir])
-  const ok = await waitReady(port!)
-  if (!ok) throw new Error(`tenant brain ${dir} did not become ready on :${port}`)
-  return { gatewayPort: port!, gatewayToken: token!, gatewayDir: dir, coldStarted: true }
+  await runScript(["start", gatewayDir])
+  const ok = await waitReady(gatewayPort)
+  if (!ok) throw new Error(`tenant brain ${gatewayDir} did not become ready on :${gatewayPort}`)
+  return { gatewayPort, gatewayToken, gatewayDir, coldStarted: true }
 }
