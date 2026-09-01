@@ -41,6 +41,9 @@ export interface TenantRecord {
   createdAt: string
   ownerUserId: string | null
   activeSessionId: string | null
+  /** 该租户云大脑 gateway 的端口与 pico token（每租户独立进程）。 */
+  gatewayPort: number | null
+  gatewayToken: string | null
 }
 
 export interface TenantUserRecord {
@@ -82,12 +85,25 @@ function applyIndexSchema(target: DatabaseSync): void {
       db_path TEXT NOT NULL,
       created_at TEXT NOT NULL,
       owner_user_id TEXT,
-      active_session_id TEXT
+      active_session_id TEXT,
+      gateway_port INTEGER,
+      gateway_token TEXT
     )
   `)
   // 兼容老 schema(没有 active_session_id 列的旧库)
   try {
     target.exec(`ALTER TABLE tenants ADD COLUMN active_session_id TEXT`)
+  } catch {
+    /* 列已存在 */
+  }
+  // v5 每租户独立云大脑进程
+  try {
+    target.exec(`ALTER TABLE tenants ADD COLUMN gateway_port INTEGER`)
+  } catch {
+    /* 列已存在 */
+  }
+  try {
+    target.exec(`ALTER TABLE tenants ADD COLUMN gateway_token TEXT`)
   } catch {
     /* 列已存在 */
   }
@@ -168,7 +184,8 @@ export function listTenants(): TenantRecord[] {
   return getIndexDb()
     .prepare(
       `SELECT id, name, db_path AS dbPath, created_at AS createdAt, owner_user_id AS ownerUserId,
-              active_session_id AS activeSessionId
+              active_session_id AS activeSessionId,
+              gateway_port AS gatewayPort, gateway_token AS gatewayToken
        FROM tenants ORDER BY created_at ASC`,
     )
     .all() as unknown as TenantRecord[]
@@ -178,7 +195,8 @@ export function getTenant(tenantId: string): TenantRecord | null {
   const row = getIndexDb()
     .prepare(
       `SELECT id, name, db_path AS dbPath, created_at AS createdAt, owner_user_id AS ownerUserId,
-              active_session_id AS activeSessionId
+              active_session_id AS activeSessionId,
+              gateway_port AS gatewayPort, gateway_token AS gatewayToken
        FROM tenants WHERE id = ?`,
     )
     .get(tenantId) as TenantRecord | undefined
@@ -281,6 +299,8 @@ export function createTenant(input: CreateTenantInput): {
       createdAt: now,
       ownerUserId: userId,
       activeSessionId,
+      gatewayPort: null,
+      gatewayToken: null,
     },
     user: {
       tenantId,
