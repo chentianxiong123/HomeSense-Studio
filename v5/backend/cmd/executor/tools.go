@@ -12,6 +12,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/capabilities/media"
 	"github.com/sipeed/picoclaw/pkg/capabilities/mi"
 	"github.com/sipeed/picoclaw/pkg/capabilities/moonlight"
+	"github.com/sipeed/picoclaw/pkg/capabilities/remote_desktop"
 )
 
 var server = mcp.NewServer(&mcp.Implementation{
@@ -97,9 +98,12 @@ func registerTools() {
 
 	moonlightCap := moonlight.NewCapability()
 	mcp.AddTool(server, moonlightCap.MCPTool(), moonlightCap.Handler)
+
+	rdCap := remote_desktop.NewCapability()
+	mcp.AddTool(server, rdCap.MCPTool(), rdCap.Handler)
 }
 
 func registeredToolNames() []string {
-	names := []string{"executor_info", "mi_device", "netdisk_sync", "adb_cmd", "media_ctl", "moonlight_ctl"}
+	names := []string{"executor_info", "mi_device", "netdisk_sync", "adb_cmd", "media_ctl", "moonlight_ctl", "remote_desktop"}
 	return names
 }
