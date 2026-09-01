@@ -10,12 +10,12 @@
 import { execFile } from "node:child_process"
 import net from "node:net"
 import crypto from "node:crypto"
-import { getTenant, setTenantGateway } from "@/lib/tenant-store"
+import { getTenant, listTenants, setTenantGateway } from "@/lib/tenant-store"
 
 const BRAIN_SCRIPT =
   process.env.HS_BRAIN_SCRIPT ??
   "/home/a1/HomeSense-Studio-v3/v5/scripts/tenant-brain.sh"
-const DATA_DIR = process.env.HS_BRAIN_DATA ?? "/tmp/opencode/hs-brain"
+const DATA_DIR = process.env.HS_BRAIN_DATA ?? "/home/a1/HomeSense-Studio-v3/.hs-brain"
 const PORT_RANGE_START = 18800
 const PORT_RANGE_END = 18950
 const READY_TIMEOUT_MS = 30_000
@@ -56,7 +56,15 @@ async function isPortFree(port: number): Promise<boolean> {
 }
 
 async function pickPort(): Promise<number> {
+  // 除了端口要空闲，还得避开 tenants 表里已分配(哪怕当前未运行)的 gateway_port，
+  // 否则两个租户会拿到同一个端口，同时冷启动时冲突。
+  const taken = new Set(
+    listTenants()
+      .map((t) => t.gatewayPort)
+      .filter((p): p is number => p != null),
+  )
   for (let p = PORT_RANGE_START; p <= PORT_RANGE_END; p++) {
+    if (taken.has(p)) continue
     if (await isPortFree(p)) return p
   }
   throw new Error("no free gateway port in range")
