@@ -76,7 +76,21 @@ export function AdminPage() {
         const err = (await res.json().catch(() => ({}))) as { message?: string }
         throw new Error(err.message || `status ${res.status}`)
       }
-      setSaveMsg("已保存,所有用户立刻生效")
+      const body = (await res.json().catch(() => ({}))) as {
+        sync?: { updated?: string[]; reloaded?: string[]; failed?: { dir: string; error: string }[] }
+      }
+      const sync = body.sync
+      const parts: string[] = []
+      if (sync) {
+        if (sync.updated?.length) parts.push(`下发 ${sync.updated.length} 个家庭`)
+        if (sync.reloaded?.length) parts.push(`热生效 ${sync.reloaded.length} 个`)
+        if (sync.failed?.length) parts.push(`失败 ${sync.failed.length}: ${sync.failed.map((f) => f.error).join("; ")}`)
+        if (sync.updated?.length === 0) {
+          // 没有已分配的租户 brain:模型源已更新,新租户会用它;已分配但失败则提示
+          if (!sync.failed?.length) parts.push("模型源已更新(暂无已建家庭,新注册家庭会自动使用)")
+        }
+      }
+      setSaveMsg(parts.length ? `已保存,${parts.join("，")}` : "已保存")
     } catch (e) {
       setSaveMsg(`保存失败: ${e instanceof Error ? e.message : String(e)}`)
     } finally {

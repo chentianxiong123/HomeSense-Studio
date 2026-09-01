@@ -10,7 +10,14 @@
 import { execFile } from "node:child_process"
 import net from "node:net"
 import crypto from "node:crypto"
+import { join } from "node:path"
 import { getTenant, listTenants, setTenantGateway } from "@/lib/tenant-store"
+import {
+  readGlobalModelsConfig,
+  deriveModelList,
+  applyModelListToConfig,
+} from "@/lib/model-source"
+import { getModelsConfigPath } from "@/lib/models-config-store"
 
 const BRAIN_SCRIPT =
   process.env.HS_BRAIN_SCRIPT ??
@@ -20,6 +27,11 @@ const PORT_RANGE_START = 18800
 const PORT_RANGE_END = 18950
 const READY_TIMEOUT_MS = 30_000
 const READY_POLL_MS = 500
+
+/** 某租户 Go 网关的 config.json 完整路径（供模型同步等模块复用）。 */
+export function tenantConfigPath(gatewayDir: string): string {
+  return join(DATA_DIR, gatewayDir, "config.json")
+}
 
 export interface EnsureBrainResult {
   gatewayPort: number
@@ -43,6 +55,18 @@ function runScript(args: string[], timeoutMs = 60_000): Promise<string> {
       },
     )
   })
+}
+
+/** 创建租户 brain 后，把 admin 的全局模型配置应用进其 config.json（云服务商兜底）。 */
+function applyGlobalModelsToConfig(gatewayDir: string): void {
+  try {
+    const cfg = readGlobalModelsConfig(getModelsConfigPath())
+    const entries = deriveModelList(cfg)
+    if (entries.length === 0) return
+    applyModelListToConfig(tenantConfigPath(gatewayDir), entries)
+  } catch (e) {
+    console.warn(`apply global models to ${gatewayDir} failed:`, e)
+  }
 }
 
 async function isPortFree(port: number): Promise<boolean> {
@@ -118,6 +142,7 @@ export async function provisionTenantBrain(tenantId: string): Promise<EnsureBrai
   const newPort = await pickPort()
   const newToken = crypto.randomBytes(16).toString("hex")
   await runScript(["create", dir, String(newPort), newToken])
+  applyGlobalModelsToConfig(dir)
   setTenantGateway(tenantId, {
     gatewayPort: newPort,
     gatewayToken: newToken,
@@ -135,6 +160,9 @@ export async function provisionTenantBrain(tenantId: string): Promise<EnsureBrai
 export async function ensureTenantBrain(tenantId: string): Promise<EnsureBrainResult> {
   const provisioned = await provisionTenantBrain(tenantId)
   const { gatewayPort, gatewayToken, gatewayDir } = provisioned
+
+  // 启动前确保 config 用的是 admin 最新全局模型源（云服务商兜底配置）
+  applyGlobalModelsToConfig(gatewayDir)
 
   if (await isReady(gatewayPort)) {
     return { ...provisioned, coldStarted: false }
