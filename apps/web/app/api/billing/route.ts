@@ -12,7 +12,7 @@ import { readAllTenantUsage } from "@/lib/usage";
 
 export const dynamic = "force-dynamic";
 
-// 计费配置：模型单价 + 每租户月度配额。仅 admin。云平台唯一计费权威。
+// 计费配置：模型单价 + 每租户月度配额。仅 admin。云平台唯一计费权威（PG）。
 export async function GET() {
   const auth = await resolveAuthFromRequest();
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -23,8 +23,8 @@ export async function GET() {
     );
   }
   try {
-    const config = readBillingConfig();
-    const usage = readAllTenantUsage(); // 费用已由 usage.ts 按单价计算
+    const config = await readBillingConfig();
+    const usage = await readAllTenantUsage(); // 费用已由 usage.ts 按单价计算
     const tenants = listTenants().map((t) => ({
       tenantId: t.id,
       name: t.name,
@@ -56,7 +56,7 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: "bad_request", message: "body 必须是 JSON" }, { status: 400 });
   }
 
-  const next: BillingConfig = readBillingConfig();
+  const next: BillingConfig = await readBillingConfig();
   if (body.model_prices !== undefined) {
     if (typeof body.model_prices !== "object" || body.model_prices === null) {
       return NextResponse.json({ error: "bad_request", message: "model_prices 必须是对象" }, { status: 400 });
@@ -85,7 +85,7 @@ export async function PUT(req: Request) {
   }
 
   try {
-    writeBillingConfig(next);
+    await writeBillingConfig(next);
     return NextResponse.json({ success: true, config: next });
   } catch (e) {
     return NextResponse.json(

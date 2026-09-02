@@ -37,8 +37,18 @@ HomeSense 不是通用聊天软件，是**家庭级智能体（家庭大脑）**
 
 ```
 云平台（Next.js 控制面）          = 唯一业务中心：租户/登录/模型源/计费/钱包/用量账本/配额
-agent 实例（Go 进程，per-tenant） = 一个家庭的工作区：跑大脑、执行工具、记录真实 token
+agent 实例（Go 进程，per-tenant） = 一个家庭的工作区：跑大脑、执行工具、报告真实 token 事实
 ```
+
+### ⚠️ 数据存储铁律（平台数据 vs 用户数据）
+
+| 数据 | 本质 | 存储 |
+|---|---|---|
+| 聊天历史 / 时间线（`pico_messages`） | **用户数据 = 用户个人财产** | per-tenant SQLite |
+| token 用量（`pico_usage`）、钱包/账单/单价/配额 | **平台账本数据** | **PostgreSQL**（统一平台库） |
+
+> SQLite **永远不存用量和钱**。用量/钱是平台级的，混进用户 SQLite 是错误架构。
+> 完整方案见 `v5/docs/billing-postgresql-platform-db.md`。
 
 ```
 家庭（tenant，一个大脑）

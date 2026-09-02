@@ -19,7 +19,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
-	"github.com/sipeed/picoclaw/pkg/agent"
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/channels"
 	"github.com/sipeed/picoclaw/pkg/config"
@@ -112,11 +111,6 @@ type PicoChannel struct {
 	// history persists per-session chat messages to SQLite when configured.
 	history *PicoHistoryStore
 
-	// usageRecorder is the tenant metering sink backed by this channel's
-	// history store. It implements agent.UsageRecorder; exposing it here lets
-	// the gateway inject it into the agent loop as the single metering
-	// chokepoint. Nil when history persistence is disabled.
-	usageRecorder agent.UsageRecorder
 	// idleTimer fires when no connections exist for IdleShutdownMinutes,
 	// triggering a graceful gateway shutdown (on-demand lifecycle).
 	idleTimer *time.Timer
@@ -169,19 +163,8 @@ func NewPicoChannel(
 			return nil, fmt.Errorf("pico history store: %w", err)
 		}
 		ch.history = store
-		ch.usageRecorder = store
 	}
 	return ch, nil
-}
-
-// UsageRecorder returns the per-tenant metering sink backed by this channel's
-// history store, or nil when history persistence is disabled. The gateway
-// injects it into the agent loop as the single LLM-usage metering chokepoint.
-func (c *PicoChannel) UsageRecorder() agent.UsageRecorder {
-	if c == nil {
-		return nil
-	}
-	return c.usageRecorder
 }
 
 // SetIdleShutdownFunc registers a callback invoked when the channel has been

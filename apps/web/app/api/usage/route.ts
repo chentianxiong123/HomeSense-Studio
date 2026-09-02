@@ -4,7 +4,7 @@ import { readAllTenantUsage } from "@/lib/usage";
 
 export const dynamic = "force-dynamic";
 
-// 用量/计费账本:仅 admin 可见。读各租户 Go 网关的 pico_usage 累计表,只读、fail-open。
+// 用量/计费账本:仅 admin 可见。读 PG 平台库的 pico_usage,只读、fail-open。
 export async function GET() {
   const auth = await resolveAuthFromRequest();
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -14,9 +14,8 @@ export async function GET() {
       { status: 403 },
     );
   }
-  // 有 SQLite 读权限才给完整账本;普通管理员降级只给汇总不至于报错
   try {
-    return NextResponse.json(readAllTenantUsage());
+    return NextResponse.json(await readAllTenantUsage());
   } catch (e) {
     return NextResponse.json(
       { error: "usage_aggregate_failed", message: String(e) },

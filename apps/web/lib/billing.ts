@@ -1,22 +1,12 @@
-// HomeSense v5 — 云平台计费/钱包（全栈在 Next.js 控制面）。
+// HomeSense v5 — 云平台计费/钱包（全栈在 Next.js 控制面，数据存 PostgreSQL）。
 //
-// 架构铁律（见 v5/ARCHITECTURE.md §1）：Go 只是 agent 实例（工作区），
-// 不算钱、不判余额、不超限拦截。整套计费/钱包 100% 在云平台：
-//   - wallet.sqlite 是唯一计费权威（余额 + 流水 + 单价表 + 月度配额）
-//   - 费用 = pico_usage 真实 token × 单价（纯 Node 计算）
-//   - 扣账是云平台动作，agent 全程不感知
+// 架构铁律（见 v5/ARCHITECTURE.md §1 + v5/docs/billing-postgresql-platform-db.md）：
+//   - 用户数据（聊天历史）留 per-tenant SQLite；平台数据（用量/钱包/单价/配额）统一 PG。
+//   - Go 只是 agent 实例，不算钱；费用 = PG pico_usage 真实 token × 单价（纯 Node）。
 //
-// 计费用美元单位（不是虚拟币/积分），单价单位 USD / 1M tokens。
+// 金额全部用「分」（cents 整数）存储，杜绝浮点；对外展示转美元。
 
-import { DatabaseSync } from "node:sqlite"
-import { existsSync, mkdirSync } from "node:fs"
-import { dirname, join, resolve } from "node:path"
-
-const DATA_ROOT = resolve(
-  process.env.HOMESENSE_DATA_ROOT || process.cwd(),
-  "data",
-)
-const WALLET_DB_PATH = process.env.HOMESENSE_WALLET_DB_PATH || join(DATA_ROOT, "wallet.sqlite")
+import { migrate, query, queryOne, withTransaction } from "@/lib/db"
 
 export interface ModelPrice {
   input: number // USD per 1M input tokens
@@ -39,106 +29,54 @@ export interface WalletLedgerRow {
   inputTokens: number
   outputTokens: number
   amountUsd: number
-  balanceAfter: number
+  balanceAfterUsd: number
   note: string | null
   createdAt: string
 }
 
-export interface WalletView {
-  tenantId: string
-  name: string
-  balanceUsd: number
-  monthlyQuota: number // tokens, 0 = unlimited
-  monthlyUsedTokens: number
-  monthlyCostUsd: number
-  recentLedger: WalletLedgerRow[]
-}
-
-let walletDb: DatabaseSync | null = null
-
-function getWalletDb(): DatabaseSync {
-  if (walletDb) return walletDb
-  if (!existsSync(dirname(WALLET_DB_PATH))) {
-    mkdirSync(dirname(WALLET_DB_PATH), { recursive: true })
-  }
-  const db = new DatabaseSync(WALLET_DB_PATH)
-  db.exec("PRAGMA journal_mode = WAL")
-  db.exec("PRAGMA busy_timeout = 5000")
-  applyWalletSchema(db)
-  walletDb = db
-  return db
-}
-
-function applyWalletSchema(db: DatabaseSync): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS wallets (
-      tenant_id   TEXT PRIMARY KEY,
-      balance_usd REAL NOT NULL DEFAULT 0,
-      created_at  TEXT NOT NULL,
-      updated_at  TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS wallet_ledger (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      tenant_id     TEXT NOT NULL,
-      kind          TEXT NOT NULL,
-      model         TEXT,
-      input_tokens  INTEGER NOT NULL DEFAULT 0,
-      output_tokens INTEGER NOT NULL DEFAULT 0,
-      amount_usd    REAL NOT NULL,
-      balance_after REAL NOT NULL,
-      note          TEXT,
-      created_at    TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_wallet_ledger_tenant ON wallet_ledger(tenant_id, id);
-    CREATE TABLE IF NOT EXISTS billing_config (
-      id            INTEGER PRIMARY KEY CHECK (id = 1),
-      model_prices  TEXT NOT NULL DEFAULT '{}',
-      monthly_quota TEXT NOT NULL DEFAULT '{}',
-      updated_at    TEXT NOT NULL
-    );
-    INSERT OR IGNORE INTO billing_config (id, model_prices, monthly_quota, updated_at)
-      VALUES (1, '{}', '{}', '');
-  `)
-}
-
 // ---- 单价 / 配额 ----
 
-export function readBillingConfig(): BillingConfig {
-  const db = getWalletDb()
-  const row = db
-    .prepare(`SELECT model_prices, monthly_quota FROM billing_config WHERE id = 1`)
-    .get() as { model_prices: string; monthly_quota: string } | undefined
+export async function readBillingConfig(): Promise<BillingConfig> {
+  await migrate()
+  const row = await queryOne<{ model_prices: unknown; monthly_quota: unknown }>(
+    `SELECT model_prices, monthly_quota FROM billing_config WHERE id = 1`,
+  )
   if (!row) return { model_prices: {}, monthly_quota: {} }
-  let prices: BillingPrices = {}
-  let quota: MonthlyQuota = {}
-  try {
-    prices = JSON.parse(row.model_prices) as BillingPrices
-  } catch {
-    prices = {}
-  }
-  try {
-    quota = JSON.parse(row.monthly_quota) as MonthlyQuota
-  } catch {
-    quota = {}
-  }
-  return { model_prices: prices, monthly_quota: quota }
+  // pg 驱动对 jsonb 列默认返回已解析对象，但也可能为字符串（取决于配置），双兼容。
+  const prices = asRecord(row.model_prices) as BillingPrices | null
+  const quota = asRecord(row.monthly_quota) as MonthlyQuota | null
+  return { model_prices: prices ?? {}, monthly_quota: quota ?? {} }
 }
 
-export function writeBillingConfig(cfg: BillingConfig): void {
-  const db = getWalletDb()
-  const now = new Date().toISOString()
-  db.prepare(
-    `INSERT INTO billing_config (id, model_prices, monthly_quota, updated_at)
-     VALUES (1, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET model_prices = excluded.model_prices,
-                                   monthly_quota = excluded.monthly_quota,
-                                   updated_at = excluded.updated_at`,
-  ).run(JSON.stringify(cfg.model_prices ?? {}), JSON.stringify(cfg.monthly_quota ?? {}), now)
+function asRecord(v: unknown): Record<string, unknown> | null {
+  if (v === null || v === undefined) return null
+  if (typeof v === "object" && !Array.isArray(v)) return v as Record<string, unknown>
+  if (typeof v === "string") {
+    try {
+      const parsed = JSON.parse(v) as unknown
+      if (typeof parsed === "object" && !Array.isArray(parsed) && parsed !== null) {
+        return parsed as Record<string, unknown>
+      }
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+export async function writeBillingConfig(cfg: BillingConfig): Promise<void> {
+  await migrate()
+  await query(
+    `UPDATE billing_config
+        SET model_prices = $1, monthly_quota = $2, updated_at = now()
+      WHERE id = 1`,
+    [JSON.stringify(cfg.model_prices ?? {}), JSON.stringify(cfg.monthly_quota ?? {})],
+  )
 }
 
 /** 模型单价查询；缺省返回 0（fail-open，绝不报错）。 */
-export function priceFor(model: string, cfg?: BillingConfig): ModelPrice {
-  const c = cfg ?? readBillingConfig()
+export async function priceFor(model: string, cfg?: BillingConfig): Promise<ModelPrice> {
+  const c = cfg ?? (await readBillingConfig())
   const p = c.model_prices[model ?? ""]
   if (!p) return { input: 0, output: 0 }
   return { input: Number(p.input) || 0, output: Number(p.output) || 0 }
@@ -151,179 +89,226 @@ export function computeModelCost(
   outputTokens: number,
   cfg?: BillingConfig,
 ): number {
-  const p = priceFor(model, cfg)
+  const p = cfg?.model_prices?.[model ?? ""]
+  const input = Number(p?.input) || 0
+  const output = Number(p?.output) || 0
   return (
-    ((inputTokens || 0) / 1e6) * p.input +
-    ((outputTokens || 0) / 1e6) * p.output
+    ((inputTokens || 0) / 1e6) * input +
+    ((outputTokens || 0) / 1e6) * output
   )
 }
 
-export function monthlyQuotaFor(tenantId: string, cfg?: BillingConfig): number {
-  const c = cfg ?? readBillingConfig()
+export async function monthlyQuotaFor(tenantId: string, cfg?: BillingConfig): Promise<number> {
+  const c = cfg ?? (await readBillingConfig())
   return Number(c.monthly_quota[tenantId]) || 0
 }
 
 // ---- 钱包 ----
 
 /** 创建/确保租户钱包行（幂等）。首次开户余额 0。 */
-export function ensureWallet(tenantId: string): void {
-  const db = getWalletDb()
-  const now = new Date().toISOString()
-  db.prepare(
-    `INSERT OR IGNORE INTO wallets (tenant_id, balance_usd, created_at, updated_at)
-     VALUES (?, 0, ?, ?)`,
-  ).run(tenantId, now, now)
+export async function ensureWallet(tenantId: string): Promise<void> {
+  await migrate()
+  await query(
+    `INSERT INTO wallets (tenant_id) VALUES ($1)
+     ON CONFLICT (tenant_id) DO NOTHING`,
+    [tenantId],
+  )
 }
 
-export function getBalance(tenantId: string): number {
-  const db = getWalletDb()
-  ensureWallet(tenantId)
-  const row = db
-    .prepare(`SELECT balance_usd FROM wallets WHERE tenant_id = ?`)
-    .get(tenantId) as { balance_usd: number } | undefined
-  return row ? Number(row.balance_usd) || 0 : 0
+export async function getBalanceUsd(tenantId: string): Promise<number> {
+  await ensureWallet(tenantId)
+  const row = await queryOne<{ balance_cents: number }>(
+    `SELECT balance_cents FROM wallets WHERE tenant_id = $1`,
+    [tenantId],
+  )
+  return row ? centsToUsd(Number(row.balance_cents)) : 0
 }
 
 /**
  * 记账：原子地更新余额 + 写一条流水（balance_after 为快照）。
- * amount > 0 充值/调整加钱；amount < 0 消费扣钱。返回流水 id。
+ * amountUsd > 0 充值/调整加钱；amountUsd < 0 消费扣钱。
  */
-export function postLedger(
+export async function postLedger(
   tenantId: string,
   kind: "topup" | "charge" | "adjust" | "grant",
   amountUsd: number,
   opts: { model?: string; inputTokens?: number; outputTokens?: number; note?: string } = {},
-): { ledgerId: number; balanceAfter: number } {
-  const db = getWalletDb()
-  ensureWallet(tenantId)
-  const now = new Date().toISOString()
-  db.exec("BEGIN")
-  try {
-    const before = getBalance(tenantId)
-    const after = Math.round((before + amountUsd) * 1e6) / 1e6
-    db.prepare(
-      `UPDATE wallets SET balance_usd = ?, updated_at = ? WHERE tenant_id = ?`,
-    ).run(after, now, tenantId)
-    const res = db
-      .prepare(
-        `INSERT INTO wallet_ledger
-           (tenant_id, kind, model, input_tokens, output_tokens, amount_usd, balance_after, note, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
+): Promise<{ ledgerId: number; balanceAfterUsd: number }> {
+  await migrate()
+  const amountCents = usdToCents(amountUsd)
+  return withTransaction(async (run) => {
+    await run(
+      `INSERT INTO wallets (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING`,
+      [tenantId],
+    )
+    const before = await run<{ balance_cents: number }>(
+      `SELECT balance_cents FROM wallets WHERE tenant_id = $1`,
+      [tenantId],
+    )
+    const balanceCents =
+      Math.round((Number(before[0]?.balance_cents) + amountCents) * 1e6) / 1e6
+    await run(
+      `UPDATE wallets SET balance_cents = $1, updated_at = now() WHERE tenant_id = $2`,
+      [balanceCents, tenantId],
+    )
+    const res = await run(
+      `INSERT INTO wallet_ledger
+         (tenant_id, kind, model, input_tokens, output_tokens, amount_cents, balance_after_cents, note)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id`,
+      [
         tenantId,
         kind,
         opts.model ?? null,
         opts.inputTokens ?? 0,
         opts.outputTokens ?? 0,
-        amountUsd,
-        after,
+        amountCents,
+        balanceCents,
         opts.note ?? null,
-        now,
-      )
-    db.exec("COMMIT")
-    return { ledgerId: Number(res.lastInsertRowid), balanceAfter: after }
-  } catch (e) {
-    db.exec("ROLLBACK")
-    throw e
-  }
-}
-
-export function listLedger(tenantId: string, limit = 50): WalletLedgerRow[] {
-  const db = getWalletDb()
-  const rows = db
-    .prepare(
-      `SELECT id, tenant_id AS tenantId, kind, model, input_tokens AS inputTokens,
-              output_tokens AS outputTokens, amount_usd AS amountUsd,
-              balance_after AS balanceAfter, note, created_at AS createdAt
-       FROM wallet_ledger WHERE tenant_id = ?
-       ORDER BY id DESC LIMIT ?`,
+      ],
     )
-    .all(tenantId, limit) as unknown as WalletLedgerRow[]
-  return rows
+    return { ledgerId: Number(res[0].id), balanceAfterUsd: centsToUsd(balanceCents) }
+  })
 }
 
-// ---- 用量 + 扣账（云平台唯一费用计算） ----
+export async function listLedger(tenantId: string, limit = 50): Promise<WalletLedgerRow[]> {
+  await migrate()
+  const rows = await query<{
+    id: string
+    tenant_id: string
+    kind: string
+    model: string | null
+    input_tokens: number
+    output_tokens: number
+    amount_cents: number
+    balance_after_cents: number
+    note: string | null
+    created_at: string
+  }>(
+    `SELECT id, tenant_id, kind, model, input_tokens, output_tokens,
+            amount_cents, balance_after_cents, note, created_at
+       FROM wallet_ledger WHERE tenant_id = $1
+       ORDER BY id DESC LIMIT $2`,
+    [tenantId, limit],
+  )
+  return rows.map((r) => ({
+    id: Number(r.id),
+    tenantId: r.tenant_id,
+    kind: r.kind as WalletLedgerRow["kind"],
+    model: r.model,
+    inputTokens: Number(r.input_tokens),
+    outputTokens: Number(r.output_tokens),
+    amountUsd: centsToUsd(Number(r.amount_cents)),
+    balanceAfterUsd: centsToUsd(Number(r.balance_after_cents)),
+    note: r.note,
+    createdAt: new Date(r.created_at).toISOString(),
+  }))
+}
+
+// ---- 用量（PG pico_usage，平台数据统一在平台库） ----
 
 /**
- * 汇总某租户本月按模型的 token 用量（读 agent 实例记录的 pico_usage）。
- * fail-open：库不可读返回空。
+ * 汇总某租户指定时间段按模型的 token 用量（读 PG，不再读 per-tenant SQLite）。
  */
+export async function readUsageByModel(
+  tenantId: string,
+  since: string | null,
+): Promise<{ model: string; requests: number; input: number; output: number }[]> {
+  await migrate()
+  const rows = await query<{
+    model: string
+    requests: number
+    input: number
+    output: number
+  }>(
+    `SELECT COALESCE(model,'') AS model,
+            COALESCE(SUM(requests),0)::BIGINT AS requests,
+            COALESCE(SUM(input_tokens),0)::BIGINT AS input,
+            COALESCE(SUM(output_tokens),0)::BIGINT AS output
+       FROM pico_usage
+      WHERE tenant_id = $1${since ? " AND last_seen >= $2" : ""}
+      GROUP BY model ORDER BY model`,
+    since ? [tenantId, since] : [tenantId],
+  )
+  return rows.map((r) => ({
+    model: r.model,
+    requests: Number(r.requests),
+    input: Number(r.input),
+    output: Number(r.output),
+  }))
+}
+
+/** 本月起始的 UTC 字符串（与旧口径一致）。 */
+export function monthStartISO(): string {
+  const now = new Date()
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
+}
+
+/** 某租户本月按模型用量（读 PG）。 */
 export function readTenantMonthUsageByModel(
-  gatewayDir: string | null,
-): { model: string; input: number; output: number }[] {
-  if (!gatewayDir) return []
-  const brainDir = process.env.HS_BRAIN_DATA ?? "/home/a1/HomeSense-Studio-v3/.hs-brain"
-  const dbPath = join(brainDir, gatewayDir, "pico-history.db")
-  if (!existsSync(dbPath)) return []
-  try {
-    const db = new DatabaseSync(dbPath, { readOnly: true })
-    try {
-      const now = new Date()
-      const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
-      const rows = db
-        .prepare(
-          `SELECT COALESCE(model,'') AS model,
-                  COALESCE(SUM(input_tokens),0) AS input,
-                  COALESCE(SUM(output_tokens),0) AS output
-           FROM pico_usage WHERE last_seen >= ? GROUP BY model`,
-        )
-        .all(monthStart) as unknown as { model: string; input: number; output: number }[]
-      return rows.map((r) => ({ model: r.model, input: Number(r.input), output: Number(r.output) }))
-    } finally {
-      db.close()
-    }
-  } catch {
-    return []
-  }
+  // 兼容旧签名：gatewayDir 已不用，保留参数避免大改调用方
+  _gatewayDir: string | null,
+  tenantId: string,
+): Promise<{ model: string; requests: number; input: number; output: number }[]> {
+  return readUsageByModel(tenantId, monthStartISO())
 }
 
 /** 计算某租户本月费用（按模型 × 单价，云平台纯计算）。 */
-export function computeTenantMonthCost(
-  gatewayDir: string | null,
+export async function computeTenantMonthCost(
+  tenantId: string,
   cfg?: BillingConfig,
-): number {
-  const c = cfg ?? readBillingConfig()
+): Promise<number> {
+  const c = cfg ?? (await readBillingConfig())
+  const usage = await readUsageByModel(tenantId, monthStartISO())
   let total = 0
-  for (const m of readTenantMonthUsageByModel(gatewayDir)) {
+  for (const m of usage) {
     total += computeModelCost(m.model, m.input, m.output, c)
   }
   return Math.round(total * 1e6) / 1e6
 }
 
-/** 某租户本月已用 token 总数（读 pico_usage，云平台只读数据源）。 */
-export function readTenantMonthTokens(gatewayDir: string | null): number {
+/** 某租户本月已用 token 总数（读 PG 平台库）。 */
+export async function readTenantMonthTokens(tenantId: string): Promise<number> {
+  const usage = await readUsageByModel(tenantId, monthStartISO())
   let total = 0
-  for (const m of readTenantMonthUsageByModel(gatewayDir)) {
+  for (const m of usage) {
     total += m.input + m.output
   }
   return total
 }
 
 /**
- * 对某租户按本月用量扣一笔账（kind=charge）。费用为 0 时跳过。
- * 返回扣掉的金额（负数）或 0。
+ * 记录一次用量（前端上报 /api/usage/record 调用）。按 (tenant, session, model, task)
+ * 累加，task 默认空串（主循环）。幂等 upsert。
  */
-export function chargeTenantForMonth(
+export async function recordUsage(
   tenantId: string,
-  gatewayDir: string | null,
-  cfg?: BillingConfig,
-): number {
-  const c = cfg ?? readBillingConfig()
-  const usage = readTenantMonthUsageByModel(gatewayDir)
-  if (usage.length === 0) return 0
-  let cost = 0
-  for (const m of usage) {
-    const cst = computeModelCost(m.model, m.input, m.output, c)
-    if (cst > 0) {
-      postLedger(tenantId, "charge", -cst, {
-        model: m.model,
-        inputTokens: m.input,
-        outputTokens: m.output,
-        note: "本月模型用量",
-      })
-      cost += cst
-    }
-  }
-  return Math.round(cost * 1e6) / 1e6
+  sessionId: string,
+  model: string,
+  inputTokens: number,
+  outputTokens: number,
+  task = "",
+): Promise<void> {
+  await migrate()
+  await query(
+    `INSERT INTO pico_usage
+       (tenant_id, session_id, model, task, requests, input_tokens, output_tokens, first_seen, last_seen)
+     VALUES ($1, $2, $3, $4, 1, $5, $6, now(), now())
+     ON CONFLICT (tenant_id, session_id, model, task) DO UPDATE SET
+       requests = pico_usage.requests + 1,
+       input_tokens = pico_usage.input_tokens + excluded.input_tokens,
+       output_tokens = pico_usage.output_tokens + excluded.output_tokens,
+       last_seen = now()`,
+    [tenantId, sessionId || "", model || "unknown", task, inputTokens || 0, outputTokens || 0],
+  )
+}
+
+// ---- 单位换算 ----
+
+export function usdToCents(usd: number): number {
+  return Math.round((usd || 0) * 100)
+}
+
+export function centsToUsd(cents: number): number {
+  return Math.round((cents || 0) * 100) / 10000
 }
