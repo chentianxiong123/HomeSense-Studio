@@ -29,6 +29,7 @@ import { cn } from "@pico/lib/utils"
 import {
   type AssistantMessageKind,
   type ChatAttachment,
+  type ChatMessageUsage,
   type ChatToolCall,
 } from "@pico/store/chat"
 
@@ -38,6 +39,7 @@ interface AssistantMessageProps {
   attachments?: ChatAttachment[]
   kind?: AssistantMessageKind
   modelName?: string
+  usage?: ChatMessageUsage
   toolCalls?: ChatToolCall[]
   timestamp?: string | number
 }
@@ -48,6 +50,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   attachments = [],
   kind = "normal",
   modelName,
+  usage,
   toolCalls = [],
   timestamp = "",
 }: AssistantMessageProps) {
@@ -88,6 +91,16 @@ export const AssistantMessage = memo(function AssistantMessage({
               <>
                 <span className="opacity-50">•</span>
                 <span>{formattedTimestamp}</span>
+              </>
+            )}
+            {usage && usage.total_tokens > 0 && (
+              <>
+                <span className="opacity-50">•</span>
+                <span className="font-mono">
+                  {usage.input_tokens.toLocaleString()} in /{" "}
+                  {usage.output_tokens.toLocaleString()} out ·{" "}
+                  {usage.total_tokens.toLocaleString()} tok
+                </span>
               </>
             )}
           </div>

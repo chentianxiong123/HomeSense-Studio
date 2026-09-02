@@ -12,6 +12,7 @@ import { DatabaseSync } from "node:sqlite"
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
+import { computeModelCost, readBillingConfig } from "@/lib/billing"
 import { listTenants } from "@/lib/tenant-store"
 
 const BRAIN_DATA_DIR = process.env.HS_BRAIN_DATA ?? "/home/a1/HomeSense-Studio-v3/.hs-brain"
@@ -93,8 +94,7 @@ export function readTenantUsage(tenantId: string, name: string, gatewayDir: stri
           `SELECT COALESCE(model,'') AS model,
                   COALESCE(SUM(requests),0) AS requests,
                   COALESCE(SUM(input_tokens),0) AS input_tokens,
-                  COALESCE(SUM(output_tokens),0) AS output_tokens,
-                  COALESCE(SUM(estimated_cost_usd),0) AS estimated_cost_usd
+                  COALESCE(SUM(output_tokens),0) AS output_tokens
              FROM pico_usage
             WHERE last_seen >= ?
             GROUP BY model
@@ -105,17 +105,22 @@ export function readTenantUsage(tenantId: string, name: string, gatewayDir: stri
         requests: number
         input_tokens: number
         output_tokens: number
-        estimated_cost_usd: number
       }[]
 
-      base.by_model = rows.map((r) => ({
-        model: r.model,
-        requests: Number(r.requests),
-        input_tokens: Number(r.input_tokens),
-        output_tokens: Number(r.output_tokens),
-        total_tokens: Number(r.input_tokens) + Number(r.output_tokens),
-        estimated_cost_usd: Number(r.estimated_cost_usd),
-      }))
+      const cfg = readBillingConfig()
+      base.by_model = rows.map((r) => {
+        const input = Number(r.input_tokens)
+        const output = Number(r.output_tokens)
+        return {
+          model: r.model,
+          requests: Number(r.requests),
+          input_tokens: input,
+          output_tokens: output,
+          total_tokens: input + output,
+          // 费用由云平台按单价计算（架构铁律：agent 不算钱）
+          estimated_cost_usd: Math.round(computeModelCost(r.model, input, output, cfg) * 1e6) / 1e6,
+        }
+      })
       for (const m of base.by_model) {
         base.requests += m.requests
         base.input_tokens += m.input_tokens
