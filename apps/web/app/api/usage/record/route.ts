@@ -38,9 +38,21 @@ export async function POST(req: Request) {
   const task = typeof body.task === "string" ? body.task : "";
 
   try {
-    await recordUsage(auth.tenantId, sessionId, model || "unknown", inputTokens, outputTokens, task);
+    const result = await recordUsage(
+      auth.tenantId,
+      sessionId,
+      model || "unknown",
+      inputTokens,
+      outputTokens,
+      task,
+    );
     const monthly = await readTenantMonthTokens(auth.tenantId);
-    return NextResponse.json({ success: true, monthly_used_tokens: monthly });
+    return NextResponse.json({
+      success: true,
+      monthly_used_tokens: monthly,
+      cost_usd: result.costUsd,
+      balance_after_usd: result.balanceAfterUsd,
+    });
   } catch (e) {
     return NextResponse.json(
       { error: "usage_record_failed", message: String(e) },

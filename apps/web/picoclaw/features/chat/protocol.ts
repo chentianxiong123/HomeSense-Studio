@@ -117,6 +117,49 @@ function parseTokenUsage(payload: Record<string, unknown>): MessageTokenUsage | 
   }
 }
 
+// Deduplicate per (messageId, model) so a stream that delivers usage on
+// both message.create (placeholder) and message.update (final) only bills once.
+const reportedUsageKeys = new Set<string>()
+
+async function reportUsageToBilling(
+  messageId: string,
+  modelName: string | undefined,
+  usage: MessageTokenUsage,
+  sessionId: string | undefined,
+) {
+  const model = modelName || "unknown"
+  const key = `${messageId}::${model}::${usage.total_tokens}`
+  if (reportedUsageKeys.has(key)) return
+  reportedUsageKeys.add(key)
+  // Cap the dedup set so a long session doesn't leak memory.
+  if (reportedUsageKeys.size > 2048) {
+    const overflow = reportedUsageKeys.size - 1024
+    const it = reportedUsageKeys.values()
+    for (let i = 0; i < overflow; i++) reportedUsageKeys.delete(it.next().value as string)
+  }
+  try {
+    const res = await fetch("/api/usage/record", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        model,
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        total_tokens: usage.total_tokens,
+        session_id: sessionId ?? null,
+        message_id: messageId,
+      }),
+    })
+    if (!res.ok && res.status !== 401) {
+      console.warn("usage record failed", res.status)
+    }
+  } catch (e) {
+    // Fail-open: never block the chat UI on a billing write.
+    console.warn("usage record error", e)
+  }
+}
+
 export function handlePicoMessage(
   message: PicoMessage,
   expectedSessionId: string,
@@ -138,6 +181,7 @@ export function handlePicoMessage(
       const isPlaceholder = payload.placeholder === true
       const modelName = parseModelName(payload)
       const usage = parseTokenUsage(payload)
+      if (usage) reportUsageToBilling(messageId, modelName, usage, message.session_id)
       const timestamp =
         message.timestamp !== undefined &&
         Number.isFinite(Number(message.timestamp))
@@ -176,6 +220,7 @@ export function handlePicoMessage(
       const contextUsage = parseContextUsage(payload)
       const modelName = parseModelName(payload)
       const usage = parseTokenUsage(payload)
+      if (usage) reportUsageToBilling(messageId, modelName, usage, message.session_id)
       const timestamp =
         message.timestamp !== undefined &&
         Number.isFinite(Number(message.timestamp))
