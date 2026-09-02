@@ -9,6 +9,7 @@ import { IconDeviceFloppy, IconPlus, IconShield, IconTrash } from "@tabler/icons
 import { useEffect, useState } from "react"
 
 import { PageHeader } from "@pico/components/page-header"
+import { UsagePanel } from "@pico/components/admin/usage-panel"
 import { Button } from "@pico/components/ui/button"
 import { useCurrentUser } from "@pico/hooks/use-current-user"
 
@@ -315,6 +316,10 @@ export function AdminPage() {
             </Button>
           </div>
         )}
+
+        <div className="border-t py-4">
+          <UsagePanel />
+        </div>
       </div>
     </div>
   )
