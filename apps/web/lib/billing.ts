@@ -288,8 +288,10 @@ export async function recordUsage(
   inputTokens: number,
   outputTokens: number,
   task = "",
-): Promise<void> {
+): Promise<{ costUsd: number; balanceAfterUsd: number | null }> {
   await migrate()
+  const inTok = Math.max(0, inputTokens || 0)
+  const outTok = Math.max(0, outputTokens || 0)
   await query(
     `INSERT INTO pico_usage
        (tenant_id, session_id, model, task, requests, input_tokens, output_tokens, first_seen, last_seen)
@@ -299,8 +301,41 @@ export async function recordUsage(
        input_tokens = pico_usage.input_tokens + excluded.input_tokens,
        output_tokens = pico_usage.output_tokens + excluded.output_tokens,
        last_seen = now()`,
-    [tenantId, sessionId || "", model || "unknown", task, inputTokens || 0, outputTokens || 0],
+    [tenantId, sessionId || "", model || "unknown", task, inTok, outTok],
   )
+
+  // Compute the dollar cost of this single call and post a charge ledger
+  // entry so the wallet balance tracks real spend. We don't pre-flight
+  // balance here — that would block writes during partial outages of the
+  // pricing table; the wallet simply goes negative and the admin UI shows
+  // it. For pre-consume / hard-quota enforcement, the chat path should
+  // call `getBalanceUsd` + `monthlyQuotaFor` before invoking the LLM.
+  let costUsd = 0
+  let balanceAfterUsd: number | null = null
+  try {
+    const cfg = await readBillingConfig()
+    costUsd = computeModelCost(model, inTok, outTok, cfg)
+    if (costUsd > 0) {
+      const r = await postLedger(
+        tenantId,
+        "charge",
+        -costUsd,
+        {
+          model,
+          inputTokens: inTok,
+          outputTokens: outTok,
+          note: `usage ${model} ${inTok}+${outTok}tok`,
+        },
+      )
+      balanceAfterUsd = r.balanceAfterUsd
+    }
+  } catch (e) {
+    // Don't fail the whole usage record on a billing-side error — the
+    // pico_usage row is the source of truth for cost, the ledger is just
+    // a convenience view.
+    console.warn("recordUsage: post-charge ledger failed", e)
+  }
+  return { costUsd, balanceAfterUsd }
 }
 
 // ---- 单位换算 ----
