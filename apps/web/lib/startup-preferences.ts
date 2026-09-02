@@ -1,5 +1,9 @@
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { SettingsManager } from "@earendil-works/pi-coding-agent";
+// v5 砍掉 pi:本地类型桩(原 ThinkingLevel / SettingsManager)
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh"
+export interface SettingsManager {
+  getDefaultThinkingLevel(): ThinkingLevel | undefined
+  setDefaultThinkingLevel(level: ThinkingLevel | undefined): void
+}
 
 export interface ExplicitStartupPreferences {
   model?: { provider: string; modelId: string };

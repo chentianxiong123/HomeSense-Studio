@@ -1,4 +1,4 @@
-import { DefaultResourceLoader, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { DefaultResourceLoader, getAgentDir } from "./pi-shims";
 import type { SkillInfo, SkillsResponse } from "@/lib/api-types";
 import { annotateSkillsWithInstallInfo } from "@/lib/skill-lock";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "@/lib/project-trust";

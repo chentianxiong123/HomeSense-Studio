@@ -1,4 +1,4 @@
-import { hasTrustRequiringProjectResources, ProjectTrustStore } from "@earendil-works/pi-coding-agent";
+import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./pi-shims";
 import type { ProjectTrustStatus } from "./api-types";
 
 export function getProjectTrustStatus(cwd: string, agentDir: string): ProjectTrustStatus {

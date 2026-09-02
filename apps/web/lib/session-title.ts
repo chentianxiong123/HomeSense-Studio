@@ -1,9 +1,4 @@
-import {
-  Agent,
-  type AgentMessage,
-  type AgentOptions,
-  type AgentTool,
-} from "@earendil-works/pi-agent-core";
+import { Agent, AgentMessage, AgentOptions, AgentTool } from "./pi-shims";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 
 const TITLE_TIMEOUT_MS = 90_000;

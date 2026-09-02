@@ -6,11 +6,8 @@
 //
 // 与 hermes 的 memory_tool + session_search 对应。
 
-import { Type } from "@earendil-works/pi-ai"
-import {
-  defineTool,
-  type InlineExtension,
-} from "@earendil-works/pi-coding-agent"
+import { Type } from "./pi-shims"
+import { defineTool, InlineExtension } from "./pi-shims"
 
 import {
   buildMemorySnapshot,

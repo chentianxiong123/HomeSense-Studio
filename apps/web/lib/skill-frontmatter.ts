@@ -1,4 +1,4 @@
-import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import { parseFrontmatter } from "./pi-shims";
 
 const KEY = "disable-model-invocation";
 const KEY_LINE = `[ \\t]*(?:${KEY}|"${KEY}"|'${KEY}')[ \\t]*:`;

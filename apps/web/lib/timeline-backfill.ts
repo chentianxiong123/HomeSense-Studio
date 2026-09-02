@@ -10,12 +10,12 @@
 
 import fs from "node:fs"
 import path from "node:path"
-import { getAgentDir } from "@earendil-works/pi-coding-agent"
 import {
   appendTimelineMessage,
   getTimelineMeta,
   setTimelineMeta,
 } from "./timeline-db"
+import { getTenantSessionsDir } from "./tenant-paths"
 
 const BACKFILL_META_KEY = "legacy_backfill_done"
 const BACKFILL_VERSION = "1"
@@ -126,7 +126,7 @@ export function backfillLegacySessionsIfNeeded(
     return { imported: 0, scanned: 0 }
   }
 
-  const sessionDir = path.join(getAgentDir(), "sessions")
+  const sessionDir = getTenantSessionsDir(tenantId)
   if (!fs.existsSync(sessionDir)) {
     setTimelineMeta(tenantId, doneKey, new Date().toISOString())
     return { imported: 0, scanned: 0 }

@@ -1,24 +1,30 @@
 import { stat } from "fs/promises";
 import { resolve } from "path";
-import {
-  loadModelsWithCache,
-  withSafeModelLoadFailure,
-  type ModelsData,
-} from "@/lib/models-cache";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 import { resolveAuthFromRequest } from "@/lib/auth-resolve";
-import { loadModels } from "@/lib/models-lib";
+import { readModelsConfig } from "@/lib/models-config-store";
 
 export const dynamic = "force-dynamic";
 
-const EMPTY_MODELS: ModelsData = {
+const EMPTY_MODELS = {
   models: {},
   modelList: [],
   defaultModel: null,
   thinkingLevels: {},
   thinkingLevelMaps: {},
   thinkingLevelPins: {},
+  pico: {
+    models: [],
+    total: 0,
+    default_model: "",
+    default_provider: "",
+    fallback_chain: [],
+  },
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 export async function GET(req: Request) {
   const auth = await resolveAuthFromRequest();
@@ -45,20 +51,20 @@ export async function GET(req: Request) {
   }
 
   try {
-    const data = await loadModelsWithCache(cwd, () => loadModels(cwd, tenantId));
-    return Response.json(toPicoModelShape(data));
+    return Response.json(toPicoModelShape(readModelsConfig()));
   } catch {
-    return Response.json(withSafeModelLoadFailure(EMPTY_MODELS));
+    return Response.json(EMPTY_MODELS);
   }
 }
 
-// 把 pi 的 models 数据转换成 PicoClaw 前端期望的 ModelInfo 列表形状
+// 把 admin 全局模型池(models.json, readModelsConfig)转换成 PicoClaw 前端期望的 ModelInfo 列表形状。
+// 模型全部 available,不按 billing enabled 过滤;defaultModel 恒为 null。
 function toPicoModelShape(
-  data: ModelsData,
+  cfg: Record<string, unknown>,
 ): {
   models: Record<string, string>;
   modelList: { id: string; name: string; provider: string }[];
-  defaultModel: { provider: string; modelId: string } | null;
+  defaultModel: null;
   thinkingLevels: Record<string, string[]>;
   thinkingLevelMaps: Record<string, Record<string, string | null>>;
   thinkingLevelPins: Record<string, string>;
@@ -83,10 +89,25 @@ function toPicoModelShape(
     fallback_chain: string[];
   };
 } {
-  const { modelList, defaultModel } = data;
+  const providers = isRecord(cfg.providers) ? cfg.providers : {};
+  const models: Record<string, string> = {};
+  const modelList: { id: string; name: string; provider: string }[] = [];
+  for (const [providerId, providerRaw] of Object.entries(providers)) {
+    if (!isRecord(providerRaw) || !Array.isArray(providerRaw.models)) continue;
+    for (const mRaw of providerRaw.models) {
+      if (!isRecord(mRaw) || typeof mRaw.id !== "string") continue;
+      const id = mRaw.id.trim();
+      if (!id) continue;
+      const name =
+        typeof mRaw.name === "string" && mRaw.name.trim() ? mRaw.name : id;
+      const key = `${providerId}:${id}`;
+      models[key] = name;
+      modelList.push({ id, name, provider: providerId });
+    }
+  }
   const picoModels = modelList.map((m, index) => ({
     index,
-    model_name: m.name || m.id,
+    model_name: m.name,
     provider: m.provider,
     model: m.id,
     api_base: "",
@@ -95,27 +116,21 @@ function toPicoModelShape(
     enabled: true,
     available: true,
     status: "available" as const,
-    is_default:
-      defaultModel != null &&
-      defaultModel.provider === m.provider &&
-      defaultModel.modelId === m.id,
+    is_default: false,
     is_virtual: false,
   }));
-  // default_model 用显示名(与 model_name 对齐,前端拿它匹配当前默认)
-  const defaultModelName =
-    defaultModel != null
-      ? (modelList.find(
-          (m) =>
-            m.provider === defaultModel.provider && m.id === defaultModel.modelId,
-        )?.name ?? defaultModel.modelId)
-      : "";
   return {
-    ...data,
+    models,
+    modelList,
+    defaultModel: null,
+    thinkingLevels: {},
+    thinkingLevelMaps: {},
+    thinkingLevelPins: {},
     pico: {
       models: picoModels,
       total: picoModels.length,
-      default_model: defaultModelName,
-      default_provider: defaultModel?.provider ?? "",
+      default_model: "",
+      default_provider: "",
       fallback_chain: [],
     },
   };

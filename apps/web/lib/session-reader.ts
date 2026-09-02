@@ -1,8 +1,4 @@
-import {
-  SessionManager,
-  buildContextEntries as piBuildContextEntries,
-  getAgentDir,
-} from "@earendil-works/pi-coding-agent";
+import { SessionManager, buildContextEntries as piBuildContextEntries, getAgentDir } from "./pi-shims";
 import { closeSync, type Dirent, fstatSync, openSync, readSync } from "fs";
 import { readdir } from "fs/promises";
 import { isAbsolute, join, normalize as normalizePath, relative, resolve as resolvePath, sep } from "path";

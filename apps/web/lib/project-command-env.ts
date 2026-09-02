@@ -1,11 +1,4 @@
-import {
-  createBashToolDefinition,
-  createLocalBashOperations,
-  getAgentDir,
-  type BashOperations,
-  type InlineExtension,
-  type LoadExtensionsResult,
-} from "@earendil-works/pi-coding-agent";
+import { createBashToolDefinition, createLocalBashOperations, getAgentDir, BashOperations, InlineExtension, LoadExtensionsResult } from "./pi-shims";
 import { join } from "node:path";
 
 const HOST_EXTENSION_NAME = "pi-web-project-command-environment";

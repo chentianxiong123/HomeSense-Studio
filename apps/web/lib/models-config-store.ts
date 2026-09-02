@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import os from "node:os";
+import path from "node:path";
 import { writePrivateFileAtomicSync } from "./atomic-file";
 import { invalidateModelsCache } from "./models-cache";
 
@@ -57,16 +57,23 @@ function sanitizeModelsConfig(data: Record<string, unknown>): Record<string, unk
   return { ...data, providers };
 }
 
+// 全局共享模型目录（admin 维护的真模型池）。pi 已移除,不再依赖 @earendil-works/pi-coding-agent 的 getAgentDir。
+// 位置与旧版保持一致: 优先环境变量, 否则 ~/.homesense/agent/models.json
+function getGlobalAgentDir(): string {
+  return process.env.HOMESENSE_CODING_AGENT_DIR || path.join(os.homedir(), ".homesense", "agent");
+}
+
 export function getModelsConfigPath(): string {
-  return join(getAgentDir(), "models.json");
+  return path.join(getGlobalAgentDir(), "models.json");
 }
 
 export function readModelsConfig(
-  modelsPath = getModelsConfigPath(),
+  modelsPath?: string,
 ): Record<string, unknown> {
-  if (!existsSync(modelsPath)) return { providers: {} };
+  const path = modelsPath ?? getModelsConfigPath();
+  if (!existsSync(path)) return { providers: {} };
   try {
-    return JSON.parse(readFileSync(modelsPath, "utf8")) as Record<string, unknown>;
+    return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
   } catch {
     return { providers: {} };
   }
@@ -74,11 +81,12 @@ export function readModelsConfig(
 
 export function writeModelsConfig(
   data: Record<string, unknown>,
-  modelsPath = getModelsConfigPath(),
+  modelsPath?: string,
 ): void {
-  const dir = dirname(modelsPath);
+  const path = modelsPath ?? getModelsConfigPath();
+  const dir = dirname(path);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const normalized = normalizeModelsConfigCosts(sanitizeModelsConfig(data));
-  writePrivateFileAtomicSync(modelsPath, JSON.stringify(normalized, null, 2));
+  writePrivateFileAtomicSync(path, JSON.stringify(normalized, null, 2));
   invalidateModelsCache();
 }

@@ -4,8 +4,8 @@
 // 模型配置(admin 在 /admin 维护的 models.json)全局共享,用 getAgentDir();
 // 用户偏好(默认模型)按租户隔离,settingsManager 用 per-tenant agentDir。
 
-import { createAgentSessionServices, getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { createAgentSessionServices, getAgentDir, SettingsManager } from "./pi-shims";
+import { getSupportedThinkingLevels } from "./pi-shims";
 import { withModelRuntimeError, type ModelsData } from "@/lib/models-cache";
 import { resolveVisibleModels, selectInitialModelScope } from "@/lib/model-scope";
 import { projectTrustReloadOptions } from "@/lib/project-trust";
@@ -26,7 +26,7 @@ function compareModelEntries(
     || modelNameCollator.compare(a.id, b.id);
 }
 
-export async function loadModels(cwd: string, tenantId?: string): Promise<ModelsData> {
+export async function loadModels(cwd: string, tenantId: string): Promise<ModelsData> {
   const nameMap = new Map<string, string>();
   let modelList: { id: string; name: string; provider: string }[] = [];
   let defaultModel: { provider: string; modelId: string } | null = null;

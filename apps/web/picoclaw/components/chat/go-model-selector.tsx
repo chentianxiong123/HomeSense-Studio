@@ -1,5 +1,6 @@
 // 用户侧模型选择器 — 严格只显示「管理员勾选 + 已配价」的模型。
-// 数据源 = /api/models-config (Go provider 配置) ∩ /api/billing 里的 model_prices.enabled。
+// 数据源 = /api/models-config (Go provider 配置真模型池) ∩ /api/billing/priced-models
+//          （该端点已 = models-config ∩ model_prices.enabled，非 admin 的计费端点）。
 // 没有勾选 = 用户看不到（fail-closed）。
 // 选择只写前端 localStorage，发消息时随消息带；不触碰云端任何配置。
 
@@ -17,15 +18,6 @@ import {
 } from "@pico/components/ui/select"
 import { getStoredChatModel, setStoredChatModel } from "@/lib/chat-model-pref"
 
-interface ModelPriceRow {
-  input: number
-  output: number
-  enabled?: boolean
-}
-interface ModelPrices {
-  [model: string]: ModelPriceRow
-}
-
 interface PricedModel {
   id: string
   label: string
@@ -42,28 +34,30 @@ export function GoModelSelector({ disabled = false }: { disabled?: boolean }) {
     let cancelled = false
     void (async () => {
       try {
-        const [cfgRes, billRes] = await Promise.all([
+        const [cfgRes, pricedRes] = await Promise.all([
           fetch("/api/models-config", { credentials: "same-origin" }),
-          fetch("/api/billing", { credentials: "same-origin" }),
+          fetch("/api/billing/priced-models", { credentials: "same-origin" }),
         ])
         if (!cfgRes.ok) throw new Error(`models-config HTTP ${cfgRes.status}`)
+        if (!pricedRes.ok) throw new Error(`priced-models HTTP ${pricedRes.status}`)
         const cfg = (await cfgRes.json()) as { providers?: Record<string, { models?: { id?: string; name?: string }[] }> }
-        const bill = billRes.ok ? ((await billRes.json()) as { config?: { model_prices?: ModelPrices } }) : { config: {} }
-        const prices = bill.config?.model_prices ?? {}
-        const seen = new Set<string>()
-        const out: PricedModel[] = []
+        const priced = (await pricedRes.json()) as { models?: { model_id: string; display_name: string; input_price: number; output_price: number }[] }
+        const poolIds = new Set<string>()
         for (const provider of Object.values(cfg.providers ?? {})) {
           for (const m of provider.models ?? []) {
             const id = String(m?.id ?? "").trim()
-            if (!id || seen.has(id)) continue
-            const p = prices[id]
-            // 必须 admin 勾选 enabled + 配了价 才给用户
-            if (!p || p.enabled !== true) continue
-            seen.add(id)
-            out.push({ id, label: m?.name || id, input_price: p.input, output_price: p.output })
+            if (id) poolIds.add(id)
           }
         }
-        out.sort((a, b) => a.label.localeCompare(b.label))
+        const out: PricedModel[] = (priced.models ?? [])
+          .filter((m) => poolIds.has(m.model_id))
+          .map((m) => ({
+            id: m.model_id,
+            label: m.display_name || m.model_id,
+            input_price: m.input_price || 0,
+            output_price: m.output_price || 0,
+          }))
+          .sort((a, b) => a.label.localeCompare(b.label))
         if (!cancelled) setModels(out)
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : String(e))
