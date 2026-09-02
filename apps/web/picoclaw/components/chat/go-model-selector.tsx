@@ -1,7 +1,7 @@
-// 用户侧热切换模型选择器。
-// 数据源 = admin 全局模型配置（云服务商卖的模型，Go 云大脑正是按它加载 model_list），
-// 选择只写前端缓存（localStorage），发消息时随消息带给云大脑这一条消息用。
-// 不做任何云端配置改动，云端全局默认模型不受影响。
+// 用户侧模型选择器 — 严格只显示管理员「公布」的模型。
+// 数据源 = /api/billing/published（PG billing_config.published_models，admin 勾选 enabled）。
+// 没有管理员公布 = 没有任何模型可选（fail-closed：用户连聊天都不能发），提示联系管理员。
+// 选择只写前端 localStorage，发消息时随消息带；不触碰云端任何配置。
 
 import { useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
@@ -17,18 +17,12 @@ import {
 } from "@pico/components/ui/select"
 import { getStoredChatModel, setStoredChatModel } from "@/lib/chat-model-pref"
 
-interface GlobalModelSource {
-  providers?: Record<
-    string,
-    {
-      name?: string
-      baseUrl?: string
-      api?: string
-      models?: { id?: string; name?: string; [k: string]: unknown }[]
-      [k: string]: unknown
-    }
-  >
-  [k: string]: unknown
+interface PublishedModel {
+  model_id: string
+  display_name: string
+  input_price: number
+  output_price: number
+  description: string
 }
 
 export function GoModelSelector({
@@ -37,63 +31,65 @@ export function GoModelSelector({
   disabled?: boolean
 }) {
   const { t } = useTranslation()
-  const [source, setSource] = useState<GlobalModelSource | null>(null)
-
-  // 所有可用模型名（去重，保持 admin 配置顺序）
-  const modelNames = useMemo(() => {
-    if (!source?.providers) return []
-    const seen = new Set<string>()
-    const names: { id: string; label: string }[] = []
-    for (const [pid, provider] of Object.entries(source.providers)) {
-      const apiBase = provider?.baseUrl ?? ""
-      for (const model of provider?.models ?? []) {
-        if (!model?.id) continue
-        const id = String(model.id).trim()
-        if (!id || seen.has(id)) continue
-        seen.add(id)
-        names.push({ id, label: model.name || id })
-      }
-      if (names.length === 0 && apiBase && pid) {
-        // provider 没有 models 时，把 provider 本身当作一个模型入口
-        names.push({ id: pid, label: pid })
-      }
-    }
-    return names
-  }, [source])
-
-  const current = getStoredChatModel()
+  const [models, setModels] = useState<PublishedModel[] | null>(null)
+  const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    void fetch("/api/models-config", { credentials: "same-origin" })
-      .then((res) => (res.ok ? (res.json() as Promise<GlobalModelSource>) : null))
-      .then((data) => {
-        if (!cancelled) setSource(data)
+    void fetch("/api/billing/published", { credentials: "same-origin" })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const body = (await res.json()) as { models?: PublishedModel[] }
+        if (cancelled) return
+        setModels(body.models ?? [])
       })
-      .catch(() => {})
+      .catch((e) => {
+        if (!cancelled) setErr(e instanceof Error ? e.message : String(e))
+      })
     return () => {
       cancelled = true
     }
   }, [])
 
+  const current = getStoredChatModel()
+  const hasPublished = (models?.length ?? 0) > 0
+
   return (
     <Select
-      value={current || ""}
+      value={hasPublished ? current || "" : ""}
       onValueChange={(name) => setStoredChatModel(name)}
-      disabled={disabled || modelNames.length === 0}
+      disabled={disabled || !hasPublished}
     >
       <SelectTrigger
         size="sm"
-        className="text-muted-foreground hover:text-foreground focus-visible:border-input h-8 max-w-[160px] min-w-[80px] bg-transparent shadow-none focus-visible:ring-0 sm:max-w-[220px]"
+        className="text-muted-foreground hover:text-foreground focus-visible:border-input h-8 max-w-[200px] min-w-[100px] bg-transparent shadow-none focus-visible:ring-0 sm:max-w-[280px]"
       >
-        <SelectValue placeholder={current || t("chat.autoModel", "自动")} />
+        <SelectValue
+          placeholder={
+            err
+              ? t("chat.modelLoadErr", "加载失败")
+              : hasPublished
+                ? current || t("chat.autoModel", "自动")
+                : t("chat.noPublishedModel", "暂无可用模型")
+          }
+        />
       </SelectTrigger>
       <SelectContent position="popper" align="start">
         <SelectGroup>
-          <SelectLabel>{t("chat.modelHint", "发送时使用该模型（仅本条及后续由你选择的）")}</SelectLabel>
-          {modelNames.map((model) => (
-            <SelectItem key={model.id} value={model.id}>
-              {model.label}
+          <SelectLabel>
+            {t(
+              "chat.modelHint",
+              "发送时使用该模型（仅本条及后续由你选择的）— 管理员公布价 = 计费价",
+            )}
+          </SelectLabel>
+          {(models ?? []).map((m) => (
+            <SelectItem key={m.model_id} value={m.model_id}>
+              <span className="flex items-center gap-2">
+                <span>{m.display_name}</span>
+                <span className="font-mono text-[10px] text-muted-foreground">
+                  ${m.input_price}/${m.output_price}/1M
+                </span>
+              </span>
             </SelectItem>
           ))}
         </SelectGroup>
