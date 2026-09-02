@@ -1,0 +1,59 @@
+{
+  "ruleChain": {
+    "id": "home_mode",
+    "name": "回家模式",
+    "debugMode": true,
+    "root": true
+  },
+  "metadata": {
+    "firstNodeIndex": 0,
+    "nodes": [
+      {
+        "id": "s1",
+        "type": "hs/mi_device",
+        "name": "开玄关灯",
+        "debugMode": true,
+        "configuration": {
+          "action": "device_action",
+          "name": "玄关灯",
+          "capability": "turn_on"
+        }
+      },
+      {
+        "id": "s2",
+        "type": "exprFilter",
+        "name": "时间在白天？",
+        "debugMode": true,
+        "configuration": {
+          "expr": "hours(msg.ts / 1000) >= 18 || hours(msg.ts / 1000) < 6"
+        }
+      },
+      {
+        "id": "s3",
+        "type": "hs/mi_device",
+        "name": "开客厅空调",
+        "debugMode": true,
+        "configuration": {
+          "action": "device_action",
+          "name": "客厅空调",
+          "capability": "turn_on"
+        }
+      },
+      {
+        "id": "s4",
+        "type": "hs/bilibili_ctl",
+        "name": "播放新闻联播",
+        "debugMode": true,
+        "configuration": {
+          "action": "search",
+          "keyword": "新闻联播 今日"
+        }
+      }
+    ],
+    "connections": [
+      {"fromId": "s1", "toId": "s2", "type": "Success"},
+      {"fromId": "s2", "toId": "s3", "type": "True"},
+      {"fromId": "s2", "toId": "s4", "type": "False"}
+    ]
+  }
+}
