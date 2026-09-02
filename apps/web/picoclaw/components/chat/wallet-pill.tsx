@@ -1,7 +1,7 @@
 // 用户侧钱包指示器 — 云平台计费（架构铁律：agent 不算钱）。
 // 点击展开 dialog: 本月余额 + 本月用量 + 最近 ledger 流水 + 最近 session 用量明细。
 
-import { IconReceipt, IconWallet } from "@tabler/icons-react"
+import { IconReceipt, IconWallet, IconArrowBack } from "@tabler/icons-react"
 import { useEffect, useState } from "react"
 
 import { Button } from "@pico/components/ui/button"
@@ -14,6 +14,7 @@ import {
   DialogTrigger,
 } from "@pico/components/ui/dialog"
 import { ScrollArea } from "@pico/components/ui/scroll-area"
+import { useCurrentUser, isAdmin } from "@pico/hooks/use-current-user"
 
 const fmtUsd = (n: number) =>
   n === null || n === undefined || Number.isNaN(n)
@@ -69,6 +70,10 @@ export function WalletPill() {
   const [ledger, setLedger] = useState<LedgerEntry[]>([])
   const [tab, setTab] = useState<"usage" | "ledger">("usage")
   const [loading, setLoading] = useState(false)
+  const [refunding, setRefunding] = useState<number | null>(null)
+  const [refundMsg, setRefundMsg] = useState<string | null>(null)
+  const { me } = useCurrentUser()
+  const isAdminUser = isAdmin(me)
 
   useEffect(() => {
     fetch("/api/wallet", { credentials: "same-origin" })
@@ -81,6 +86,7 @@ export function WalletPill() {
   useEffect(() => {
     if (!open) return
     setLoading(true)
+    setRefundMsg(null)
     Promise.all([
       fetch("/api/usage/records?limit=50", { credentials: "same-origin" })
         .then((r) => r.json())
@@ -96,6 +102,44 @@ export function WalletPill() {
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [open])
+
+  // 退款：仅 admin，charge 行 → 写一行 adjust +金额（加回余额）+note 引用原 ledger id
+  async function refund(entry: LedgerEntry) {
+    if (entry.kind !== "charge" || !entry.model) return
+    const refundAmount = Math.abs(entry.amountUsd)
+    if (refundAmount <= 0) return
+    setRefunding(entry.id)
+    setRefundMsg(null)
+    try {
+      const res = await fetch("/api/wallet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          tenantId: me?.user?.tenantId,
+          amount: refundAmount,
+          kind: "adjust",
+          note: `refund #${entry.id} (${entry.model}, ${entry.inputTokens}+${entry.outputTokens} tok)`,
+        }),
+      })
+      const body = await res.json()
+      if (!res.ok) throw new Error(body?.message ?? body?.error ?? `HTTP ${res.status}`)
+      setRefundMsg(`已退款 #${entry.id} +$${refundAmount.toFixed(2)}`)
+      // 刷新钱包 + ledger
+      const [w, l] = await Promise.all([
+        fetch("/api/wallet", { credentials: "same-origin" }).then((r) => r.json()),
+        fetch("/api/wallet/ledger?limit=100", { credentials: "same-origin" })
+          .then((r) => r.json())
+          .then((b) => Array.isArray(b?.entries) ? b.entries : []),
+      ])
+      if (!w?.error) setData(w as WalletData)
+      setLedger(l as LedgerEntry[])
+    } catch (e) {
+      setRefundMsg(`退款失败: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setRefunding(null)
+    }
+  }
 
   if (!data) return null
 
@@ -140,7 +184,7 @@ export function WalletPill() {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex gap-2 border-b">
+        <div className="flex items-center gap-2 border-b px-2">
           <button
             onClick={() => setTab("usage")}
             className={`px-3 py-1.5 text-sm ${tab === "usage" ? "border-b-2 border-primary font-medium" : "text-muted-foreground"}`}
@@ -153,6 +197,9 @@ export function WalletPill() {
           >
             钱包流水 ({ledger.length})
           </button>
+          {refundMsg && tab === "ledger" && (
+            <span className="ml-2 text-[10px] text-muted-foreground">{refundMsg}</span>
+          )}
           <div className="ml-auto">
             <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>关闭</Button>
           </div>
@@ -164,7 +211,12 @@ export function WalletPill() {
           ) : tab === "usage" ? (
             <UsageTab records={records} />
           ) : (
-            <LedgerTab entries={ledger} />
+            <LedgerTab
+              entries={ledger}
+              isAdmin={isAdminUser}
+              refunding={refunding}
+              onRefund={refund}
+            />
           )}
         </ScrollArea>
       </DialogContent>
@@ -199,7 +251,17 @@ function UsageTab({ records }: { records: UsageRecord[] }) {
   )
 }
 
-function LedgerTab({ entries }: { entries: LedgerEntry[] }) {
+function LedgerTab({
+  entries,
+  isAdmin,
+  refunding,
+  onRefund,
+}: {
+  entries: LedgerEntry[]
+  isAdmin: boolean
+  refunding: number | null
+  onRefund: (entry: LedgerEntry) => void | Promise<void>
+}) {
   if (entries.length === 0) {
     return <div className="p-4 text-sm text-muted-foreground">还没有钱包流水</div>
   }
@@ -207,14 +269,17 @@ function LedgerTab({ entries }: { entries: LedgerEntry[] }) {
     <div className="divide-y">
       {entries.map((e) => {
         const isCredit = e.amountUsd > 0
+        const canRefund = isAdmin && e.kind === "charge" && (e.amountUsd < 0)
         return (
           <div key={e.id} className="space-y-1 px-4 py-3">
             <div className="flex items-center gap-2 text-sm">
               <span
                 className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                  isCredit
+                  e.kind === "topup" || e.kind === "grant"
                     ? "bg-emerald-500/10 text-emerald-600"
-                    : "bg-rose-500/10 text-rose-600"
+                    : e.kind === "charge"
+                      ? "bg-rose-500/10 text-rose-600"
+                      : "bg-blue-500/10 text-blue-600"
                 }`}
               >
                 {e.kind}
@@ -223,6 +288,19 @@ function LedgerTab({ entries }: { entries: LedgerEntry[] }) {
               <span className={`ml-auto font-mono ${isCredit ? "text-emerald-600" : "text-rose-600"}`}>
                 {isCredit ? "+" : ""}{fmtUsd(e.amountUsd)}
               </span>
+              {canRefund && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 px-2 text-[10px]"
+                  disabled={refunding === e.id}
+                  onClick={() => void onRefund(e)}
+                  title={`撤销 #${e.id} 扣费, 余额加回 $${Math.abs(e.amountUsd).toFixed(2)}`}
+                >
+                  <IconArrowBack className="mr-0.5 size-3" />
+                  {refunding === e.id ? "退款中" : "退款"}
+                </Button>
+              )}
             </div>
             {e.note && <div className="text-xs text-muted-foreground">{e.note}</div>}
             <div className="flex justify-between text-[10px] text-muted-foreground/70">
