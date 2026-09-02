@@ -1,6 +1,6 @@
-// 用户侧模型选择器 — 严格只显示管理员「公布」的模型。
-// 数据源 = /api/billing/published（PG billing_config.published_models，admin 勾选 enabled）。
-// 没有管理员公布 = 没有任何模型可选（fail-closed：用户连聊天都不能发），提示联系管理员。
+// 用户侧模型选择器 — 严格只显示「管理员勾选 + 已配价」的模型。
+// 数据源 = /api/models-config (Go provider 配置) ∩ /api/billing 里的 model_prices.enabled。
+// 没有勾选 = 用户看不到（fail-closed）。
 // 选择只写前端 localStorage，发消息时随消息带；不触碰云端任何配置。
 
 import { useEffect, useMemo, useState } from "react"
@@ -17,35 +17,58 @@ import {
 } from "@pico/components/ui/select"
 import { getStoredChatModel, setStoredChatModel } from "@/lib/chat-model-pref"
 
-interface PublishedModel {
-  model_id: string
-  display_name: string
-  input_price: number
-  output_price: number
-  description: string
+interface ModelPriceRow {
+  input: number
+  output: number
+  enabled?: boolean
+}
+interface ModelPrices {
+  [model: string]: ModelPriceRow
 }
 
-export function GoModelSelector({
-  disabled = false,
-}: {
-  disabled?: boolean
-}) {
+interface PricedModel {
+  id: string
+  label: string
+  input_price: number
+  output_price: number
+}
+
+export function GoModelSelector({ disabled = false }: { disabled?: boolean }) {
   const { t } = useTranslation()
-  const [models, setModels] = useState<PublishedModel[] | null>(null)
+  const [models, setModels] = useState<PricedModel[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    void fetch("/api/billing/published", { credentials: "same-origin" })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const body = (await res.json()) as { models?: PublishedModel[] }
-        if (cancelled) return
-        setModels(body.models ?? [])
-      })
-      .catch((e) => {
+    void (async () => {
+      try {
+        const [cfgRes, billRes] = await Promise.all([
+          fetch("/api/models-config", { credentials: "same-origin" }),
+          fetch("/api/billing", { credentials: "same-origin" }),
+        ])
+        if (!cfgRes.ok) throw new Error(`models-config HTTP ${cfgRes.status}`)
+        const cfg = (await cfgRes.json()) as { providers?: Record<string, { models?: { id?: string; name?: string }[] }> }
+        const bill = billRes.ok ? ((await billRes.json()) as { config?: { model_prices?: ModelPrices } }) : { config: {} }
+        const prices = bill.config?.model_prices ?? {}
+        const seen = new Set<string>()
+        const out: PricedModel[] = []
+        for (const provider of Object.values(cfg.providers ?? {})) {
+          for (const m of provider.models ?? []) {
+            const id = String(m?.id ?? "").trim()
+            if (!id || seen.has(id)) continue
+            const p = prices[id]
+            // 必须 admin 勾选 enabled + 配了价 才给用户
+            if (!p || p.enabled !== true) continue
+            seen.add(id)
+            out.push({ id, label: m?.name || id, input_price: p.input, output_price: p.output })
+          }
+        }
+        out.sort((a, b) => a.label.localeCompare(b.label))
+        if (!cancelled) setModels(out)
+      } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : String(e))
-      })
+      }
+    })()
     return () => {
       cancelled = true
     }
@@ -77,15 +100,12 @@ export function GoModelSelector({
       <SelectContent position="popper" align="start">
         <SelectGroup>
           <SelectLabel>
-            {t(
-              "chat.modelHint",
-              "发送时使用该模型（仅本条及后续由你选择的）— 管理员公布价 = 计费价",
-            )}
+            {t("chat.modelHint", "发送时使用该模型（仅本条及后续由你选择的）— 管理员勾选 + 已配价")}
           </SelectLabel>
           {(models ?? []).map((m) => (
-            <SelectItem key={m.model_id} value={m.model_id}>
+            <SelectItem key={m.id} value={m.id}>
               <span className="flex items-center gap-2">
-                <span>{m.display_name}</span>
+                <span>{m.label}</span>
                 <span className="font-mono text-[10px] text-muted-foreground">
                   ${m.input_price}/${m.output_price}/1M
                 </span>
