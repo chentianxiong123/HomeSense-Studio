@@ -35,6 +35,7 @@ export const MessageList = memo(function MessageList({
                 attachments={msg.attachments}
                 kind={msg.kind}
                 modelName={msg.modelName}
+                usage={msg.usage}
                 toolCalls={msg.toolCalls}
                 timestamp={msg.timestamp}
               />

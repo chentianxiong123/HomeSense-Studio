@@ -16,6 +16,7 @@ import { GoModelSelector } from "@pico/components/chat/go-model-selector"
 import { MessageList } from "@pico/components/chat/message-list"
 import { TypingIndicator } from "@pico/components/chat/typing-indicator"
 import { PageHeader } from "@pico/components/page-header"
+import { WalletPill } from "@pico/components/chat/wallet-pill"
 import {
   Select,
   SelectContent,
@@ -338,6 +339,7 @@ export function ChatPage() {
           )
         }
       >
+        <WalletPill />
         <div className="border-border/60 hidden items-center gap-2 rounded-lg border px-3 py-1.5 sm:flex">
           <span className="text-muted-foreground text-sm">
             {t("chat.showAssistantDetails")}

@@ -93,6 +93,30 @@ function parseModelName(payload: Record<string, unknown>): string | undefined {
   return modelName || undefined
 }
 
+/** 本条消息真实 token 用量（agent 实例客观记录，云平台计费只读它）。 */
+export interface MessageTokenUsage {
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  estimated_cost_usd?: number
+}
+
+function parseTokenUsage(payload: Record<string, unknown>): MessageTokenUsage | undefined {
+  const raw = payload.usage
+  if (!raw || typeof raw !== "object") return undefined
+  const obj = raw as Record<string, unknown>
+  const input = Number(obj.input_tokens)
+  const output = Number(obj.output_tokens)
+  if (!Number.isFinite(input) || !Number.isFinite(output)) return undefined
+  return {
+    input_tokens: input,
+    output_tokens: output,
+    total_tokens: input + output,
+    estimated_cost_usd:
+      typeof obj.estimated_cost_usd === "number" ? obj.estimated_cost_usd : undefined,
+  }
+}
+
 export function handlePicoMessage(
   message: PicoMessage,
   expectedSessionId: string,
@@ -113,6 +137,7 @@ export function handlePicoMessage(
       const contextUsage = parseContextUsage(payload)
       const isPlaceholder = payload.placeholder === true
       const modelName = parseModelName(payload)
+      const usage = parseTokenUsage(payload)
       const timestamp =
         message.timestamp !== undefined &&
         Number.isFinite(Number(message.timestamp))
@@ -130,6 +155,7 @@ export function handlePicoMessage(
             kind,
             ...(modelName ? { modelName } : {}),
             ...(toolCalls ? { toolCalls } : {}),
+            ...(usage ? { usage } : {}),
             attachments,
             timestamp,
           },
@@ -149,6 +175,7 @@ export function handlePicoMessage(
       const attachments = parseAttachments(payload)
       const contextUsage = parseContextUsage(payload)
       const modelName = parseModelName(payload)
+      const usage = parseTokenUsage(payload)
       const timestamp =
         message.timestamp !== undefined &&
         Number.isFinite(Number(message.timestamp))
@@ -176,6 +203,7 @@ export function handlePicoMessage(
               kind,
               toolCalls,
               ...(modelName ? { modelName } : {}),
+              ...(usage ? { usage } : {}),
               ...(attachments ? { attachments } : {}),
             }
           })
@@ -196,6 +224,7 @@ export function handlePicoMessage(
               kind,
               toolCalls,
               ...(modelName ? { modelName } : {}),
+              ...(usage ? { usage } : {}),
               ...(attachments ? { attachments } : {}),
               timestamp,
             },

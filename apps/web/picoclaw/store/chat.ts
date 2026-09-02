@@ -36,6 +36,13 @@ export interface ChatToolCall {
   extraContent?: ChatToolCallExtraContent
 }
 
+export interface ChatMessageUsage {
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  estimated_cost_usd?: number
+}
+
 export type AssistantMessageKind = "normal" | "thought" | "tool_calls"
 
 export interface ChatMessage {
@@ -47,6 +54,8 @@ export interface ChatMessage {
   timestamp: number | string
   kind?: AssistantMessageKind
   modelName?: string
+  /** 本条消息真实 token 用量(agent 客观记录,云平台计费只读它)。 */
+  usage?: ChatMessageUsage
   attachments?: ChatAttachment[]
   toolCalls?: ChatToolCall[]
   /** SQLite 时间线消息 id（仅来自 /api/timeline 的历史消息），用于上拉分页去重。 */
