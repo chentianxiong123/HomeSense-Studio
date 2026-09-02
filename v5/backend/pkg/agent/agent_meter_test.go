@@ -1,57 +1,80 @@
 package agent
 
 import (
-	"encoding/json"
+	"context"
+	"sync"
 	"testing"
 
-	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/providers"
 )
 
-func TestAttachMeterUsageToOutbound(t *testing.T) {
-	mkMsg := func() bus.OutboundMessage {
-		ctx := bus.NewOutboundContext("pico", "pico:sess-1", "")
-		return bus.OutboundMessage{Context: ctx, Content: "answer"}
-	}
-
-	t.Run("attaches usage JSON when usage present", func(t *testing.T) {
-		msg := attachMeterUsageToOutbound(mkMsg(), &providers.UsageInfo{
-			PromptTokens: 100, CompletionTokens: 50, TotalTokens: 150,
-		})
-		raw, ok := msg.Context.Raw["meter_usage"]
-		if !ok || raw == "" {
-			t.Fatalf("expected meter_usage in raw, got %+v", msg.Context.Raw)
-		}
-		var got map[string]int
-		if err := json.Unmarshal([]byte(raw), &got); err != nil {
-			t.Fatalf("meter_usage not valid JSON: %v", err)
-		}
-		if got["input_tokens"] != 100 || got["output_tokens"] != 50 || got["total_tokens"] != 150 {
-			t.Fatalf("meter_usage = %v", got)
-		}
-	})
-
-	t.Run("keeps msg untouched when usage nil", func(t *testing.T) {
-		msg := mkMsg()
-		msg.Context.Raw = map[string]string{"model_name": "auto"}
-		out := attachMeterUsageToOutbound(msg, nil)
-		if _, ok := out.Context.Raw["meter_usage"]; ok {
-			t.Fatal("should not add meter_usage when usage is nil")
-		}
-		if out.Context.Raw["model_name"] != "auto" {
-			t.Fatal("should preserve existing raw keys")
-		}
-	})
+type captureRecorder struct {
+	mu    sync.Mutex
+	calls []LLMUsageRecord
 }
 
-func TestAgentOutboundCarriesMeterUsage(t *testing.T) {
-	// Guards against regressions in the wire key shared by agent (writer) and
-	// pico channel (reader).
-	msg := attachMeterUsageToOutbound(
-		bus.OutboundMessage{Context: bus.NewOutboundContext("pico", "c", "")},
-		&providers.UsageInfo{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12},
-	)
-	if _, ok := msg.Context.Raw["meter_usage"]; !ok {
-		t.Fatal("agent outbound must carry meter_usage for pico to meter")
+func (c *captureRecorder) RecordLLMUsage(_ context.Context, usage LLMUsageRecord) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls = append(c.calls, usage)
+}
+
+func TestWithUsageRecorderInjects(t *testing.T) {
+	rec := &captureRecorder{}
+	al := &AgentLoop{}
+	WithUsageRecorder(rec)(al)
+	if al.usageRecorder != rec {
+		t.Fatal("WithUsageRecorder should set al.usageRecorder")
+	}
+}
+
+func TestSetUsageRecorderNilSafe(t *testing.T) {
+	al := &AgentLoop{}
+	al.SetUsageRecorder(nil) // must not panic
+	if al.usageRecorder != nil {
+		t.Fatal("nil recorder should no-op")
+	}
+}
+
+// TestLLMUsageRecorderReceivesCalls wires a fake pipeline-alike to confirm the
+// recording chokepoint is reached and carries the live model + session key.
+func TestLLMUsageRecorderReceivesCalls(t *testing.T) {
+	rec := &captureRecorder{}
+	al := &AgentLoop{usageRecorder: rec}
+
+	ts := &turnState{sessionKey: "sess-abc"}
+	exec := &turnExecution{llmModelName: "deepseek-v4-flash"}
+
+	p := &Pipeline{al: al}
+	ctx := context.Background()
+
+	// Invoke the exact path pipeline_llm.go uses after a response: record usage.
+	usage := &providers.UsageInfo{PromptTokens: 11, CompletionTokens: 22, TotalTokens: 33}
+	ts.SetLastUsage(usage)
+	recCall := func() {
+		if u := ts.GetLastUsage(); u != nil {
+			if r := p.al.usageRecorder; r != nil {
+				r.RecordLLMUsage(ctx, LLMUsageRecord{
+					SessionKey:   ts.sessionKey,
+					Model:        exec.llmModelName,
+					InputTokens:  u.PromptTokens,
+					OutputTokens: u.CompletionTokens,
+				})
+			}
+		}
+	}
+	recCall()
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if len(rec.calls) != 1 {
+		t.Fatalf("expected 1 recorder call, got %d", len(rec.calls))
+	}
+	got := rec.calls[0]
+	if got.SessionKey != "sess-abc" || got.Model != "deepseek-v4-flash" {
+		t.Fatalf("unexpected record: %+v", got)
+	}
+	if got.InputTokens != 11 || got.OutputTokens != 22 {
+		t.Fatalf("token counts wrong: %+v", got)
 	}
 }

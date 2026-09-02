@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
+	"github.com/sipeed/picoclaw/pkg/agent"
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/channels"
 	"github.com/sipeed/picoclaw/pkg/config"
@@ -110,6 +111,12 @@ type PicoChannel struct {
 	broadcastFn func(chatID string, msg PicoMessage) error
 	// history persists per-session chat messages to SQLite when configured.
 	history *PicoHistoryStore
+
+	// usageRecorder is the tenant metering sink backed by this channel's
+	// history store. It implements agent.UsageRecorder; exposing it here lets
+	// the gateway inject it into the agent loop as the single metering
+	// chokepoint. Nil when history persistence is disabled.
+	usageRecorder agent.UsageRecorder
 	// idleTimer fires when no connections exist for IdleShutdownMinutes,
 	// triggering a graceful gateway shutdown (on-demand lifecycle).
 	idleTimer *time.Timer
@@ -162,8 +169,19 @@ func NewPicoChannel(
 			return nil, fmt.Errorf("pico history store: %w", err)
 		}
 		ch.history = store
+		ch.usageRecorder = store
 	}
 	return ch, nil
+}
+
+// UsageRecorder returns the per-tenant metering sink backed by this channel's
+// history store, or nil when history persistence is disabled. The gateway
+// injects it into the agent loop as the single LLM-usage metering chokepoint.
+func (c *PicoChannel) UsageRecorder() agent.UsageRecorder {
+	if c == nil {
+		return nil
+	}
+	return c.usageRecorder
 }
 
 // SetIdleShutdownFunc registers a callback invoked when the channel has been
@@ -490,9 +508,6 @@ func (c *PicoChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]stri
 		); err != nil {
 			logger.WarnCF("pico", "history append(assistant) failed", map[string]any{"error": err.Error()})
 		}
-		// Metering: persist the real per-turn LLM token usage handed off by the
-		// agent. Billing is the control plane's job; this only records.
-		c.recordUsageFromOutbound(msg, sessionID, modelName)
 	}
 	if isToolFeedback {
 		c.RecordToolFeedbackMessage(msg.ChatID, msgID, msg.Content)
@@ -500,33 +515,6 @@ func (c *PicoChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]stri
 		c.dismissTrackedToolFeedbackMessage(ctx, msg.ChatID, trackedMsgID)
 	}
 	return []string{msgID}, nil
-}
-
-// recordUsageFromOutbound persists per-turn LLM token usage handed off by the
-// agent (msg.Context.Raw["meter_usage"]) into the tenant history DB. Billing
-// belongs to the control plane; this only measures. Safe when history is nil.
-func (c *PicoChannel) recordUsageFromOutbound(msg bus.OutboundMessage, sessionID, modelName string) {
-	if c == nil || c.history == nil {
-		return
-	}
-	rawUsage, ok := msg.Context.Raw["meter_usage"]
-	if !ok || rawUsage == "" {
-		return
-	}
-	var usage struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-		TotalTokens  int `json:"total_tokens"`
-	}
-	if json.Unmarshal([]byte(rawUsage), &usage) != nil {
-		return
-	}
-	if err := c.history.RecordUsage(
-		context.Background(), sessionID, modelName,
-		usage.InputTokens, usage.OutputTokens,
-	); err != nil {
-		logger.WarnCF("pico", "usage record failed", map[string]any{"error": err.Error()})
-	}
 }
 
 // EditMessage implements channels.MessageEditor.
@@ -751,23 +739,7 @@ func (s *picoStreamer) Finalize(ctx context.Context, content string) error {
 func (s *picoStreamer) FinalizeWithContext(ctx context.Context, content string, contextUsage *bus.ContextUsage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	err := s.updateLocked(ctx, content, true, contextUsage)
-	// Metering is handled on the non-streaming Send() path; keep this hook too
-	// in case a future config routes pico through streaming. No-op here.
-	if s.turnInputTokens > 0 || s.turnOutputTokens > 0 {
-		sessionID := strings.TrimPrefix(s.chatID, "pico:")
-		if s.channel != nil && s.channel.history != nil {
-			_ = s.channel.history.RecordUsage(
-				context.Background(), sessionID, s.modelName,
-				s.turnInputTokens, s.turnOutputTokens,
-			)
-		}
-	} else if s.channel != nil {
-		logger.DebugCF("pico", "meter: no usage to record", map[string]any{
-			"model": s.modelName, "in": s.turnInputTokens, "out": s.turnOutputTokens,
-		})
-	}
-	return err
+	return s.updateLocked(ctx, content, true, contextUsage)
 }
 
 func (s *picoStreamer) UpdateReasoning(ctx context.Context, content string) error {

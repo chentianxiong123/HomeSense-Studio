@@ -542,6 +542,14 @@ func (p *Pipeline) CallLLM(
 		ts.SetLastFinishReason(exec.response.FinishReason)
 		if exec.response.Usage != nil {
 			ts.SetLastUsage(exec.response.Usage)
+			if rec := p.al.usageRecorder; rec != nil {
+				rec.RecordLLMUsage(turnCtx, LLMUsageRecord{
+					SessionKey:   ts.sessionKey,
+					Model:        exec.llmModelName,
+					InputTokens:  exec.response.Usage.PromptTokens,
+					OutputTokens: exec.response.Usage.CompletionTokens,
+				})
+			}
 		}
 	}
 

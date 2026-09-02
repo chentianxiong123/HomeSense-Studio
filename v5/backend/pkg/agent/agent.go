@@ -81,6 +81,20 @@ type AgentLoop struct {
 	reloadFunc func() error
 
 	providerFactory func(*config.ModelConfig) (providers.LLMProvider, string, error)
+
+	// usageRecorder is the single metering sink for LLM token usage. When nil
+	// (default), metering is disabled. Set via WithUsageRecorder at construction
+	// or SetUsageRecorder before Run.
+	usageRecorder UsageRecorder
+}
+
+// SetUsageRecorder installs (or uninstalls, with nil) the LLM-usage metering
+// sink. Safe to call after construction but must be set before Run. Nil no-ops.
+func (al *AgentLoop) SetUsageRecorder(rec UsageRecorder) {
+	if al == nil {
+		return
+	}
+	al.usageRecorder = rec
 }
 
 // processOptions configures how a message is processed
@@ -608,10 +622,6 @@ func (al *AgentLoop) runAgentLoop(
 			}
 			msg.Context.Raw["model_name"] = modelName
 		}
-		// Metering: attach the real per-turn LLM token usage so the channel
-		// (e.g. pico) can persist it to the tenant DB. Billing stays in the
-		// control plane; this is just the measurement hand-off.
-		msg = attachMeterUsageToOutbound(msg, ts.GetLastUsage())
 		markFinalOutbound(&msg)
 		al.bus.PublishOutbound(ctx, msg)
 	}
