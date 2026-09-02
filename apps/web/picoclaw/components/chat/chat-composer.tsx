@@ -27,6 +27,7 @@ export type ChatInputDisabledReason =
   | "websocketDisconnected"
   | "websocketError"
   | "noDefaultModel"
+  | "walletEmpty"
 
 interface ChatComposerProps {
   attachments: ChatAttachment[]
