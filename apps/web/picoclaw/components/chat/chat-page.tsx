@@ -17,6 +17,7 @@ import { MessageList } from "@pico/components/chat/message-list"
 import { TypingIndicator } from "@pico/components/chat/typing-indicator"
 import { PageHeader } from "@pico/components/page-header"
 import { WalletPill } from "@pico/components/chat/wallet-pill"
+import { WalletStatusBanner } from "@pico/components/chat/wallet-status-banner"
 import {
   Select,
   SelectContent,
@@ -34,6 +35,7 @@ import { useChatModels } from "@pico/hooks/use-chat-models"
 import { useGateway } from "@pico/hooks/use-gateway"
 import { usePicoChat } from "@pico/hooks/use-pico-chat"
 import { useTimelineHistory } from "@pico/hooks/use-timeline-history"
+import { useWalletStatus } from "@pico/hooks/use-wallet-status"
 import type { AssistantDetailVisibility } from "@pico/store/chat"
 import type { ConnectionState } from "@pico/store/chat"
 import type { ChatAttachment } from "@pico/store/chat"
@@ -46,10 +48,12 @@ function resolveChatInputDisabledReason({
   hasDefaultModel,
   connectionState,
   gatewayState,
+  walletEmpty,
 }: {
   hasDefaultModel: boolean
   connectionState: ConnectionState
   gatewayState: GatewayState
+  walletEmpty: boolean
 }): ChatInputDisabledReason | null {
   if (gatewayState === "unknown") {
     return "gatewayUnknown"
@@ -85,6 +89,10 @@ function resolveChatInputDisabledReason({
 
   if (connectionState === "disconnected") {
     return "websocketDisconnected"
+  }
+
+  if (walletEmpty) {
+    return "walletEmpty"
   }
 
   if (!hasDefaultModel) {
@@ -141,10 +149,12 @@ export function ChatPage() {
     handleSetDefault,
   } = useChatModels({ isConnected: isGatewayRunning })
   const hasDefaultModel = Boolean(defaultModelName)
+  const walletStatus = useWalletStatus(30_000)
   const inputDisabledReason = resolveChatInputDisabledReason({
     hasDefaultModel,
     connectionState,
     gatewayState: gwState,
+    walletEmpty: !walletStatus.loading && walletStatus.isEmpty,
   })
   const canInput = inputDisabledReason === null
 
@@ -367,6 +377,11 @@ export function ChatPage() {
           </Select>
         </div>
       </PageHeader>
+
+      <WalletStatusBanner
+        status={walletStatus}
+        onRefresh={() => void walletStatus.refresh()}
+      />
 
       <div
         ref={scrollRef}
