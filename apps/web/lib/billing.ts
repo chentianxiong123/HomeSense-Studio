@@ -16,9 +16,23 @@ export interface ModelPrice {
 export type BillingPrices = Record<string, ModelPrice>
 export type MonthlyQuota = Record<string, number> // tenantId -> tokens per month
 
+// 管理员在云平台「公布」的模型（用户可见可用的模型目录）。
+// 算钱优先用这里的 input/output 单价（避免「算价≠公布价」的对账纠纷），
+// 旧字段 model_prices 仅作 fallback 兼容。
+export interface PublishedModel {
+  enabled: boolean // admin 是否对用户开放
+  display_name: string // 用户侧展示名
+  input_price: number // USD per 1M input tokens（公布价即计费价）
+  output_price: number // USD per 1M output tokens
+  description?: string // 用途说明（可选）
+}
+
+export type PublishedModels = Record<string, PublishedModel>
+
 export interface BillingConfig {
   model_prices: BillingPrices
   monthly_quota: MonthlyQuota
+  published_models: PublishedModels
 }
 
 export interface WalletLedgerRow {
@@ -38,14 +52,19 @@ export interface WalletLedgerRow {
 
 export async function readBillingConfig(): Promise<BillingConfig> {
   await migrate()
-  const row = await queryOne<{ model_prices: unknown; monthly_quota: unknown }>(
-    `SELECT model_prices, monthly_quota FROM billing_config WHERE id = 1`,
+  const row = await queryOne<{ model_prices: unknown; monthly_quota: unknown; published_models: unknown }>(
+    `SELECT model_prices, monthly_quota, published_models FROM billing_config WHERE id = 1`,
   )
-  if (!row) return { model_prices: {}, monthly_quota: {} }
+  if (!row) return { model_prices: {}, monthly_quota: {}, published_models: {} }
   // pg 驱动对 jsonb 列默认返回已解析对象，但也可能为字符串（取决于配置），双兼容。
   const prices = asRecord(row.model_prices) as BillingPrices | null
   const quota = asRecord(row.monthly_quota) as MonthlyQuota | null
-  return { model_prices: prices ?? {}, monthly_quota: quota ?? {} }
+  const published = asRecord(row.published_models) as PublishedModels | null
+  return {
+    model_prices: prices ?? {},
+    monthly_quota: quota ?? {},
+    published_models: published ?? {},
+  }
 }
 
 function asRecord(v: unknown): Record<string, unknown> | null {
@@ -68,15 +87,56 @@ export async function writeBillingConfig(cfg: BillingConfig): Promise<void> {
   await migrate()
   await query(
     `UPDATE billing_config
-        SET model_prices = $1, monthly_quota = $2, updated_at = now()
+        SET model_prices = $1, monthly_quota = $2, published_models = $3, updated_at = now()
       WHERE id = 1`,
-    [JSON.stringify(cfg.model_prices ?? {}), JSON.stringify(cfg.monthly_quota ?? {})],
+    [
+      JSON.stringify(cfg.model_prices ?? {}),
+      JSON.stringify(cfg.monthly_quota ?? {}),
+      JSON.stringify(cfg.published_models ?? {}),
+    ],
   )
+}
+
+/** 单独写 published_models（admin 在「模型目录」tab 保存时用）。 */
+export async function writePublishedModels(published: PublishedModels): Promise<void> {
+  await migrate()
+  await query(
+    `UPDATE billing_config
+        SET published_models = $1, updated_at = now()
+      WHERE id = 1`,
+    [JSON.stringify(published ?? {})],
+  )
+}
+
+/** 用户侧拉取「管理员已公布」的模型（只返回 enabled=true）。 */
+export async function listPublishedForUser(): Promise<
+  { model_id: string; display_name: string; input_price: number; output_price: number; description: string }[]
+> {
+  const cfg = await readBillingConfig()
+  const items: { model_id: string; display_name: string; input_price: number; output_price: number; description: string }[] = []
+  for (const [id, p] of Object.entries(cfg.published_models ?? {})) {
+    if (!p?.enabled) continue
+    items.push({
+      model_id: id,
+      display_name: String(p.display_name ?? id),
+      input_price: Number(p.input_price) || 0,
+      output_price: Number(p.output_price) || 0,
+      description: String(p.description ?? ""),
+    })
+  }
+  // 按 display_name 升序
+  items.sort((a, b) => a.display_name.localeCompare(b.display_name))
+  return items
 }
 
 /** 模型单价查询；缺省返回 0（fail-open，绝不报错）。 */
 export async function priceFor(model: string, cfg?: BillingConfig): Promise<ModelPrice> {
   const c = cfg ?? (await readBillingConfig())
+  // 优先 published_models（公布价即计费价），fallback model_prices（兼容老数据）
+  const pub = c.published_models?.[model ?? ""]
+  if (pub?.enabled) {
+    return { input: Number(pub.input_price) || 0, output: Number(pub.output_price) || 0 }
+  }
   const p = c.model_prices[model ?? ""]
   if (!p) return { input: 0, output: 0 }
   return { input: Number(p.input) || 0, output: Number(p.output) || 0 }
@@ -89,9 +149,18 @@ export function computeModelCost(
   outputTokens: number,
   cfg?: BillingConfig,
 ): number {
-  const p = cfg?.model_prices?.[model ?? ""]
-  const input = Number(p?.input) || 0
-  const output = Number(p?.output) || 0
+  // 优先 published_models，fallback model_prices
+  const pub = cfg?.published_models?.[model ?? ""]
+  let input = 0
+  let output = 0
+  if (pub?.enabled) {
+    input = Number(pub.input_price) || 0
+    output = Number(pub.output_price) || 0
+  } else {
+    const p = cfg?.model_prices?.[model ?? ""]
+    input = Number(p?.input) || 0
+    output = Number(p?.output) || 0
+  }
   return (
     ((inputTokens || 0) / 1e6) * input +
     ((outputTokens || 0) / 1e6) * output
