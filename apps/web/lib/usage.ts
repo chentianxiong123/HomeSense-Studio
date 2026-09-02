@@ -1,21 +1,11 @@
 // HomeSense v5 — 用量/计费控制面聚合。
 //
-// 计量在每租户 Go 网关（pico_usage 累积表，按 session+model+task 累计），
-// 记账是数据面的事；这里读各租户的 pico-history.db 把账算出来给 admin 看：
-//   - 每租户本月总用量（token + 请求数）
-//   - 按模型明细
-//   - 模型单价（写回 estimated_cost_usd 做费用估算）
-//
-// 只读、fail-open：任一个租户库异常不影响其它租户展示。
+// 架构铁律：平台数据（token 用量/费用）统一存 PostgreSQL；
+// 用户数据（聊天历史）留 per-tenant SQLite。费用 = PG pico_usage token × 单价（纯 Node）。
+// 只读、fail-open：任一段失败仅影响该租户展示。
 
-import { DatabaseSync } from "node:sqlite"
-import { existsSync, readFileSync } from "node:fs"
-import { join } from "node:path"
-
-import { computeModelCost, readBillingConfig } from "@/lib/billing"
+import { computeModelCost, readBillingConfig, readUsageByModel, monthStartISO } from "@/lib/billing"
 import { listTenants } from "@/lib/tenant-store"
-
-const BRAIN_DATA_DIR = process.env.HS_BRAIN_DATA ?? "/home/a1/HomeSense-Studio-v3/.hs-brain"
 
 export interface UsagePerModel {
   model: string
@@ -45,32 +35,12 @@ export interface UsageSnapshot {
   total_estimated_cost_usd: number
 }
 
-function readJson(file: string): Record<string, unknown> | null {
-  try {
-    if (!existsSync(file)) return null
-    return JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>
-  } catch {
-    return null
-  }
-}
-
-/** 从租户 config.json 读 pico db_path；缺省推导为 DATA_DIR/<dir>/pico-history.db。 */
-function picoDbPath(gatewayDir: string): string {
-  const cfg = readJson(join(BRAIN_DATA_DIR, gatewayDir, "config.json"))
-  const ch = cfg?.channel_list as Record<string, { settings?: { db_path?: unknown } }> | undefined
-  const dbPath = ch?.pico?.settings?.db_path
-  if (typeof dbPath === "string" && dbPath.trim()) return dbPath.trim()
-  return join(BRAIN_DATA_DIR, gatewayDir, "pico-history.db")
-}
-
-/** 本月起始的 UTC RFC3339Nano 字符串，与 Go 侧 MonthUsage 口径一致。 */
-function monthStart(): string {
-  const now = new Date()
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
-}
-
-/** 读单个租户的 pico_usage 并聚合（本月）。fail-open：异常返回 available=false。 */
-export function readTenantUsage(tenantId: string, name: string, gatewayDir: string | null): TenantUsage {
+/** 读单个租户的 PG pico_usage 并聚合（本月）。fail-open：异常返回 available=false。 */
+export async function readTenantUsage(
+  tenantId: string,
+  name: string,
+  gatewayDir: string | null,
+): Promise<TenantUsage> {
   const base: TenantUsage = {
     tenantId,
     name,
@@ -83,55 +53,26 @@ export function readTenantUsage(tenantId: string, name: string, gatewayDir: stri
     estimated_cost_usd: 0,
     by_model: [],
   }
-  if (!gatewayDir) return base
-  const dbPath = picoDbPath(gatewayDir)
-  if (!existsSync(dbPath)) return base
   try {
-    const db = new DatabaseSync(dbPath, { readOnly: true })
-    try {
-      const rows = db
-        .prepare(
-          `SELECT COALESCE(model,'') AS model,
-                  COALESCE(SUM(requests),0) AS requests,
-                  COALESCE(SUM(input_tokens),0) AS input_tokens,
-                  COALESCE(SUM(output_tokens),0) AS output_tokens
-             FROM pico_usage
-            WHERE last_seen >= ?
-            GROUP BY model
-            ORDER BY model`,
-        )
-        .all(monthStart()) as unknown as {
-        model: string
-        requests: number
-        input_tokens: number
-        output_tokens: number
-      }[]
-
-      const cfg = readBillingConfig()
-      base.by_model = rows.map((r) => {
-        const input = Number(r.input_tokens)
-        const output = Number(r.output_tokens)
-        return {
-          model: r.model,
-          requests: Number(r.requests),
-          input_tokens: input,
-          output_tokens: output,
-          total_tokens: input + output,
-          // 费用由云平台按单价计算（架构铁律：agent 不算钱）
-          estimated_cost_usd: Math.round(computeModelCost(r.model, input, output, cfg) * 1e6) / 1e6,
-        }
-      })
-      for (const m of base.by_model) {
-        base.requests += m.requests
-        base.input_tokens += m.input_tokens
-        base.output_tokens += m.output_tokens
-        base.total_tokens += m.total_tokens
-        base.estimated_cost_usd += m.estimated_cost_usd
-      }
-      base.available = true
-    } finally {
-      db.close()
+    const byModel = await readUsageByModel(tenantId, monthStartISO())
+    const cfg = await readBillingConfig()
+    base.by_model = byModel.map((r) => ({
+      model: r.model,
+      requests: r.requests,
+      input_tokens: r.input,
+      output_tokens: r.output,
+      total_tokens: r.input + r.output,
+      // 费用由云平台按单价计算（架构铁律：agent 不算钱）
+      estimated_cost_usd: Math.round(computeModelCost(r.model, r.input, r.output, cfg) * 1e6) / 1e6,
+    }))
+    for (const m of base.by_model) {
+      base.requests += m.requests
+      base.input_tokens += m.input_tokens
+      base.output_tokens += m.output_tokens
+      base.total_tokens += m.total_tokens
+      base.estimated_cost_usd += m.estimated_cost_usd
     }
+    base.available = true
   } catch {
     return base
   }
@@ -139,9 +80,11 @@ export function readTenantUsage(tenantId: string, name: string, gatewayDir: stri
 }
 
 /** 聚合所有租户的本月用量。只读、fail-open。 */
-export function readAllTenantUsage(): UsageSnapshot {
+export async function readAllTenantUsage(): Promise<UsageSnapshot> {
   const tenants = listTenants()
-  const usage = tenants.map((t) => readTenantUsage(t.id, t.name, t.gatewayDir))
+  const usage = await Promise.all(
+    tenants.map((t) => readTenantUsage(t.id, t.name, t.gatewayDir)),
+  )
   const snapshot: UsageSnapshot = { tenants: usage, total_tokens: 0, total_estimated_cost_usd: 0 }
   for (const u of usage) {
     snapshot.total_tokens += u.total_tokens

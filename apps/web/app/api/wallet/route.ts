@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { resolveAuthFromRequest } from "@/lib/auth-resolve";
 import {
   ensureWallet,
-  getBalance,
+  getBalanceUsd,
   listLedger,
   postLedger,
   readBillingConfig,
@@ -27,21 +27,20 @@ export async function GET(req: Request) {
   }
 
   const tenant = getTenant(targetTenant);
-  const gatewayDir = tenant?.gatewayDir ?? null;
-  ensureWallet(targetTenant);
+  await ensureWallet(targetTenant);
 
-  const cfg = readBillingConfig();
-  const monthlyUsedTokens = readTenantMonthTokens(gatewayDir);
-  const monthlyCostUsd = computeTenantMonthCost(gatewayDir, cfg);
+  const cfg = await readBillingConfig();
+  const monthlyUsedTokens = await readTenantMonthTokens(targetTenant);
+  const monthlyCostUsd = await computeTenantMonthCost(targetTenant, cfg);
 
   return NextResponse.json({
     tenantId: targetTenant,
     name: tenant?.name ?? targetTenant,
-    balance_usd: getBalance(targetTenant),
-    monthly_quota: monthlyQuotaFor(targetTenant, cfg),
+    balance_usd: await getBalanceUsd(targetTenant),
+    monthly_quota: await monthlyQuotaFor(targetTenant, cfg),
     monthly_used_tokens: monthlyUsedTokens,
     monthly_cost_usd: monthlyCostUsd,
-    recent_ledger: listLedger(targetTenant, 30),
+    recent_ledger: await listLedger(targetTenant, 30),
   });
 }
 
@@ -75,6 +74,6 @@ export async function POST(req: Request) {
   const kind = kindRaw === "adjust" || kindRaw === "grant" ? kindRaw : "topup";
   const note = typeof body.note === "string" && body.note.trim() ? body.note.trim() : null;
 
-  const { balanceAfter } = postLedger(tenantId, kind, amount, { note: note ?? undefined });
-  return NextResponse.json({ success: true, tenantId, amount, balance_usd: balanceAfter });
+  const { balanceAfterUsd } = await postLedger(tenantId, kind, amount, { note: note ?? undefined });
+  return NextResponse.json({ success: true, tenantId, amount, balance_usd: balanceAfterUsd });
 }

@@ -511,13 +511,10 @@ func setupAndStartServices(
 					_ = p.Signal(syscall.SIGTERM)
 				}
 			})
-			// Metering wiring: the pico channel owns the tenant history DB, so
-			// its UsageRecorder is the single sink the agent loop records every
-			// LLM call into (mirrors hermes' update_token_counts chokepoint).
-			if rec := typed.UsageRecorder(); rec != nil {
-				agentLoop.SetUsageRecorder(rec)
-				logger.InfoCF("gateway", "pico metering enabled", map[string]any{})
-			}
+			// NOTE(2026-09-02) 架构铁律（v5/docs/billing-postgresql-platform-db.md）：
+			// Go 只是 agent 实例，不写用量/计费。用量统一由云平台（Next.js）
+			// 从前端流式响应的 usage payload 上报存入 PostgreSQL。此处不再注入
+			// UsageRecorder，agent 只作客观测量（响应带 model+usage），不落库。
 		}
 	}
 
