@@ -1,0 +1,60 @@
+{
+  "ruleChain": {
+    "id": "movie_mode",
+    "name": "电影模式",
+    "debugMode": true,
+    "root": true
+  },
+  "metadata": {
+    "firstNodeIndex": 0,
+    "nodes": [
+      {
+        "id": "s1",
+        "type": "hs/mi_device",
+        "name": "关客厅灯",
+        "debugMode": true,
+        "configuration": {
+          "action": "device_action",
+          "name": "客厅灯",
+          "capability": "turn_off"
+        }
+      },
+      {
+        "id": "s2",
+        "type": "exprFilter",
+        "name": "检查灯是否已关",
+        "debugMode": true,
+        "configuration": {
+          "expr": "msg.tool == 'mi_device' && msg.action == 'device_action'"
+        }
+      },
+      {
+        "id": "s3",
+        "type": "hs/dlna_ctl",
+        "name": "投屏到电视",
+        "debugMode": true,
+        "configuration": {
+          "action": "start_cast",
+          "renderer": "客厅电视",
+          "url": "https://www.bilibili.com/video/BV1xx"
+        }
+      },
+      {
+        "id": "s4",
+        "type": "hs/mi_device",
+        "name": "调低音量",
+        "debugMode": true,
+        "configuration": {
+          "action": "device_action",
+          "name": "客厅音箱",
+          "capability": "volume_down"
+        }
+      }
+    ],
+    "connections": [
+      {"fromId": "s1", "toId": "s2", "type": "Success"},
+      {"fromId": "s2", "toId": "s3", "type": "True"},
+      {"fromId": "s3", "toId": "s4", "type": "Success"}
+    ]
+  }
+}

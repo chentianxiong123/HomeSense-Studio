@@ -106,6 +106,11 @@ func (c *Capability) Handler(ctx context.Context, req *mcp.CallToolRequest, _ an
 	}, result, nil
 }
 
+// Dispatch runs the action and returns the result map. Exposed for callers
+// outside the MCP path (e.g. workflow adapters) that need the same logic
+// without constructing a CallToolRequest.
+func (c *Capability) Dispatch(req Request) map[string]any { return c.dispatch(req) }
+
 func (c *Capability) dispatch(req Request) map[string]any {
 	switch req.Action {
 	case "search", "search_bilibili", "bilibili_search":
