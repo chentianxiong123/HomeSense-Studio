@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { resolveAuthFromRequest } from "@/lib/auth-resolve";
-import { ModelNotFoundError, setTenantDefaultModel } from "@/lib/models-lib";
+import { ModelNotFoundError, setTenantDefaultModel } from "@/lib/models-default";
 
 export const dynamic = "force-dynamic";
 

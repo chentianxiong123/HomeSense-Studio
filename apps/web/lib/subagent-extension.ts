@@ -1,10 +1,5 @@
-import { Type } from "@earendil-works/pi-ai";
-import {
-  defineTool,
-  type ExtensionContext,
-  type InlineExtension,
-  type LoadExtensionsResult,
-} from "@earendil-works/pi-coding-agent";
+import { Type } from "./pi-shims";
+import { defineTool, ExtensionContext, InlineExtension, LoadExtensionsResult } from "./pi-shims";
 import {
   SUBAGENT_CONTROL_TOOL_NAMES,
   type SubagentProfile,

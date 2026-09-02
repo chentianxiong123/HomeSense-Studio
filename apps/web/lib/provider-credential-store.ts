@@ -1,9 +1,10 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import type { Credential } from "@earendil-works/pi-ai";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import lockfile from "proper-lockfile";
 import type { ProviderCredentialType } from "@/lib/provider-listing";
+import { getTenantAuthPath } from "./tenant-paths";
+import { ensureTenantData } from "./tenant-bootstrap";
 
 const AUTH_FILE_WRITE_OPTIONS = { encoding: "utf-8" as const, mode: 0o600 };
 
@@ -76,9 +77,13 @@ async function updateStoredCredentials<T>(
 export function storeProviderCredential(
   providerId: string,
   credential: Credential,
-  authPath = join(getAgentDir(), "auth.json"),
+  authPath?: string,
+  tenantId?: string,
 ): Promise<void> {
-  return updateStoredCredentials(authPath, (credentials) => {
+  const path = authPath ?? (tenantId ? getTenantAuthPath(tenantId) : null)
+  if (!path) throw new Error("storeProviderCredential: tenantId is required")
+  if (tenantId) ensureTenantData(tenantId)
+  return updateStoredCredentials(path, (credentials) => {
     credentials[providerId] = credential;
     return { result: undefined, changed: true };
   });
@@ -93,9 +98,13 @@ export function storeProviderCredential(
 export async function removeStoredCredentialIfType(
   providerId: string,
   expectedType: ProviderCredentialType,
-  authPath = join(getAgentDir(), "auth.json"),
+  authPath?: string,
+  tenantId?: string,
 ): Promise<CredentialRemovalResult> {
-  return updateStoredCredentials<CredentialRemovalResult>(authPath, (credentials) => {
+  const path = authPath ?? (tenantId ? getTenantAuthPath(tenantId) : null)
+  if (!path) throw new Error("removeStoredCredentialIfType: tenantId is required")
+  if (tenantId) ensureTenantData(tenantId)
+  return updateStoredCredentials<CredentialRemovalResult>(path, (credentials) => {
     if (!Object.hasOwn(credentials, providerId)) {
       return { result: { status: "not_found" }, changed: false };
     }

@@ -1,23 +1,36 @@
 // HomeSense v3 — 多租户数据模型
 //
-// 物理隔离：每个租户一个独立 SQLite 文件（与 ARCHITECTURE.md §10.2 + CLOUD-EDGE-BLUEPRINT.md §5.3 一致）。
+// 物理隔离：每个租户一个独立 SQLite 文件 + 独立工作区
+// (与 ARCHITECTURE.md §10.2 + CLOUD-EDGE-BLUEPRINT.md §5.3 + v5 §5.2 一致)。
 //
 //   data/
 //     tenants.db                 ← 索引库（仅元数据,不含业务数据）
-//       ├─ tenants(全局)            租户清单(id, name, db_path, created_at, owner_user_id)
-//       └─ tenant_users(全局)       全局唯一登录凭据(username, password_hash, tenant_id, user_id)
-//     <tenant-id>.db            ← 租户库,只存本租户数据
-//       ├─ users                    租户成员(id, username, display_name, role, created_at, last_seen_at)
-//       ├─ messages                 单一永续时间线(原 timeline.db schema 不变)
-//       ├─ timeline_meta            key-value 元数据
-//       └─ tenant_meta              租户级设置(后续 home/device 等业务表加在这里)
+//       ├─ tenants(全局)            租户清单(id, name, db_path, created_at, owner_user_id, active_session_id)
+//       └─ tenant_users(全局)       全局唯一登录凭据
+//     tenants/<tenantId>/
+//       ├─ timeline.db              单一永续时间线
+//       └─ .homesense/agent/        独立工作区
+//            ├─ models.json
+//            ├─ auth.json
+//            ├─ settings.json
+//            ├─ agents/settings.json
+//            ├─ memories/{MEMORY.md, USER.md}
+//            ├─ sessions/
+//            └─ skills/
 //
 // username 全局唯一(username → tenant_id + user_id 来自 tenants.db.tenant_users),
 // 登录只需查索引库,不需扫所有租户库。
+//
+// 每租户自己一套配置(models/auth/settings),互不共享;
+// 全局共享的只有模型目录(由 /api/models-config 全局配的真模型池)+ 平台计费/钱包。
+// v5 蓝图 §5.3 计费/钱包是 B 端要求, 家庭版可无 — 当前保留作为 SaaS 基建。
 
 import { DatabaseSync } from "node:sqlite"
 import fs from "node:fs"
 import path from "node:path"
+
+import { getTenantTimelineDbPath } from "./tenant-paths"
+import { ensureActiveSession, ensureTenantData } from "./tenant-bootstrap"
 import crypto from "node:crypto"
 
 const DATA_ROOT = path.resolve(
@@ -173,14 +186,20 @@ function applyTenantSchema(target: DatabaseSync): void {
 }
 
 export function getTenantDb(tenantId: string): DatabaseSync {
+  if (!tenantId) throw new Error("getTenantDb: tenantId is required")
   const cached = tenantDbCache.get(tenantId)
   if (cached) return cached
 
   const tenant = getTenant(tenantId)
   if (!tenant) throw new Error(`租户不存在: ${tenantId}`)
 
-  fs.mkdirSync(path.dirname(tenant.dbPath), { recursive: true })
-  const db = new DatabaseSync(tenant.dbPath)
+  // 兜底:确保该租户工作区齐全 + active_session_id 永久维持
+  ensureTenantData(tenantId)
+  ensureActiveSession(tenantId)
+
+  const dbPath = getTenantTimelineDbPath(tenantId)
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true })
+  const db = new DatabaseSync(dbPath)
   db.exec("PRAGMA journal_mode = WAL")
   db.exec("PRAGMA busy_timeout = 5000")
   applyTenantSchema(db)
@@ -264,10 +283,10 @@ export function createTenant(input: CreateTenantInput): {
   // 前端永远从 server 拿这个 id(通过 /api/auth/me 一起返回),
   // 不存 localStorage,避免 404 重试。
   // pi engine 第一次发消息时按 sessionId + tenantId 落到 per-tenant 路径
-  // (data/<tenantId>/.homesense/agent/sessions/<cwd>/<iso>_<sessionId>.jsonl)。
+  // (data/tenants/<tenantId>/.homesense/agent/sessions/<cwd>/<iso>_<sessionId>.jsonl)。
   const activeSessionId = crypto.randomUUID()
   const now = new Date().toISOString()
-  const dbPath = path.join(DATA_ROOT, `${tenantId}.db`)
+  const dbPath = getTenantTimelineDbPath(tenantId)
   const { hash, salt } = hashPassword(password)
 
   const db = getIndexDb()
@@ -292,8 +311,9 @@ export function createTenant(input: CreateTenantInput): {
     throw e
   }
 
-  // 初始化租户库(包含 users/messages/timeline_meta/tenant_meta)
+  // 初始化租户库(包含 users/messages/timeline_meta/tenant_meta) + 工作区目录
   const tenantDb = getTenantDb(tenantId)
+  ensureTenantData(tenantId)
   tenantDb.prepare(
     `INSERT INTO users (id, username, display_name, role, created_at)
      VALUES (?, ?, ?, 'owner', ?)`,

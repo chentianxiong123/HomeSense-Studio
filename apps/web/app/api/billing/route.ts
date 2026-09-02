@@ -68,6 +68,7 @@ export async function PUT(req: Request) {
       prices[model] = {
         input: Number(s.input) || 0,
         output: Number(s.output) || 0,
+        enabled: Boolean(s.enabled),
       };
     }
     next.model_prices = prices;

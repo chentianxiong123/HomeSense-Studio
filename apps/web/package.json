@@ -27,10 +27,6 @@
     "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.84.3",
-    "@earendil-works/pi-ai": "0.84.3",
-    "@earendil-works/pi-coding-agent": "0.84.3",
-    "@earendil-works/pi-tui": "0.84.3",
     "@fontsource-variable/inter": "^5.3.0",
     "@radix-ui/react-popover": "^1.1.23",
     "@sinclair/typebox": "^0.34.52",

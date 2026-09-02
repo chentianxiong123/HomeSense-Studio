@@ -1,4 +1,4 @@
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { SessionManager } from "./pi-shims";
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 import webpush from "web-push";

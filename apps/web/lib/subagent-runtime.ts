@@ -1,13 +1,5 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import {
-  createAgentSessionFromServices,
-  createAgentSessionServices,
-  getAgentDir,
-  initTheme,
-  SessionManager,
-  SettingsManager,
-  type ModelRuntime,
-} from "@earendil-works/pi-coding-agent";
+import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, SettingsManager, ModelRuntime } from "./pi-shims";
 import type { AgentSessionLike } from "./pi-types";
 import {
   subagentFinalText,

@@ -12,7 +12,9 @@
 
 import fs from "node:fs"
 import path from "node:path"
-import { getAgentDir } from "@earendil-works/pi-coding-agent"
+
+import { getTenantMemoryDir, getTenantMemoryFile, getTenantUserFile } from "./tenant-paths"
+import { ensureTenantData } from "./tenant-bootstrap"
 
 export type MemoryTarget = "memory" | "user"
 
@@ -25,25 +27,19 @@ const MEMORY_BLOCK_HEADERS: Record<MemoryTarget, string> = {
 export const ENTRY_DELIMITER = "\n§\n"
 export const MEMORY_CHAR_LIMIT = 6000
 
-/**
- * 记忆根目录。tenantId 必传:
- *   - 真实用户(从 ctx 解析出来): data/<tenantId>/.homesense/agent/memories
- *   - 老路径兜底(无 tenantId,过渡期): getAgentDir()/memories
- * 调用方必须主动传 tenantId;无参走 fallback,仅用于 backward-compat 测试。
- */
-export function getMemoriesDir(tenantId?: string): string {
-  if (tenantId && typeof tenantId === "string" && tenantId !== "default") {
-    // 跟 rpc-manager.ts 里 resolveTenantAgentDir 同源
-    return path.join(process.cwd(), "data", tenantId, ".homesense", "agent", "memories")
-  }
-  return path.join(getAgentDir(), "memories")
+/** 记忆根目录。tenantId 必传: data/tenants/<tenantId>/.homesense/agent/memories */
+export function getMemoriesDir(tenantId: string): string {
+  if (!tenantId) throw new Error("getMemoriesDir: tenantId is required")
+  return getTenantMemoryDir(tenantId)
 }
 
-function memoryFilePath(tenantId: string | undefined, target: MemoryTarget): string {
-  return path.join(getMemoriesDir(tenantId), target === "memory" ? "MEMORY.md" : "USER.md")
+function memoryFilePath(tenantId: string, target: MemoryTarget): string {
+  return target === "memory" ? getTenantMemoryFile(tenantId) : getTenantUserFile(tenantId)
 }
 
 export function readMemoryEntries(tenantId: string, target: MemoryTarget): string[] {
+  if (!tenantId) throw new Error("readMemoryEntries: tenantId is required")
+  ensureTenantData(tenantId)
   const filePath = memoryFilePath(tenantId, target)
   if (!fs.existsSync(filePath)) return []
   const raw = fs.readFileSync(filePath, "utf8").trim()
@@ -55,6 +51,8 @@ export function readMemoryEntries(tenantId: string, target: MemoryTarget): strin
 }
 
 function writeMemoryEntries(tenantId: string, target: MemoryTarget, entries: string[]): void {
+  if (!tenantId) throw new Error("writeMemoryEntries: tenantId is required")
+  ensureTenantData(tenantId)
   const filePath = memoryFilePath(tenantId, target)
   fs.mkdirSync(path.dirname(filePath), { recursive: true })
   const content = entries.filter(Boolean).join(ENTRY_DELIMITER)
