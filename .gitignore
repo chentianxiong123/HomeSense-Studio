@@ -5,3 +5,8 @@ out/
 .env*
 .DS_Store
 .hs-brain/
+
+# Go backend build artifacts (ONNX runtime subproject, workflow matcher, ONNX binary)
+/v5/backend/onnxruntime-purego/
+/v5/backend/pkg/workflowmatch/
+/v5/backend/third_party/
