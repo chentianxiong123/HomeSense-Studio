@@ -97,15 +97,13 @@ CREATE TABLE IF NOT EXISTS wallet_ledger (
 CREATE INDEX IF NOT EXISTS idx_wallet_ledger_tenant ON wallet_ledger(tenant_id, id DESC);
 
 CREATE TABLE IF NOT EXISTS billing_config (
-    id                INTEGER PRIMARY KEY CHECK (id = 1),
-    model_prices      JSONB NOT NULL DEFAULT '{}'::jsonb,
-    monthly_quota     JSONB NOT NULL DEFAULT '{}'::jsonb,
-    published_models  JSONB NOT NULL DEFAULT '{}'::jsonb,
-    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+    id            INTEGER PRIMARY KEY CHECK (id = 1),
+    model_prices  JSONB NOT NULL DEFAULT '{}'::jsonb,
+    monthly_quota JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
--- 旧表若已存在，补列（幂等 ALTER）
-ALTER TABLE billing_config ADD COLUMN IF NOT EXISTS published_models JSONB NOT NULL DEFAULT '{}'::jsonb;
-INSERT INTO billing_config (id, model_prices, monthly_quota, published_models) VALUES (1, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb)
+-- 旧表若带 published_models 列（旧 schema 残留），保留不删（代码不再读写，删列会破坏升级路径）
+INSERT INTO billing_config (id, model_prices, monthly_quota) VALUES (1, '{}'::jsonb, '{}'::jsonb)
 ON CONFLICT (id) DO NOTHING;
 `
 
