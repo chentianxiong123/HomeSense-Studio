@@ -253,6 +253,68 @@ export function readTenantMonthUsageByModel(
   return readUsageByModel(tenantId, monthStartISO())
 }
 
+/**
+ * 某租户按会话聚合的用量明细（每个 session 一行，包含该 session 内跨模型的累加）。
+ * 给"我的对话账本"页用 — 用户能看到每一次会话的 token / 时间 / 模型。
+ */
+export async function readUsageBySession(
+  tenantId: string,
+  since: string | null,
+  limit = 50,
+): Promise<
+  {
+    sessionId: string
+    requests: number
+    inputTokens: number
+    outputTokens: number
+    totalTokens: number
+    models: string[]
+    firstSeen: string
+    lastSeen: string
+  }[]
+> {
+  await migrate()
+  const rows = await query<{
+    session_id: string
+    requests: string | number
+    input_tokens: string | number
+    output_tokens: string | number
+    first_seen: Date
+    last_seen: Date
+    models: string
+  }>(
+    `SELECT session_id,
+            SUM(requests)::BIGINT AS requests,
+            SUM(input_tokens)::BIGINT AS input_tokens,
+            SUM(output_tokens)::BIGINT AS output_tokens,
+            MIN(first_seen) AS first_seen,
+            MAX(last_seen) AS last_seen,
+            string_agg(DISTINCT model, ',' ORDER BY model) AS models
+       FROM pico_usage
+      WHERE tenant_id = $1
+        AND session_id <> ''
+        ${since ? "AND last_seen >= $2" : ""}
+      GROUP BY session_id
+      ORDER BY MAX(last_seen) DESC
+      LIMIT ${since ? "$3" : "$2"}`,
+    since ? [tenantId, since, limit] : [tenantId, limit],
+  )
+  return rows.map((r) => {
+    const inT = Number(r.input_tokens)
+    const outT = Number(r.output_tokens)
+    return {
+      sessionId: r.session_id,
+      requests: Number(r.requests),
+      inputTokens: inT,
+      outputTokens: outT,
+      totalTokens: inT + outT,
+      models: r.models ? r.models.split(",") : [],
+      firstSeen: new Date(r.first_seen).toISOString(),
+      lastSeen: new Date(r.last_seen).toISOString(),
+    }
+  })
+}
+
 /** 计算某租户本月费用（按模型 × 单价，云平台纯计算）。 */
 export async function computeTenantMonthCost(
   tenantId: string,
