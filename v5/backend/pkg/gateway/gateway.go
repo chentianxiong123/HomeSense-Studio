@@ -511,6 +511,13 @@ func setupAndStartServices(
 					_ = p.Signal(syscall.SIGTERM)
 				}
 			})
+			// Metering wiring: the pico channel owns the tenant history DB, so
+			// its UsageRecorder is the single sink the agent loop records every
+			// LLM call into (mirrors hermes' update_token_counts chokepoint).
+			if rec := typed.UsageRecorder(); rec != nil {
+				agentLoop.SetUsageRecorder(rec)
+				logger.InfoCF("gateway", "pico metering enabled", map[string]any{})
+			}
 		}
 	}
 

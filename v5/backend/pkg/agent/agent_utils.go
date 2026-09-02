@@ -4,7 +4,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"maps"
 	"path/filepath"
@@ -723,24 +722,4 @@ func extractProvider(registry *AgentRegistry) (providers.LLMProvider, bool) {
 		return nil, false
 	}
 	return defaultAgent.Provider, true
-}
-
-// attachMeterUsageToOutbound hands the real per-turn LLM token usage to the
-// channel via Context.Raw["meter_usage"]. Billing lives in the control plane;
-// this is only the measurement hand-off. It returns msg unchanged when there
-// is no usage to hand off.
-func attachMeterUsageToOutbound(msg bus.OutboundMessage, usage *providers.UsageInfo) bus.OutboundMessage {
-	if usage == nil {
-		return msg
-	}
-	if msg.Context.Raw == nil {
-		msg.Context.Raw = make(map[string]string, 2)
-	}
-	usageJSON, _ := json.Marshal(map[string]int{
-		"input_tokens":  usage.PromptTokens,
-		"output_tokens": usage.CompletionTokens,
-		"total_tokens":  usage.TotalTokens,
-	})
-	msg.Context.Raw["meter_usage"] = string(usageJSON)
-	return msg
 }
