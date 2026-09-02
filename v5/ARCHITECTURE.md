@@ -172,11 +172,58 @@ AI 上下文窗口有限，一条上下文不可能无限积攒。分三层破�
 ### 5.1 隔离层（v3 已完整）
 per-tenant SQLite、per-tenant sessions 目录、per-tenant timeline、auth 绑定 tenantId。
 
-### 5.2 容量：单 worker 可复制 N 份（未来的事，不在此阶段实现）
-- 无状态 HTTP 层（Next.js API）可水平扩展 N 个副本；
-- 引擎状态按 `tenantId` 哈希粘性路由到"引擎 worker 池"，每个 worker = 今天的单进程；
-- session 状态已外置在 jsonl，进程重启可恢复；
-- **不是解耦重写**，是给现有架构加一层粘性路由。
+### 5.2 容量：per-tenant SQLite + 粘性 worker 池（核心扩容路径）
+
+> 决策（2026-09-02）：**HomeSense 不走 Postgres**。扩容路径是 **per-tenant SQLite + 粘性 worker 池 + LiteFS/S3 备份**。
+> 理由与详细分析见 `v5/docs/scaling-strategy.md`。
+
+#### 5.2.1 为什么是 SQLite 不是 Postgres
+
+| 维度 | per-tenant SQLite | Postgres |
+|---|---|---|
+| 删租户 | `rm file.db`（物理隔离，无法泄漏） | `DROP SCHEMA`（有锁、有缓存、可能残留） |
+| 跨租户查询 | ❌ 天然无（**HomeSense 永远不需要**） | ✅ |
+| 单租户延迟 | 0 网络，本地文件 | 跨网连接池 |
+| 写并发 | 单写者，但**租户之间不冲突** | 全局 MVCC |
+| 运维 | 0（文件即一切） | pg_dump/wals/replica |
+| GDPR/隐私 | **强**：物理隔离 | 弱：同盘同 schema |
+| 单库成本 | $0 | 连接/IO/存储 |
+
+HomeSense 是家庭场景，跨租户聚合**毫无业务价值**。Postgres 唯一赢的"跨家庭 BI"在 HomeSense 永远不存在。
+
+#### 5.2.2 扩容模型
+
+```
+LB (粘性 hash(tenantId) % N)
+  ├─ worker-1   持有 ten_a, ten_b, ten_c ...
+  ├─ worker-2   持有 ten_d, ten_e ...
+  └─ worker-N
+       │
+       └─ 每个 tenant 一个独立 .sqlite 文件
+            WAL + 写锁 = 天然并发隔离
+            读可走 LiteFS 只读副本
+            写只走粘性路由到的那个 worker
+```
+
+#### 5.2.3 容量里程碑
+
+| 形态 | 家庭数 | 并发聊天 | 关键点 |
+|---|---|---|---|
+| 1 worker | 50–200 | 100–400 | fd 上限（ulimit）、内存 |
+| 4 worker 粘性分流 | 500–1500 | 1000–3000 | worker 数 = fd 上限 / 100 |
+| 8 worker + 读副本 | 2000–5000 | 5000+ | LiteFS 只读分担读流量 |
+| 16+ worker + LiteFS 跨机 | 10000+ | 20000+ | S3 备份，进程重启自拉回 |
+
+> 真正贵的不是 SQLite，是 **pi agent 状态**。但 agent 状态本来就是 per-session 的，跟着 tenantId 走粘性就行。
+
+#### 5.2.4 session 状态外置：不是"无状态"，是"按租户小有状态"
+
+- 每个 worker 持有 N 个 per-tenant SQLite + N 个 pi agent session
+- tenant 文件物理隔离，**删租户 = 删文件**
+- 进程重启 = LiteFS 自动从 S3 拉回该 worker 持有的文件
+- 状态在 worker 内存里，但**只要 worker 挂掉、它持有的租户粘性路由到别的 worker**（要么热迁，要么新 worker 拉文件 + 重建 session）
+
+**不是解耦重写**，是给现有架构加一层粘性路由。worker 之间不需要共享内存。
 
 ### 5.3 计费/配额
 B 端要求，家庭版可无；列为 v5 后续项。
@@ -190,7 +237,7 @@ B 端要求，家庭版可无；列为 v5 后续项。
 | 换基座到 picoclaw（Go） | ❌ 否决：换基座=换掉整个大脑（pi agent 栈），成本巨大；仅可借鉴渠道层 |
 | 每用户独立 session | ❌ 否决：会切碎家庭共享记忆 |
 | 每渠道独立会话 | ❌ 否决：渠道只是 IO |
-| worker 池横向扩展 | ⏸ 冻结：功能正确性优先，容量后续再说 |
+| worker 池横向扩展 | ✅ 路径落定：per-tenant SQLite + 粘性路由 + LiteFS |
 | 计费 / 账号体系 / 权限 | ⏸ 待定 |
 
 ---
