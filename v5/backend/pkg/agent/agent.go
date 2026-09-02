@@ -604,10 +604,14 @@ func (al *AgentLoop) runAgentLoop(
 		}
 		if modelName := strings.TrimSpace(result.modelName); modelName != "" {
 			if msg.Context.Raw == nil {
-				msg.Context.Raw = make(map[string]string, 1)
+				msg.Context.Raw = make(map[string]string, 2)
 			}
 			msg.Context.Raw["model_name"] = modelName
 		}
+		// Metering: attach the real per-turn LLM token usage so the channel
+		// (e.g. pico) can persist it to the tenant DB. Billing stays in the
+		// control plane; this is just the measurement hand-off.
+		msg = attachMeterUsageToOutbound(msg, ts.GetLastUsage())
 		markFinalOutbound(&msg)
 		al.bus.PublishOutbound(ctx, msg)
 	}

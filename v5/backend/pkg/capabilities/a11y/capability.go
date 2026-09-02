@@ -226,11 +226,11 @@ func (c *Capability) find(req Request) map[string]any {
 	if req.Query == "" {
 		return fail("INVALID_PARAMS", "query is required")
 	}
-	_, errOut, code := adbShell(req.Device, "uiautomator dump /sdcard/.uiautomator.dump 2>&1", 10*time.Second)
+	_, errOut, code := adbShell(req.Device, "uiautomator dump /sdcard/.uiautomator.dump 2>/dev/null", 30*time.Second)
 	if code != 0 {
 		return fail("DUMP_FAILED", errOut)
 	}
-	treeOut, errOut, code := adbShell(req.Device, "cat /sdcard/.uiautomator.dump", 10*time.Second)
+	treeOut, errOut, code := adbShell(req.Device, "cat /sdcard/.uiautomator.dump", 15*time.Second)
 	if code != 0 {
 		return fail("READ_FAILED", errOut)
 	}
