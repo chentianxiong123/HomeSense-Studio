@@ -12,3 +12,7 @@ out/
 /v5/backend/third_party/
 
 # embedded moonlight subrepos
+
+# archived v5 build artifacts (二进制误提交, 已从历史摘除)
+/old/v5/backend/executor
+/old/v5/backend/pkg/workflowmatch/models/model_quantized.onnx_data
