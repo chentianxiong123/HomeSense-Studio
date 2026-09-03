@@ -1,0 +1,23 @@
+# Binaries and build artifacts
+bin/
+*.exe
+*.out
+
+# Runtime data (user workspaces, meta DBs, personal SQLite files)
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Secret / local env
+.env
+.env.local
+
+# Frontend build outputs and deps
+node_modules/
+dist/
+web/dist/
+
+# v6 compiled test binary
+/v6server
+/usersim
