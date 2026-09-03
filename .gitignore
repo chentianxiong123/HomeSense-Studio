@@ -12,5 +12,3 @@ out/
 /v5/backend/third_party/
 
 # embedded moonlight subrepos
-old/v5/backend/pkg/capabilities/moonlight/vendor/moonlight-embedded/third_party/SDL_GameControllerDB/
-old/v5/backend/pkg/capabilities/moonlight/vendor/moonlight-embedded/third_party/moonlight-common-c/
