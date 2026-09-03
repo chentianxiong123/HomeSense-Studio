@@ -5,6 +5,9 @@
     "debugMode": true,
     "root": true
   },
+  "intents": ["电影模式", "看电影模式", "我想看电影", "看个电影", "放电影", "打开电影模式"],
+  "negative_examples": ["关闭电影模式", "关掉电影模式", "退出电影模式"],
+  "confusable": ["home_mode"],
   "metadata": {
     "firstNodeIndex": 0,
     "nodes": [
