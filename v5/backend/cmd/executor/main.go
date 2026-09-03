@@ -6,9 +6,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/sipeed/picoclaw/pkg/ruleengine"
 )
 
 var (
@@ -25,6 +28,18 @@ func main() {
 		os.Exit(1)
 	}
 	flag.Parse()
+
+	// 获取 workspace 路径
+	homeDir := config.GetHome()
+	workspaceDir := filepath.Join(homeDir, "workspace")
+
+	// 初始化 L1 规则引擎
+	ruleEngine = ruleengine.NewEngine()
+
+	// 初始化 L2 embedding + 工作流匹配
+	if err := initWorkflowMatch(workspaceDir); err != nil {
+		log.Printf("Warning: L2 workflow match init failed: %v (将继续运行，仅 L1 规则匹配可用)", err)
+	}
 
 	registerTools()
 

@@ -5,6 +5,9 @@
     "debugMode": true,
     "root": true
   },
+  "intents": ["回家模式", "我要回家了", "我到家了", "到家了", "回家了", "快到家了"],
+  "negative_examples": ["离家模式", "我要出门了", "出去一下", "离家出走"],
+  "confusable": ["movie_mode"],
   "metadata": {
     "firstNodeIndex": 0,
     "nodes": [
