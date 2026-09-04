@@ -36,7 +36,6 @@ const legacyConsoleRoutes: Record<string, string> = {
 const legacySettingsTabs: Record<string, string> = {
   operation: '/system-settings/operations/behavior',
   dashboard: '/system-settings/content/dashboard',
-  chats: '/system-settings/content/chat',
   drawing: '/system-settings/content/drawing',
   payment: '/system-settings/billing/payment',
   ratio: '/system-settings/billing/model-pricing',
@@ -87,10 +86,6 @@ export function resolveLegacyRoute(rawHref: string): string | null {
   }
   if (pathname === '/console/chat') {
     return buildTargetHref('/dashboard', source)
-  }
-  if (pathname.startsWith('/console/chat/')) {
-    const chatID = pathname.slice('/console/chat/'.length)
-    return buildTargetHref(chatID ? `/chat/${chatID}` : '/dashboard', source)
   }
 
   const target = legacyConsoleRoutes[pathname]
