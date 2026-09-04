@@ -4,6 +4,7 @@ go 1.25.13
 
 require (
 	github.com/sipeed/picoclaw v0.0.0
+	golang.org/x/sync v0.21.0
 	modernc.org/sqlite v1.53.0
 )
 
@@ -42,6 +43,7 @@ require (
 	github.com/gomarkdown/markdown v0.0.0-20260411013819-759bbc3e3207 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/h2non/filetype v1.1.3 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/kagisearch/kagi-openapi-golang v0.0.0-20260526215348-96575e864d62 // indirect
@@ -75,7 +77,6 @@ require (
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/term v0.44.0 // indirect
 	golang.org/x/text v0.39.0 // indirect

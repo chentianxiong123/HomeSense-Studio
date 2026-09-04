@@ -31,10 +31,25 @@ type picoConn struct {
 	id        string
 	conn      *websocket.Conn
 	sessionID string
+	userID    string
 	writeMu   sync.Mutex
 	closed    atomic.Bool
 	cancel    context.CancelFunc // cancels per-connection goroutines (e.g. pingLoop)
 }
+
+// UserResolver authenticates a WebSocket upgrade request and returns the
+// authenticated user ID. When set on the channel it replaces the single
+// static token check; returning ok=false rejects the connection. It is used
+// by multi-tenant hosts (e.g. the v6 control plane) to route every message
+// to the caller's own agent instance.
+type UserResolver func(r *http.Request) (userID string, ok bool)
+
+// InboundHandler, when set, is invoked for every inbound message.send /
+// media.send instead of publishing to the message bus for default routing.
+// This lets a multi-tenant host dispatch directly to a specific agent
+// instance (see AgentLoop.ProcessToAgent). When nil, the channel keeps its
+// built-in bus routing behaviour.
+type InboundHandler func(ctx context.Context, userID, sessionID string, msg PicoMessage) error
 
 var allowedInlineImageMIMETypes = map[string]struct{}{
 	"image/jpeg": {},
@@ -107,6 +122,12 @@ type PicoChannel struct {
 	deleteMessageFn    func(context.Context, string, string) error
 	// broadcastFn lets tests intercept outbound broadcasts. nil → broadcastToSession.
 	broadcastFn func(chatID string, msg PicoMessage) error
+	// userResolver, when non-nil, authenticates connections as specific users
+	// instead of the single static token. hostUserResolver stores the hook so
+	// tests can set it via the exported field setter.
+	userResolver UserResolver
+	// inboundHandler, when non-nil, takes over inbound message handling.
+	inboundHandler InboundHandler
 }
 
 // NewPicoChannel creates a new Pico Protocol channel.
@@ -150,6 +171,22 @@ func NewPicoChannel(
 	ch.progress = channels.NewToolFeedbackAnimator(ch.EditMessage)
 	ch.deleteMessageFn = ch.DeleteMessage
 	return ch, nil
+}
+
+// SetUserResolver installs a per-connection user authenticator. When set,
+// connections are accepted only when the resolver returns ok=true, and the
+// returned userID is attached to every inbound message from that connection.
+// This supersedes the single static token check.
+func (c *PicoChannel) SetUserResolver(fn UserResolver) {
+	c.userResolver = fn
+}
+
+// SetInboundHandler installs a custom inbound message handler. When set,
+// inbound message.send / media.send messages are handed to the handler
+// instead of being published to the message bus. This is how a multi-tenant
+// host routes each message to the caller's own agent instance.
+func (c *PicoChannel) SetInboundHandler(fn InboundHandler) {
+	c.inboundHandler = fn
 }
 
 // createAndAddConnection checks MaxConnections and registers a connection atomically.
@@ -989,7 +1026,15 @@ func (c *PicoChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Authenticate
-	if !c.authenticate(r) {
+	resolvedUserID := ""
+	if c.userResolver != nil {
+		var ok bool
+		resolvedUserID, ok = c.userResolver(r)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+	} else if !c.authenticate(r) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -1034,6 +1079,7 @@ func (c *PicoChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close()
 		return
 	}
+	pc.userID = resolvedUserID
 
 	logger.InfoCF("pico", "WebSocket client connected", map[string]any{
 		"conn_id":    pc.id,
@@ -1215,6 +1261,16 @@ func (c *PicoChannel) handleMessageSend(pc *picoConn, msg PicoMessage) {
 	sessionID := msg.SessionID
 	if sessionID == "" {
 		sessionID = pc.sessionID
+	}
+
+	if c.inboundHandler != nil {
+		if err := c.inboundHandler(c.ctx, pc.userID, sessionID, msg); err != nil {
+			errMsg := newErrorWithPayload("delivery_failed", err.Error(), map[string]any{
+				"request_id": msg.ID,
+			})
+			pc.writeJSON(errMsg)
+		}
+		return
 	}
 
 	chatID := "pico:" + sessionID

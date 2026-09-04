@@ -27,20 +27,25 @@ func main() {
 		idleTimeout   = flag.Duration("idle-timeout", 10*time.Minute, "reclaim agent instances idle longer than this")
 		reapInterval  = flag.Duration("reap-interval", 30*time.Second, "interval between idle reclamation sweeps")
 		parallelTurns = flag.Int("parallel-turns", 8, "MaxParallelTurns for the AgentLoop (process-global turn concurrency)")
+		webDir        = flag.String("web-dir", "", "frontend dist directory to serve (default: in-repo picoclaw frontend dist)")
 	)
 	flag.Parse()
+	if *webDir == "" {
+		*webDir = defaultDistDir()
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	srv, err := NewServer(ServerConfig{
-		DataDir:        *dataDir,
-		NewAPIBase:     *newAPIBase,
-		NewAPIKey:      *newAPIKey,
-		Model:          *model,
-		IdleTimeout:    *idleTimeout,
-		ReapInterval:   *reapInterval,
-		ParallelTurns:  *parallelTurns,
+		DataDir:       *dataDir,
+		NewAPIBase:    *newAPIBase,
+		NewAPIKey:     *newAPIKey,
+		Model:         *model,
+		IdleTimeout:   *idleTimeout,
+		ReapInterval:  *reapInterval,
+		ParallelTurns: *parallelTurns,
+		WebDir:        *webDir,
 	})
 	if err != nil {
 		log.Fatalf("init v6 server: %v", err)
@@ -68,4 +73,3 @@ func main() {
 		log.Fatalf("http server error: %v", err)
 	}
 }
-
