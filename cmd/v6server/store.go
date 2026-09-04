@@ -18,18 +18,18 @@ import (
 
 // User is a registered tenant row in the v6 meta DB.
 type User struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Workspace string `json:"workspace"`
-	Model     string `json:"model,omitempty"`
-	APIKey    string `json:"-"` // per-user new-api token (never serialized)
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Workspace string    `json:"workspace"`
+	Model     string    `json:"model,omitempty"`
+	APIKey    string    `json:"-"` // per-user new-api token (never serialized)
 	CreatedAt time.Time `json:"created_at"`
 }
 
 // Store persists the user→agent mapping and manages per-user SQLite files.
 type Store struct {
-	db       *sql.DB
-	dataDir  string
+	db        *sql.DB
+	dataDir   string
 	corpusDir string
 }
 
