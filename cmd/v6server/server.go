@@ -45,15 +45,23 @@ type ServerConfig struct {
 	ReapInterval  time.Duration
 	ParallelTurns int
 	CorpusDir     string
+	WebDir        string
 }
 
 // Server is the v6 control plane.
 type Server struct {
-	cfg      ServerConfig
-	store    *Store
-	loop     *agent.AgentLoop
-	bus      *bus.MessageBus
-	rootCfg  *config.Config
+	cfg     ServerConfig
+	store   *Store
+	loop    *agent.AgentLoop
+	bus     *bus.MessageBus
+	rootCfg *config.Config
+
+	// sessions mints and resolves v6 login tokens.
+	sessions *sessionStore
+	// bridge wires the multi-user Pico WebSocket onto the shared message bus.
+	bridge *picoBridge
+	// web serves the picoclaw SPA frontend.
+	web http.Handler
 
 	stop     chan struct{}
 	closeOne sync.Once
@@ -117,12 +125,22 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	ctx := context.Background()
 
 	s := &Server{
-		cfg:     cfg,
-		store:   store,
-		loop:    loop,
-		bus:     mb,
-		rootCfg: pcCfg,
-		stop:    make(chan struct{}),
+		cfg:      cfg,
+		store:    store,
+		loop:     loop,
+		bus:      mb,
+		rootCfg:  pcCfg,
+		sessions: newSessionStore(),
+		stop:     make(chan struct{}),
+	}
+	bridge, err := newPicoBridge(s, pcCfg, mb)
+	if err != nil {
+		store.Close()
+		return nil, err
+	}
+	s.bridge = bridge
+	if cfg.WebDir != "" {
+		s.web = newFrontendHandler(cfg.WebDir)
 	}
 	go s.runReaper()
 
@@ -265,10 +283,20 @@ func (s *Server) Close() {
 // Routes wires the HTTP handlers.
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
+	auth := &authHandlers{srv: s}
+	mux.HandleFunc("/api/auth/login", auth.handleLogin)
+	mux.HandleFunc("/api/auth/logout", auth.handleLogout)
+	mux.HandleFunc("/api/auth/status", auth.handleStatus)
 	mux.HandleFunc("/api/v1/users", s.handleUsers)
 	mux.HandleFunc("/api/v1/users/", s.handleUserByID)
 	mux.HandleFunc("/api/v1/reap", s.handleReap)
 	mux.HandleFunc("/api/v1/status", s.handleStatus)
+	if s.bridge != nil {
+		mux.Handle("/pico/", s.bridge.ch)
+	}
+	if s.web != nil {
+		mux.Handle("/", s.web)
+	}
 	return mux
 }
 
@@ -397,11 +425,11 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	registered, _ := s.store.ListUsers()
 	idle := reg.IdleAgents(time.Now().Add(-s.cfg.IdleTimeout))
 	respondJSON(w, http.StatusOK, map[string]any{
-		"users_registered":   len(registered),
-		"instances_active":   len(reg.ListAgentIDs()),
-		"instances_idle":     idle,
-		"idle_timeout":       s.cfg.IdleTimeout.String(),
-		"reap_interval":      s.cfg.ReapInterval.String(),
+		"users_registered": len(registered),
+		"instances_active": len(reg.ListAgentIDs()),
+		"instances_idle":   idle,
+		"idle_timeout":     s.cfg.IdleTimeout.String(),
+		"reap_interval":    s.cfg.ReapInterval.String(),
 	})
 }
 
