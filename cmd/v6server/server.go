@@ -27,6 +27,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/sipeed/picoclaw/pkg/agent"
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/config"
@@ -52,8 +54,13 @@ type Server struct {
 	loop     *agent.AgentLoop
 	bus      *bus.MessageBus
 	rootCfg  *config.Config
+
 	stop     chan struct{}
 	closeOne sync.Once
+
+	// materialize de-duplicates concurrent first-message warm-ups for the
+	// same user, so simultaneous requests can't double-add an agent instance.
+	materialize singleflight.Group
 }
 
 // NewServer builds the embedded picoclaw AgentLoop and manager store.
@@ -104,17 +111,10 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	rootProvider := buildRootProvider(pcCfg)
 	loop := agent.NewAgentLoop(pcCfg, mb, rootProvider)
 
-	// Persist any pre-registered users into memory eagerly at boot so the
-	// reaper sees them immediately; instances still warm lazily.
+	// No eager warm-up: pre-registered users stay dormant in the meta DB and
+	// get an agent instance only when they actually send a message
+	// (see ensureUserAgent). Memory therefore tracks *active* users.
 	ctx := context.Background()
-	for _, u := range mustListUsers(store) {
-		if _, ok := loop.GetRegistry().GetAgent(u.ID); !ok {
-			aCfg := userAgentConfig(u)
-			if _, err := loop.GetRegistry().AddUserAgent(aCfg, userProviderFor(pcCfg, u)); err != nil {
-				log.Printf("warm-up agent %s: %v", u.ID, err)
-			}
-		}
-	}
 
 	s := &Server{
 		cfg:     cfg,
@@ -189,25 +189,37 @@ func userProviderFor(cfg *config.Config, u User) providers.LLMProvider {
 }
 
 // ensureUserAgent lazily places a user's agent instance in the registry if it
-// is not already present, then refreshes its last-used timestamp.
+// is not already present, then refreshes its last-used timestamp. Concurrent
+// first messages for the same user are de-duplicated via singleflight so only
+// one AddUserAgent happens.
 func (s *Server) ensureUserAgent(userID string) (*agent.AgentInstance, error) {
-	reg := s.loop.GetRegistry()
-	if inst, ok := reg.GetAgent(userID); ok {
-		reg.Touch(userID)
+	if inst, ok := s.loop.GetRegistry().GetAgent(userID); ok {
+		s.loop.GetRegistry().Touch(userID)
 		return inst, nil
 	}
 
-	u, err := s.store.GetUser(userID)
-	if err != nil {
-		return nil, fmt.Errorf("unknown user %q: %w", userID, err)
-	}
+	v, err, _ := s.materialize.Do(userID, func() (any, error) {
+		if inst, ok := s.loop.GetRegistry().GetAgent(userID); ok {
+			s.loop.GetRegistry().Touch(userID)
+			return inst, nil
+		}
 
-	inst, err := reg.AddUserAgent(userAgentConfig(u), userProviderFor(s.rootCfg, u))
+		u, err := s.store.GetUser(userID)
+		if err != nil {
+			return nil, fmt.Errorf("unknown user %q: %w", userID, err)
+		}
+
+		inst, err := s.loop.GetRegistry().AddUserAgent(userAgentConfig(u), userProviderFor(s.rootCfg, u))
+		if err != nil {
+			return nil, err
+		}
+		log.Printf("lazily materialized agent %s", userID)
+		return inst, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("lazily materialized agent %s", userID)
-	return inst, nil
+	return v.(*agent.AgentInstance), nil
 }
 
 // handleChat processes a user message on their (lazily materialized) agent.
@@ -391,15 +403,6 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		"idle_timeout":       s.cfg.IdleTimeout.String(),
 		"reap_interval":      s.cfg.ReapInterval.String(),
 	})
-}
-
-func mustListUsers(s *Store) []User {
-	users, err := s.ListUsers()
-	if err != nil {
-		log.Printf("list users on boot: %v", err)
-		return nil
-	}
-	return users
 }
 
 func firstNonEmpty(a, b string) string {
