@@ -84,9 +84,8 @@ const SETUP_GUIDE_CODE_PATTERN = [
 type DashboardActionPath =
   | '/keys'
   | '/wallet'
-  | '/playground'
-  | '/channels'
   | '/usage-logs'
+  | '/channels'
   | '/pricing'
 
 interface StartStep {
@@ -515,8 +514,8 @@ export function OverviewDashboard() {
       },
       {
         title: t('Send a request'),
-        description: t('Verify routing with Playground or your client'),
-        to: '/playground',
+        description: t('Verify routing from your own client'),
+        to: '/usage-logs',
         icon: TerminalSquare,
         completed: requestCount > 0,
       },
