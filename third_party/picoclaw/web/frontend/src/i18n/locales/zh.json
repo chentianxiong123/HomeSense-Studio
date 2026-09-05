@@ -17,11 +17,13 @@
   },
   "launcherLogin": {
     "title": "登录",
-    "description": "请输入控制台密码以继续。",
+    "description": "登录您的 HomeSense 账号。",
+    "usernameLabel": "用户名",
+    "usernamePlaceholder": "输入用户名",
     "passwordLabel": "密码",
     "passwordPlaceholder": "输入密码",
     "submit": "登录",
-    "errorInvalid": "密码错误，请重试。",
+    "errorInvalid": "用户名或密码错误，请重试。",
     "errorNetwork": "网络错误，请重试。"
   },
   "launcherSetup": {

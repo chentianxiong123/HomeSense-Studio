@@ -17,11 +17,13 @@
   },
   "launcherLogin": {
     "title": "Sign in",
-    "description": "Enter the dashboard password to continue.",
+    "description": "Sign in to your HomeSense account.",
+    "usernameLabel": "Username",
+    "usernamePlaceholder": "Enter username",
     "passwordLabel": "Password",
     "passwordPlaceholder": "Enter password",
     "submit": "Sign in",
-    "errorInvalid": "Incorrect password. Please try again.",
+    "errorInvalid": "Incorrect username or password. Please try again.",
     "errorNetwork": "Network error. Please try again."
   },
   "launcherSetup": {

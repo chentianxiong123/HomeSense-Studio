@@ -220,9 +220,9 @@ func (h *authHandlers) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Proxy to new-api login.
+	// Proxy to new-api login (management API, no /v1 suffix).
 	body, _ := json.Marshal(loginRequest{Username: req.Username, Password: req.Password})
-	loginURL := strings.TrimSuffix(h.srv.cfg.NewAPIBase, "/") + "/api/user/login"
+	loginURL := adminBase(h.srv.cfg.NewAPIBase) + "/api/user/login"
 	httpReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, loginURL, bytes.NewReader(body))
 	if err != nil {
 		respondErr(w, http.StatusBadGateway, err.Error())
@@ -260,8 +260,11 @@ func (h *authHandlers) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Ensure the v6 user row + workspace exist (agent materializes lazily).
+	// The new-api login JWT is NOT stored as the user's LLM API key: it is a
+	// dashboard session token that new-api rejects on /v1/chat/completions.
+	// All tenant LLM traffic uses the shared root provider key instead.
 	if _, err := h.srv.store.GetUser(userID); err != nil {
-		if _, rerr := h.srv.store.RegisterUser(userID, username, h.srv.cfg.Model, na.Data.AccessToken); rerr != nil {
+		if _, rerr := h.srv.store.RegisterUser(userID, username, h.srv.cfg.Model, ""); rerr != nil {
 			respondErr(w, http.StatusInternalServerError, "register v6 user: "+rerr.Error())
 			return
 		}
@@ -300,6 +303,12 @@ func (h *authHandlers) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"user_id":  st.userID,
 		"username": st.username,
 	})
+}
+
+// adminBase strips any trailing /v1 (OpenAI-compatible suffix) so new-api's
+// management API (/api/...) is reached at the server root.
+func adminBase(newAPIBase string) string {
+	return strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(newAPIBase), "/"), "/v1")
 }
 
 func bearerToken(r *http.Request) string {

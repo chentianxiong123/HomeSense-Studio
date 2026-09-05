@@ -21,3 +21,6 @@ web/dist/
 # v6 compiled test binary
 /v6server
 /usersim
+
+# new-api runtime logs
+/logs/

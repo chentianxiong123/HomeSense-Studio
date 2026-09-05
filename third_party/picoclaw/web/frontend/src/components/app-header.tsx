@@ -14,7 +14,7 @@ import { Link } from "@tanstack/react-router"
 import * as React from "react"
 import { useTranslation } from "react-i18next"
 
-import { postLauncherDashboardLogout } from "@/api/launcher-auth"
+import { v6Logout } from "@/api/v6-auth"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -72,7 +72,7 @@ export function AppHeader() {
   const [showLogoutDialog, setShowLogoutDialog] = React.useState(false)
 
   const handleLogout = async () => {
-    await postLauncherDashboardLogout()
+    await v6Logout()
     globalThis.location.assign("/launcher-login")
   }
 

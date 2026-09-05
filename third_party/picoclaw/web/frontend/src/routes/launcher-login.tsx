@@ -3,10 +3,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import * as React from "react"
 import { useTranslation } from "react-i18next"
 
-import {
-  getLauncherAuthStatus,
-  postLauncherDashboardLogin,
-} from "@/api/launcher-auth"
+import { v6Login } from "@/api/v6-auth"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -28,35 +25,19 @@ import { useTheme } from "@/hooks/use-theme"
 function LauncherLoginPage() {
   const { t, i18n } = useTranslation()
   const { theme, toggleTheme } = useTheme()
+  const [username, setUsername] = React.useState("")
   const [password, setPassword] = React.useState("")
   const [submitting, setSubmitting] = React.useState(false)
   const [error, setError] = React.useState("")
 
-  // If the password store has never been initialized, go to setup instead.
-  React.useEffect(() => {
-    void getLauncherAuthStatus()
-      .then((s) => {
-        if (!s.initialized) {
-          globalThis.location.assign("/launcher-setup")
-        }
-      })
-      .catch(() => {
-        /* network error — stay on login page */
-      })
-  }, [])
-
-  const loginWithPassword = React.useCallback(
-    async (passwordValue: string) => {
+  const login = React.useCallback(
+    async (usernameValue: string, passwordValue: string) => {
       setError("")
       setSubmitting(true)
       try {
-        const result = await postLauncherDashboardLogin(passwordValue)
+        const result = await v6Login(usernameValue, passwordValue)
         if (result.ok) {
           globalThis.location.assign("/")
-          return
-        }
-        if (result.status === 409) {
-          globalThis.location.assign("/launcher-setup")
           return
         }
         if (result.status === 401) {
@@ -75,7 +56,7 @@ function LauncherLoginPage() {
 
   const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    await loginWithPassword(password)
+    await login(username, password)
   }
 
   return (
@@ -119,6 +100,22 @@ function LauncherLoginPage() {
           </CardHeader>
           <CardContent>
             <form className="flex flex-col gap-4" onSubmit={onSubmit}>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="launcher-username">
+                  {t("launcherLogin.usernameLabel")}
+                </Label>
+                <Input
+                  id="launcher-username"
+                  name="username"
+                  type="text"
+                  autoComplete="username"
+                  autoFocus
+                  required
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder={t("launcherLogin.usernamePlaceholder")}
+                />
+              </div>
               <div className="flex flex-col gap-2">
                 <Label htmlFor="launcher-password">
                   {t("launcherLogin.passwordLabel")}
