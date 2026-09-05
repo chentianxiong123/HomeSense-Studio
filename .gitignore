@@ -1,3 +1,4 @@
+# --- v1-v5 归档 (old/) 与历史版本 ---
 node_modules/
 .next/
 out/
@@ -16,3 +17,29 @@ out/
 # archived v5 build artifacts (二进制误提交, 已从历史摘除)
 /old/v5/backend/executor
 /old/v5/backend/pkg/workflowmatch/models/model_quantized.onnx_data
+
+# --- v6/v7 活跃代码 ---
+# Binaries and build artifacts
+bin/
+*.exe
+*.out
+
+# Runtime data (user workspaces, meta DBs, personal SQLite files)
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Secret / local env
+.env.local
+
+# Frontend build outputs and deps
+dist/
+web/dist/
+
+# v6 compiled test binary
+/v6server
+/usersim
+
+# new-api runtime logs
+/logs/
