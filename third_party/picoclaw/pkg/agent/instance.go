@@ -163,7 +163,7 @@ func NewAgentInstance(
 	}
 
 	sessionsDir := filepath.Join(workspace, "sessions")
-	sessions := initSessionStore(sessionsDir)
+	sessions := initSessionStore(cfg, sessionsDir)
 
 	mcpDiscoveryActive := agentHasDiscoverableMCPServers(cfg, agentMCPServerAllowlist)
 	contextBuilder := NewContextBuilder(workspace).
@@ -759,10 +759,22 @@ func closeUnreferencedStatefulProviders(
 }
 
 // initSessionStore creates the session persistence backend.
-// It uses the JSONL store by default and auto-migrates legacy JSON sessions.
-// Falls back to SessionManager if the JSONL store cannot be initialized or
-// if migration fails (which indicates the store cannot write reliably).
-func initSessionStore(dir string) session.SessionStore {
+// With cfg.Agents.Defaults.SessionStorage == "sqlite" it uses a per-agent
+// SQLite database; otherwise it uses the JSONL store by default and
+// auto-migrates legacy JSON sessions. Falls back to SessionManager if the
+// store cannot be initialized or if migration fails (which indicates the
+// store cannot write reliably).
+func initSessionStore(cfg *config.Config, dir string) session.SessionStore {
+	if cfg != nil && cfg.Agents.Defaults.SessionStorage == "sqlite" {
+		store, err := memory.NewSQLiteStore(dir)
+		if err != nil {
+			logger.WarnCF("agent", "SQLite session store init failed; falling back to jsonl",
+				map[string]any{"error": err.Error()})
+		} else {
+			return session.NewJSONLBackend(store)
+		}
+	}
+
 	store, err := memory.NewJSONLStore(dir)
 	if err != nil {
 		logger.WarnCF("agent", "Memory JSONL store init failed; falling back to json sessions",

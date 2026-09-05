@@ -422,6 +422,7 @@ type ToolFeedbackConfig struct {
 
 type AgentDefaults struct {
 	Workspace                 string             `json:"workspace"                        env:"PICOCLAW_AGENTS_DEFAULTS_WORKSPACE"`
+	SessionStorage            string             `json:"session_storage,omitempty"         env:"PICOCLAW_AGENTS_DEFAULTS_SESSION_STORAGE"` // "jsonl" (default) or "sqlite"
 	RestrictToWorkspace       bool               `json:"restrict_to_workspace"            env:"PICOCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
 	AllowReadOutsideWorkspace bool               `json:"allow_read_outside_workspace"     env:"PICOCLAW_AGENTS_DEFAULTS_ALLOW_READ_OUTSIDE_WORKSPACE"`
 	Provider                  string             `json:"provider"                         env:"PICOCLAW_AGENTS_DEFAULTS_PROVIDER"`
