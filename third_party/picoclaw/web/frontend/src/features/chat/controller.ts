@@ -12,6 +12,7 @@ import {
   readStoredSessionId,
 } from "@/features/chat/state"
 import { invalidateSocket, isCurrentSocket } from "@/features/chat/websocket"
+import { getV6Token } from "@/api/v6-auth"
 import i18n from "@/i18n"
 import {
   type ChatAttachment,
@@ -139,7 +140,7 @@ export async function connectChat() {
 
     const wsScheme = window.location.protocol === "https:" ? "wss:" : "ws:"
     const wsUrl = `${wsScheme}//${window.location.host}/pico/ws`
-    const url = `${wsUrl}?session_id=${encodeURIComponent(sessionId)}`
+    const url = `${wsUrl}?session_id=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(getV6Token())}`
     const socket = new WebSocket(url)
 
     if (generation !== connectionGeneration) {

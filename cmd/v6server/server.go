@@ -291,6 +291,16 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/v1/users/", s.handleUserByID)
 	mux.HandleFunc("/api/v1/reap", s.handleReap)
 	mux.HandleFunc("/api/v1/status", s.handleStatus)
+	mux.HandleFunc("/api/gateway/status", s.handleGatewayStatus)
+	mux.HandleFunc("/api/gateway/logs", s.handleGatewayLogs)
+	mux.HandleFunc("/api/gateway/start", s.handleGatewayAction)
+	mux.HandleFunc("/api/gateway/stop", s.handleGatewayAction)
+	mux.HandleFunc("/api/gateway/restart", s.handleGatewayAction)
+	mux.HandleFunc("/api/gateway/logs/clear", s.handleGatewayClearLogs)
+	mux.HandleFunc("/api/sessions", s.handleSessions)
+	mux.HandleFunc("/api/sessions/", s.handleSessionByID)
+	mux.HandleFunc("/api/models", s.handleModels)
+	mux.HandleFunc("/api/models/default", s.handleSetDefaultModel)
 	if s.bridge != nil {
 		mux.Handle("/pico/", s.bridge.ch)
 	}
