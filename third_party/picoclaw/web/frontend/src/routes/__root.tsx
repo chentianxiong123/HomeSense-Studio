@@ -2,7 +2,7 @@ import { Outlet, createRootRoute, useRouterState } from "@tanstack/react-router"
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools"
 import { useEffect, useState } from "react"
 
-import { getLauncherAuthStatus } from "@/api/launcher-auth"
+import { v6AuthStatus } from "@/api/v6-auth"
 import { AppLayout } from "@/components/app-layout"
 import { initializeChatStore } from "@/features/chat/controller"
 import { isLauncherAuthPathname } from "@/lib/launcher-login-path"
@@ -35,11 +35,9 @@ const RootLayout = () => {
   // Session guard: proactively check auth status on every page load.
   useEffect(() => {
     if (isAuthPage) return
-    void getLauncherAuthStatus()
+    void v6AuthStatus()
       .then((s) => {
-        if (!s.initialized) {
-          globalThis.location.assign("/launcher-setup")
-        } else if (!s.authenticated) {
+        if (!s.authenticated) {
           globalThis.location.assign("/launcher-login")
         }
       })
@@ -54,7 +52,7 @@ const RootLayout = () => {
           setAuthError(
             err instanceof Error
               ? err.message
-              : "Auth service unavailable. Reset dashboard password storage and restart the application.",
+              : "Auth service unavailable. Please try again later.",
           )
         }
       })

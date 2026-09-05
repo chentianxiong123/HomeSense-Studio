@@ -150,7 +150,7 @@ func (al *AgentLoop) ProcessToAgent(
 		SenderID:                agentID,
 		DefaultResponse:         defaultResponse,
 		EnableSummary:           true,
-		SendResponse:            false,
+		SendResponse:            true,
 		AllowInterimPicoPublish: true,
 	}
 	var err error
