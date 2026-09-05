@@ -2,8 +2,8 @@
 //
 // The v6 control plane embeds picoclaw directly (no gateway subprocess), so
 // the legacy gateway-management endpoints always report a running, embedded
-// gateway. Sessions/history are managed by the per-user agent runtime and are
-// surfaced here as empty lists for now.
+// gateway. Session listing/history live in sessions.go (real SQLite-backed
+// queries on the per-user session store).
 
 package main
 
@@ -44,24 +44,6 @@ func (s *Server) handleGatewayClearLogs(w http.ResponseWriter, r *http.Request) 
 	respondJSON(w, http.StatusOK, map[string]any{
 		"status":    "running",
 		"log_total": 0,
-	})
-}
-
-// handleSessions lists recent sessions (empty for now).
-func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		respondJSON(w, http.StatusOK, []any{})
-	case http.MethodPost:
-		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
-	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
-	}
-}
-
-func (s *Server) handleSessionByID(w http.ResponseWriter, r *http.Request) {
-	respondJSON(w, http.StatusNotFound, map[string]any{
-		"error": "session history not available yet",
 	})
 }
 

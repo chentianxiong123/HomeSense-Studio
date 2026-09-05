@@ -102,6 +102,9 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	pcCfg.Agents.Defaults.SummarizeMessageThreshold = 1000
 	pcCfg.Agents.Defaults.SteeringMode = "one-at-a-time"
 	pcCfg.Agents.Defaults.RestrictToWorkspace = true
+	// Per-user agents persist sessions in their own SQLite database
+	// (data/users/<id>/sessions/sessions.db) instead of JSONL files.
+	pcCfg.Agents.Defaults.SessionStorage = "sqlite"
 	pcCfg.Session.Dimensions = []string{"chat"}
 
 	// Single model channel through new-api (OpenAI-compatible).
