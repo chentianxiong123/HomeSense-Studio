@@ -1,0 +1,8 @@
+# v7server compiled binary
+/v7server
+cmd/v7server/v7server
+cmd/v7server/v7server.exe
+
+# one-api runtime data and per-instance auto logs
+data-v7/
+logs/

@@ -24,7 +24,15 @@
     "passwordPlaceholder": "Enter password",
     "submit": "Sign in",
     "errorInvalid": "Incorrect username or password. Please try again.",
-    "errorNetwork": "Network error. Please try again."
+    "errorNetwork": "Network error. Please try again.",
+    "confirmLabel": "Confirm password",
+    "confirmPlaceholder": "Re-enter password",
+    "registerSubmit": "Register",
+    "toRegister": "No account? Register",
+    "toLogin": "Have an account? Log in",
+    "errorMismatch": "Passwords do not match",
+    "registerTitle": "Create account",
+    "registerDescription": "Create an account with automatic key provisioning."
   },
   "launcherSetup": {
     "title": "Set dashboard password",
