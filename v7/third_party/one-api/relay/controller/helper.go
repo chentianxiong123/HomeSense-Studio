@@ -68,6 +68,15 @@ func getPreConsumedQuota(textRequest *relaymodel.GeneralOpenAIRequest, promptTok
 func preConsumeQuota(ctx context.Context, textRequest *relaymodel.GeneralOpenAIRequest, promptTokens int, ratio float64, meta *meta.Meta) (int64, *relaymodel.ErrorWithStatusCode) {
 	preConsumedQuota := getPreConsumedQuota(textRequest, promptTokens, ratio)
 
+	// v7: a token with UnlimitedQuota means the tenant is on the platform's
+	// own per-user billing (unlimited tokens for platform-internal users), so
+	// the user-level quota gate and the pre-consume both do not apply.
+	if meta.TokenId != 0 {
+		if token, err := model.GetTokenById(meta.TokenId); err == nil && token.UnlimitedQuota {
+			return 0, nil
+		}
+	}
+
 	userQuota, err := model.CacheGetUserQuota(ctx, meta.UserId)
 	if err != nil {
 		return preConsumedQuota, openai.ErrorWrapper(err, "get_user_quota_failed", http.StatusInternalServerError)

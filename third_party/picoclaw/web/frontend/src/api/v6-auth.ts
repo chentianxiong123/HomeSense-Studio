@@ -62,6 +62,45 @@ export async function v6Login(
   }
 }
 
+/** Register a new account through the control plane (proxies one-api) and log
+ * the new user in, returning the same shape as v6Login. */
+export async function v6Register(
+  username: string,
+  password: string,
+): Promise<V6LoginResult> {
+  let res: Response
+  try {
+    res = await fetch("/api/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ username: username.trim(), password }),
+    })
+  } catch {
+    return { ok: false, status: 0, error: "network error" }
+  }
+
+  if (res.ok) {
+    const data = (await res.json()) as V6LoginResponse
+    if (data.token) {
+      setV6Token(data.token)
+      return {
+        ok: true,
+        token: data.token,
+        userId: data.user_id,
+        username: data.username,
+        model: data.model,
+      }
+    }
+  }
+
+  return {
+    ok: false,
+    status: res.status,
+    error: await readV6AuthError(res),
+  }
+}
+
 export function setV6Token(token: string) {
   globalThis.localStorage?.setItem(V6_TOKEN_KEY, token)
 }
