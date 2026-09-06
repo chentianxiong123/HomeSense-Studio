@@ -24,7 +24,15 @@
     "passwordPlaceholder": "输入密码",
     "submit": "登录",
     "errorInvalid": "用户名或密码错误，请重试。",
-    "errorNetwork": "网络错误，请重试。"
+    "errorNetwork": "网络错误，请重试。",
+    "confirmLabel": "确认密码",
+    "confirmPlaceholder": "再次输入密码",
+    "registerSubmit": "注册",
+    "toRegister": "没有账号？去注册",
+    "toLogin": "已有账号？去登录",
+    "errorMismatch": "两次输入的密码不一致",
+    "registerTitle": "注册账号",
+    "registerDescription": "注册新账号并自动开通配额。"
   },
   "launcherSetup": {
     "title": "设置控制台密码",

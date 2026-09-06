@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import * as React from "react"
 import { useTranslation } from "react-i18next"
 
-import { v6Login } from "@/api/v6-auth"
+import { v6Login, v6Register } from "@/api/v6-auth"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -25,17 +25,22 @@ import { useTheme } from "@/hooks/use-theme"
 function LauncherLoginPage() {
   const { t, i18n } = useTranslation()
   const { theme, toggleTheme } = useTheme()
+  const [mode, setMode] = React.useState<"login" | "register">("login")
   const [username, setUsername] = React.useState("")
   const [password, setPassword] = React.useState("")
+  const [confirm, setConfirm] = React.useState("")
   const [submitting, setSubmitting] = React.useState(false)
   const [error, setError] = React.useState("")
 
-  const login = React.useCallback(
+  const submit = React.useCallback(
     async (usernameValue: string, passwordValue: string) => {
       setError("")
       setSubmitting(true)
       try {
-        const result = await v6Login(usernameValue, passwordValue)
+        const result =
+          mode === "register"
+            ? await v6Register(usernameValue, passwordValue)
+            : await v6Login(usernameValue, passwordValue)
         if (result.ok) {
           globalThis.location.assign("/")
           return
@@ -51,12 +56,21 @@ function LauncherLoginPage() {
         setSubmitting(false)
       }
     },
-    [t],
+    [mode, t],
   )
 
   const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    await login(username, password)
+    if (mode === "register" && password !== confirm) {
+      setError(t("launcherLogin.errorMismatch"))
+      return
+    }
+    await submit(username, password)
+  }
+
+  const switchMode = () => {
+    setError("")
+    setMode((m) => (m === "login" ? "register" : "login"))
   }
 
   return (
@@ -95,8 +109,16 @@ function LauncherLoginPage() {
       <div className="flex flex-1 items-center justify-center p-4">
         <Card className="w-full max-w-md" size="sm">
           <CardHeader>
-            <CardTitle>{t("launcherLogin.title")}</CardTitle>
-            <CardDescription>{t("launcherLogin.description")}</CardDescription>
+            <CardTitle>
+              {mode === "register"
+                ? t("launcherLogin.registerTitle")
+                : t("launcherLogin.title")}
+            </CardTitle>
+            <CardDescription>
+              {mode === "register"
+                ? t("launcherLogin.registerDescription")
+                : t("launcherLogin.description")}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <form className="flex flex-col gap-4" onSubmit={onSubmit}>
@@ -131,14 +153,40 @@ function LauncherLoginPage() {
                   placeholder={t("launcherLogin.passwordPlaceholder")}
                 />
               </div>
+              {mode === "register" ? (
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="launcher-confirm">
+                    {t("launcherLogin.confirmLabel")}
+                  </Label>
+                  <Input
+                    id="launcher-confirm"
+                    name="confirm"
+                    type="password"
+                    autoComplete="new-password"
+                    required
+                    value={confirm}
+                    onChange={(e) => setConfirm(e.target.value)}
+                    placeholder={t("launcherLogin.confirmPlaceholder")}
+                  />
+                </div>
+              ) : null}
               <Button type="submit" disabled={submitting}>
-                {submitting ? t("labels.loading") : t("launcherLogin.submit")}
+                {submitting
+                  ? t("labels.loading")
+                  : mode === "register"
+                    ? t("launcherLogin.registerSubmit")
+                    : t("launcherLogin.submit")}
               </Button>
               {error ? (
                 <p className="text-destructive text-sm" role="alert">
                   {error}
                 </p>
               ) : null}
+              <Button type="button" variant="ghost" onClick={switchMode}>
+                {mode === "register"
+                  ? t("launcherLogin.toLogin")
+                  : t("launcherLogin.toRegister")}
+              </Button>
             </form>
           </CardContent>
         </Card>
