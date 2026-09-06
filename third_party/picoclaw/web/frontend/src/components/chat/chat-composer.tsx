@@ -1,9 +1,12 @@
 import { IconArrowUp, IconPhotoPlus, IconX } from "@tabler/icons-react"
 import {
+  memo,
   type ClipboardEvent as ReactClipboardEvent,
   type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  useCallback,
   useRef,
+  useState,
 } from "react"
 import { useTranslation } from "react-i18next"
 import TextareaAutosize from "react-textarea-autosize"
@@ -26,9 +29,7 @@ export type ChatInputDisabledReason =
   | "noDefaultModel"
 
 interface ChatComposerProps {
-  input: string
   attachments: ChatAttachment[]
-  onInputChange: (value: string) => void
   onAddImages: () => void
   onPaste: (event: ReactClipboardEvent<HTMLTextAreaElement>) => void
   onDragEnter: (event: ReactDragEvent<HTMLDivElement>) => void
@@ -36,18 +37,15 @@ interface ChatComposerProps {
   onDragOver: (event: ReactDragEvent<HTMLDivElement>) => void
   onDrop: (event: ReactDragEvent<HTMLDivElement>) => void
   onRemoveAttachment: (index: number) => void
-  onSend: () => void
-  onContextDetail?: () => void
+  onSend: (payload: { content: string; attachments: ChatAttachment[] }) => boolean
+  onContextDetail?: () => boolean
   inputDisabledReason: ChatInputDisabledReason | null
-  canSend: boolean
   isDragActive: boolean
   contextUsage?: ContextUsage
 }
 
-export function ChatComposer({
-  input,
+export const ChatComposer = memo(function ChatComposer({
   attachments,
-  onInputChange,
   onAddImages,
   onPaste,
   onDragEnter,
@@ -58,37 +56,57 @@ export function ChatComposer({
   onSend,
   onContextDetail,
   inputDisabledReason,
-  canSend,
   isDragActive,
   contextUsage,
 }: ChatComposerProps) {
   const { t } = useTranslation()
-  const canInput = inputDisabledReason === null
+  const [input, setInput] = useState("")
   const composingRef = useRef(false)
+  const canInput = inputDisabledReason === null
   const hasInput = input.trim().length > 0
+  const canSend = canInput && (hasInput || attachments.length > 0)
   const disabledMessage =
     inputDisabledReason === null
       ? null
       : t(`chat.disabledPlaceholder.${inputDisabledReason}`)
   const placeholder = disabledMessage ?? t("chat.placeholder")
 
-  const handleKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-    const nativeEvent = e.nativeEvent as Event & {
-      isComposing?: boolean
-      keyCode?: number
+  const handleSend = useCallback(() => {
+    if (!canSend) return
+    const sent = onSend({ content: input, attachments })
+    if (sent) {
+      setInput("")
     }
-    if (
-      composingRef.current ||
-      nativeEvent.isComposing ||
-      nativeEvent.keyCode === 229
-    ) {
-      return
+  }, [canSend, onSend, input, attachments])
+
+  const handleContextDetail = useCallback(() => {
+    if (!onContextDetail) return
+    const sent = onContextDetail()
+    if (sent) {
+      setInput("")
     }
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault()
-      onSend()
-    }
-  }
+  }, [onContextDetail])
+
+  const handleKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+      const nativeEvent = e.nativeEvent as Event & {
+        isComposing?: boolean
+        keyCode?: number
+      }
+      if (
+        composingRef.current ||
+        nativeEvent.isComposing ||
+        nativeEvent.keyCode === 229
+      ) {
+        return
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault()
+        handleSend()
+      }
+    },
+    [handleSend],
+  )
 
   return (
     <div className="before:bg-background pointer-events-none relative z-10 -mt-[24px] shrink-0 [scrollbar-gutter:stable] overflow-y-auto px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] before:pointer-events-none before:absolute before:inset-x-0 before:top-[24px] before:bottom-0 before:content-[''] md:px-8 md:pb-8 lg:px-24 xl:px-48">
@@ -139,7 +157,7 @@ export function ChatComposer({
 
           <TextareaAutosize
             value={input}
-            onChange={(e) => onInputChange(e.target.value)}
+            onChange={(e) => setInput(e.target.value)}
             onCompositionStart={() => {
               composingRef.current = true
             }}
@@ -179,7 +197,7 @@ export function ChatComposer({
               {contextUsage && (
                 <ContextUsageRing
                   usage={contextUsage}
-                  onDetailClick={onContextDetail}
+                  onDetailClick={handleContextDetail}
                 />
               )}
               {canInput ? (
@@ -188,7 +206,7 @@ export function ChatComposer({
                     type="button"
                     size="icon"
                     className="size-8 rounded-full bg-violet-500 text-white transition-transform hover:bg-violet-600 active:scale-95"
-                    onClick={onSend}
+                    onClick={handleSend}
                     disabled={!canSend}
                     aria-label={t("chat.sendMessage")}
                   >
@@ -214,4 +232,4 @@ export function ChatComposer({
       </div>
     </div>
   )
-}
+})
