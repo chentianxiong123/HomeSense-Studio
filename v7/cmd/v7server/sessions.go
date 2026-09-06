@@ -198,10 +198,10 @@ func (s *Server) listUserSessions(userID string, offset, limit int) ([]sessionSu
 		if title == "" {
 			title = "(新对话)"
 		}
-		if len(title) > 60 {
+		if len([]rune(title)) > 60 {
 			title = string([]rune(title)[:60])
 		}
-		if len(preview) > 120 {
+		if len([]rune(preview)) > 120 {
 			preview = string([]rune(preview)[:120])
 		}
 
