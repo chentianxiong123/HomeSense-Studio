@@ -18,11 +18,14 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/channels"
 	"github.com/sipeed/picoclaw/pkg/channels/pico"
@@ -30,7 +33,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/media"
 )
 
-// v7SessionToken is a per-login opaque token mapping to a v7 user ID.
+// v7SessionToken is a per-login token mapping to a v7 user ID.
 type v7SessionToken struct {
 	token    string
 	userID   string
@@ -38,39 +41,116 @@ type v7SessionToken struct {
 	issuedAt time.Time
 }
 
-// sessionStore keeps issued v7 session tokens in memory.
+// sessionTTL is how long a signed login token stays valid.
+const sessionTTL = 30 * 24 * time.Hour
+
+// sessionStore mints and verifies stateless HS256 JWTs. Verification requires
+// only the persisted signing key (data/jwt-secret), so restarts never
+// invalidate outstanding tokens. Revocation is recorded as a jar of honored
+// JTIs in the meta DB instead of stored sessions.
 type sessionStore struct {
-	mu     sync.RWMutex
-	tokens map[string]v7SessionToken
+	secret []byte
+	store  *Store
 }
 
-func newSessionStore() *sessionStore {
-	return &sessionStore{tokens: make(map[string]v7SessionToken)}
+// newSessionStore loads (or creates) the persisted JWT signing secret and
+// wires the revocation database.
+func newSessionStore(dataDir string, store *Store) (*sessionStore, error) {
+	secret, err := loadOrCreateJWTSecret(filepath.Join(dataDir, "jwt-secret"))
+	if err != nil {
+		return nil, err
+	}
+	return &sessionStore{secret: secret, store: store}, nil
 }
 
-func (s *sessionStore) issue(userID, username string) string {
-	buf := make([]byte, 24)
+// loadOrCreateJWTSecret reads the signing secret from disk, generating and
+// persisting a fresh 256-bit key on first run so it is stable across restarts.
+func loadOrCreateJWTSecret(path string) ([]byte, error) {
+	if b, err := os.ReadFile(path); err == nil {
+		secret := strings.TrimSpace(string(b))
+		if len(secret) >= 32 {
+			return []byte(secret), nil
+		}
+	}
+	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
+		return nil, fmt.Errorf("crypto/rand failed: %w", err)
+	}
+	secret := hex.EncodeToString(buf)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(path, []byte(secret+"\n"), 0o600); err != nil {
+		return nil, err
+	}
+	return []byte(secret), nil
+}
+
+// issue signs a stateless login token carrying the user's ID and name.
+func (s *sessionStore) issue(userID, username string) string {
+	jti := make([]byte, 16)
+	if _, err := rand.Read(jti); err != nil {
 		panic(fmt.Sprintf("crypto/rand failed: %v", err))
 	}
-	token := hex.EncodeToString(buf)
-	s.mu.Lock()
-	s.tokens[token] = v7SessionToken{token: token, userID: userID, username: username, issuedAt: time.Now()}
-	s.mu.Unlock()
-	return token
+	now := time.Now()
+	claims := jwt.MapClaims{
+		"sub": userID,
+		"name": username,
+		"jti":  hex.EncodeToString(jti),
+		"iat":  now.Unix(),
+		"exp":  now.Add(sessionTTL).Unix(),
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := tok.SignedString(s.secret)
+	if err != nil {
+		panic(fmt.Sprintf("jwt signing failed: %v", err))
+	}
+	return signed
 }
 
+// lookup verifies the token signature and expiry and checks revocation.
 func (s *sessionStore) lookup(token string) (v7SessionToken, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	st, ok := s.tokens[token]
-	return st, ok
+	tok, err := jwt.ParseWithClaims(token, jwt.MapClaims{}, func(t *jwt.Token) (any, error) {
+		return s.secret, nil
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
+	if err != nil || !tok.Valid {
+		return v7SessionToken{}, false
+	}
+	claims, ok := tok.Claims.(jwt.MapClaims)
+	if !ok {
+		return v7SessionToken{}, false
+	}
+	userID, _ := claims.GetSubject()
+	username, _ := claims["name"].(string)
+	if jti, _ := claims["jti"].(string); jti != "" && s.store != nil {
+		revoked, rerr := s.store.TokenRevoked(jti)
+		if rerr != nil {
+			return v7SessionToken{}, false
+		}
+		if revoked {
+			return v7SessionToken{}, false
+		}
+	}
+	var issuedAt time.Time
+	if iat, err := claims.GetIssuedAt(); err == nil {
+		issuedAt = iat.Time
+	}
+	return v7SessionToken{token: token, userID: userID, username: username, issuedAt: issuedAt}, true
 }
 
+// revoke records the token's JTI so subsequent lookups reject it.
 func (s *sessionStore) revoke(token string) {
-	s.mu.Lock()
-	delete(s.tokens, token)
-	s.mu.Unlock()
+	tok, err := jwt.ParseWithClaims(token, jwt.MapClaims{}, func(t *jwt.Token) (any, error) {
+		return s.secret, nil
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
+	if err != nil || !tok.Valid {
+		return
+	}
+	if claims, ok := tok.Claims.(jwt.MapClaims); ok {
+		if jti, _ := claims["jti"].(string); jti != "" && s.store != nil {
+			_ = s.store.RevokeToken(jti)
+		}
+	}
 }
 
 // picoBridge wires a PicoChannel onto the shared message bus for one Server.
