@@ -57,6 +57,15 @@ func NewStore(dataDir, corpusDir string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("create users table: %w", err)
 	}
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS revoked_tokens (
+			jti        TEXT PRIMARY KEY,
+			revoked_at TIMESTAMP NOT NULL
+		);
+	`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("create revoked_tokens table: %w", err)
+	}
 	return &Store{db: db, dataDir: dataDir, corpusDir: corpusDir}, nil
 }
 
@@ -149,4 +158,29 @@ func (s *Store) ListUsers() ([]User, error) {
 func (s *Store) RemoveUser(id string) error {
 	_, err := s.db.Exec(`DELETE FROM users WHERE id = ?`, id)
 	return err
+}
+
+// RevokeToken records a JWT JTI so its token is rejected after logout.
+func (s *Store) RevokeToken(jti string) error {
+	if jti == "" {
+		return nil
+	}
+	_, err := s.db.Exec(
+		`INSERT OR IGNORE INTO revoked_tokens (jti, revoked_at) VALUES (?, ?)`,
+		jti, time.Now().UTC(),
+	)
+	return err
+}
+
+// TokenRevoked reports whether a JTI has been logged out.
+func (s *Store) TokenRevoked(jti string) (bool, error) {
+	var one int
+	err := s.db.QueryRow(`SELECT 1 FROM revoked_tokens WHERE jti = ?`, jti).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }

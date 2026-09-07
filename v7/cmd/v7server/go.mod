@@ -3,6 +3,7 @@ module homesense/v7
 go 1.25.13
 
 require (
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/sipeed/picoclaw v0.0.0
 	golang.org/x/sync v0.21.0
 	modernc.org/sqlite v1.53.0
@@ -39,7 +40,6 @@ require (
 	github.com/github/copilot-sdk/go v0.2.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/gomarkdown/markdown v0.0.0-20260411013819-759bbc3e3207 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect

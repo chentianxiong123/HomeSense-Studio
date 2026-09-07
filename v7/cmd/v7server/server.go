@@ -88,6 +88,12 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		return nil, err
 	}
 
+	sessions, err := newSessionStore(cfg.DataDir, store)
+	if err != nil {
+		store.Close()
+		return nil, err
+	}
+
 	// Build the root picoclaw config. The AgentLoop is created with a minimal
 	// implicit agent; tenant agents are added dynamically via AddUserAgent.
 	pcCfg := config.DefaultConfig()
@@ -135,7 +141,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		loop:     loop,
 		bus:      mb,
 		rootCfg:  pcCfg,
-		sessions: newSessionStore(),
+		sessions: sessions,
 		stop:     make(chan struct{}),
 	}
 	bridge, err := newPicoBridge(s, pcCfg, mb)
