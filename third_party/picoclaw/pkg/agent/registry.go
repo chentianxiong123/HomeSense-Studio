@@ -94,6 +94,18 @@ func (r *AgentRegistry) Touch(agentID string) {
 // on disk (AGENT.md/SOUL.md/skills/sessions), so an evicted agent's state is
 // rehydrated seamlessly.
 func (r *AgentRegistry) AddUserAgent(agentCfg *config.AgentConfig, provider providers.LLMProvider) (*AgentInstance, error) {
+	return r.addUserAgent(agentCfg, r.cfg, provider)
+}
+
+// AddUserAgentWithConfig registers a new agent instance with a per-tenant
+// configuration. The AgentInstance carries its own copy so per-tenant
+// defaults, tools, and MCP servers stay isolated from every other tenant and
+// from the platform root config that the registry itself is built from.
+func (r *AgentRegistry) AddUserAgentWithConfig(agentCfg *config.AgentConfig, userCfg *config.Config, provider providers.LLMProvider) (*AgentInstance, error) {
+	return r.addUserAgent(agentCfg, userCfg, provider)
+}
+
+func (r *AgentRegistry) addUserAgent(agentCfg *config.AgentConfig, cfg *config.Config, provider providers.LLMProvider) (*AgentInstance, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -105,7 +117,7 @@ func (r *AgentRegistry) AddUserAgent(agentCfg *config.AgentConfig, provider prov
 		return nil, fmt.Errorf("agent %q already registered", id)
 	}
 
-	instance := NewAgentInstance(agentCfg, &r.cfg.Agents.Defaults, r.cfg, provider)
+	instance := NewAgentInstance(agentCfg, &cfg.Agents.Defaults, cfg, provider)
 	r.agents[id] = instance
 	r.lastUsed[id] = time.Now()
 
