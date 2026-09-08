@@ -1,6 +1,6 @@
 import { Outlet, createFileRoute, useRouterState } from "@tanstack/react-router"
 
-import { ConfigPage } from "@/components/config/config-page"
+import { V7ConfigPage } from "@/components/config/v7-config-page"
 
 export const Route = createFileRoute("/config")({
   component: ConfigRouteLayout,
@@ -12,7 +12,7 @@ function ConfigRouteLayout() {
   })
 
   if (pathname === "/config") {
-    return <ConfigPage />
+    return <V7ConfigPage />
   }
 
   return <Outlet />

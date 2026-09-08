@@ -1,16 +1,5 @@
 import { IconChevronRight } from "@tabler/icons-react"
-import {
-  IconAtom,
-  IconChevronsDown,
-  IconChevronsUp,
-  IconKey,
-  IconListDetails,
-  IconMessageCircle,
-  IconSearch,
-  IconSettings,
-  IconSparkles,
-  IconTools,
-} from "@tabler/icons-react"
+import { IconListDetails, IconMessageCircle, IconSettings } from "@tabler/icons-react"
 import { Link, useRouterState } from "@tanstack/react-router"
 import * as React from "react"
 import { useTranslation } from "react-i18next"
@@ -32,7 +21,6 @@ import {
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar"
-import { useSidebarChannels } from "@/hooks/use-sidebar-channels"
 
 interface NavItem {
   title: string
@@ -45,132 +33,56 @@ interface NavGroup {
   label: string
   defaultOpen: boolean
   items: NavItem[]
-  isChannelsGroup?: boolean
 }
 
-const baseNavGroups: Omit<NavGroup, "items">[] = [
+// HomeSense v7 keeps the product surface minimal: chat, per-tenant
+// configuration, and gateway logs. The upstream single-node destinations
+// (models / credentials / channels / agent hub / skills / tools) are managed
+// by the control plane (one-api) and are intentionally not surfaced here.
+const navGroups: NavGroup[] = [
   {
     label: "navigation.chat",
     defaultOpen: true,
-  },
-  {
-    label: "navigation.model_group",
-    defaultOpen: true,
-  },
-  {
-    label: "navigation.agent_group",
-    defaultOpen: true,
+    items: [
+      {
+        title: "navigation.chat",
+        url: "/",
+        icon: IconMessageCircle,
+        translateTitle: true,
+      },
+    ],
   },
   {
     label: "navigation.services",
     defaultOpen: true,
+    items: [
+      {
+        title: "navigation.config",
+        url: "/config",
+        icon: IconSettings,
+        translateTitle: true,
+      },
+      {
+        title: "navigation.logs",
+        url: "/logs",
+        icon: IconListDetails,
+        translateTitle: true,
+      },
+    ],
   },
 ]
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const routerState = useRouterState()
-  const { i18n, t } = useTranslation()
+  const { t } = useTranslation()
   const { isMobile, setOpenMobile } = useSidebar()
   const currentPath = routerState.location.pathname
-  const {
-    channelItems,
-    hasMoreChannels,
-    showAllChannels,
-    toggleShowAllChannels,
-  } = useSidebarChannels({
-    language: (i18n.resolvedLanguage ?? i18n.language ?? "").toLowerCase(),
-    t,
-  })
 
   const handleNavItemClick = React.useCallback(() => {
     if (isMobile) {
       setOpenMobile(false)
     }
   }, [isMobile, setOpenMobile])
-
-  const navGroups: NavGroup[] = React.useMemo(() => {
-    return [
-      {
-        ...baseNavGroups[0],
-        items: [
-          {
-            title: "navigation.chat",
-            url: "/",
-            icon: IconMessageCircle,
-            translateTitle: true,
-          },
-        ],
-      },
-      {
-        ...baseNavGroups[1],
-        items: [
-          {
-            title: "navigation.models",
-            url: "/models",
-            icon: IconAtom,
-            translateTitle: true,
-          },
-          {
-            title: "navigation.credentials",
-            url: "/credentials",
-            icon: IconKey,
-            translateTitle: true,
-          },
-        ],
-      },
-      {
-        label: "navigation.channels_group",
-        defaultOpen: true,
-        items: channelItems.map((item) => ({
-          title: item.title,
-          url: item.url,
-          icon: item.icon,
-          translateTitle: false,
-        })),
-        isChannelsGroup: true,
-      },
-      {
-        ...baseNavGroups[2],
-        items: [
-          {
-            title: "navigation.hub",
-            url: "/agent/hub",
-            icon: IconSearch,
-            translateTitle: true,
-          },
-          {
-            title: "navigation.skills",
-            url: "/agent/skills",
-            icon: IconSparkles,
-            translateTitle: true,
-          },
-          {
-            title: "navigation.tools",
-            url: "/agent/tools",
-            icon: IconTools,
-            translateTitle: true,
-          },
-        ],
-      },
-      {
-        ...baseNavGroups[3],
-        items: [
-          {
-            title: "navigation.config",
-            url: "/config",
-            icon: IconSettings,
-            translateTitle: true,
-          },
-          {
-            title: "navigation.logs",
-            url: "/logs",
-            icon: IconListDetails,
-            translateTitle: true,
-          },
-        ],
-      },
-    ]
-  }, [channelItems])
 
   return (
     <Sidebar
@@ -228,25 +140,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                         </SidebarMenuItem>
                       )
                     })}
-                    {group.isChannelsGroup && hasMoreChannels && (
-                      <SidebarMenuItem key="channels-more-toggle">
-                        <SidebarMenuButton
-                          onClick={toggleShowAllChannels}
-                          className="text-muted-foreground hover:bg-muted/60 h-9 px-3"
-                        >
-                          {showAllChannels ? (
-                            <IconChevronsUp className="size-4 opacity-60" />
-                          ) : (
-                            <IconChevronsDown className="size-4 opacity-60" />
-                          )}
-                          <span className="opacity-80">
-                            {showAllChannels
-                              ? t("navigation.show_less_channels")
-                              : t("navigation.show_more_channels")}
-                          </span>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    )}
                   </SidebarMenu>
                 </SidebarGroupContent>
               </CollapsibleContent>
