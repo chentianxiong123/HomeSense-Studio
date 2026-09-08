@@ -44,7 +44,7 @@ func main() {
 	registerTools()
 
 	addr := fmt.Sprintf("%s:%d", *host, *port)
-	handler := mcp.NewSSEHandler(func(request *http.Request) *mcp.Server {
+	handler := mcp.NewStreamableHTTPHandler(func(request *http.Request) *mcp.Server {
 		return server
 	}, nil)
 
