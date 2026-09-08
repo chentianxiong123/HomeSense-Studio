@@ -7,6 +7,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -105,6 +106,10 @@ func (s *Store) RegisterUser(id, name, model, apiKey string) (User, error) {
 		return User{}, err
 	}
 
+	if _, err := s.EnsureUserConfigTemplate(id); err != nil {
+		return User{}, fmt.Errorf("seed user config: %w", err)
+	}
+
 	u := User{
 		ID:        id,
 		Name:      name,
@@ -158,6 +163,43 @@ func (s *Store) ListUsers() ([]User, error) {
 func (s *Store) RemoveUser(id string) error {
 	_, err := s.db.Exec(`DELETE FROM users WHERE id = ?`, id)
 	return err
+}
+
+// UserConfigPath returns the absolute path of the tenant's config.json.
+func (s *Store) UserConfigPath(userID string) string {
+	return filepath.Join(s.dataDir, "users", userID, "config.json")
+}
+
+// LoadUserConfig reads the tenant's config.json (raw bytes). Returns
+// os.ErrNotExist when the tenant has no config file yet.
+func (s *Store) LoadUserConfig(userID string) ([]byte, error) {
+	return os.ReadFile(s.UserConfigPath(userID))
+}
+
+// SaveUserConfig validates and writes the tenant's config.json.
+func (s *Store) SaveUserConfig(userID string, data []byte) error {
+	if !json.Valid(data) {
+		return errors.New("config: invalid JSON")
+	}
+	if err := os.MkdirAll(filepath.Dir(s.UserConfigPath(userID)), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(s.UserConfigPath(userID), data, 0o644)
+}
+
+// EnsureUserConfigTemplate writes the baseline per-tenant config file if it
+// does not exist yet and reports whether it created one.
+func (s *Store) EnsureUserConfigTemplate(userID string) (bool, error) {
+	if _, err := os.Stat(s.UserConfigPath(userID)); err == nil {
+		return false, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(s.UserConfigPath(userID)), 0o755); err != nil {
+		return false, err
+	}
+	if err := os.WriteFile(s.UserConfigPath(userID), []byte(userConfigTemplateJSON), 0o644); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // RevokeToken records a JWT JTI so its token is rejected after logout.

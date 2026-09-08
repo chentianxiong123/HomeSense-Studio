@@ -238,7 +238,12 @@ func (s *Server) ensureUserAgent(userID string) (*agent.AgentInstance, error) {
 			return nil, fmt.Errorf("unknown user %q: %w", userID, err)
 		}
 
-		inst, err := s.loop.GetRegistry().AddUserAgent(userAgentConfig(u), userProviderFor(s.rootCfg, u))
+		ucfg, err := s.userConfigFor(u)
+		if err != nil {
+			return nil, err
+		}
+
+		inst, err := s.loop.MaterializeUserAgent(userAgentConfig(u), ucfg, userProviderFor(s.rootCfg, u))
 		if err != nil {
 			return nil, err
 		}
@@ -402,6 +407,9 @@ func (s *Server) handleUserByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		respondJSON(w, http.StatusOK, map[string]any{"reply": reply})
+
+	case suffix == "config":
+		s.handleUserConfig(w, r, userID)
 
 	case r.Method == http.MethodGet:
 		u, err := s.store.GetUser(userID)

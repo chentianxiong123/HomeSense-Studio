@@ -112,36 +112,42 @@ func registerSharedTools(
 	registry *AgentRegistry,
 	provider providers.LLMProvider,
 ) {
-	allowReadPaths := buildAllowReadPatterns(cfg)
-	var ttsProvider tts.TTSProvider
-	if cfg.Tools.IsToolEnabled("send_tts") {
-		ttsProvider = tts.DetectTTS(cfg)
-		if ttsProvider == nil {
-			logger.WarnCF("voice-tts", "send_tts enabled but no TTS provider configured", nil)
-		}
-	}
-
 	for _, agentID := range registry.ListAgentIDs() {
 		agent, ok := registry.GetAgent(agentID)
 		if !ok {
 			continue
 		}
+		// Per-tenant wiring: use the instance's own config when the agent was
+		// materialized with one (multi-tenant), falling back to the registry
+		// config for implicit/shared agents.
+		acfg := agent.Config
+		if acfg == nil {
+			acfg = cfg
+		}
+		allowReadPaths := buildAllowReadPatterns(acfg)
+		var ttsProvider tts.TTSProvider
+		if acfg.Tools.IsToolEnabled("send_tts") {
+			ttsProvider = tts.DetectTTS(acfg)
+			if ttsProvider == nil {
+				logger.WarnCF("voice-tts", "send_tts enabled but no TTS provider configured", nil)
+			}
+		}
 
-		if cfg.Tools.IsToolEnabled("web") {
-			searchTool, err := tools.NewWebSearchTool(tools.WebSearchToolOptionsFromConfig(cfg))
+		if acfg.Tools.IsToolEnabled("web") {
+			searchTool, err := tools.NewWebSearchTool(tools.WebSearchToolOptionsFromConfig(acfg))
 			if err != nil {
 				logger.ErrorCF("agent", "Failed to create web search tool", map[string]any{"error": err.Error()})
 			} else if searchTool != nil {
 				agent.Tools.Register(searchTool)
 			}
 		}
-		if cfg.Tools.IsToolEnabled("web_fetch") {
+		if acfg.Tools.IsToolEnabled("web_fetch") {
 			fetchTool, err := tools.NewWebFetchToolWithProxy(
 				50000,
-				cfg.Tools.Web.Proxy,
-				cfg.Tools.Web.Format,
-				cfg.Tools.Web.FetchLimitBytes,
-				cfg.Tools.Web.PrivateHostWhitelist)
+				acfg.Tools.Web.Proxy,
+				acfg.Tools.Web.Format,
+				acfg.Tools.Web.FetchLimitBytes,
+				acfg.Tools.Web.PrivateHostWhitelist)
 			if err != nil {
 				logger.ErrorCF("agent", "Failed to create web fetch tool", map[string]any{"error": err.Error()})
 			} else {
@@ -150,24 +156,24 @@ func registerSharedTools(
 		}
 
 		// Hardware tools (I2C, SPI) - Linux only, returns error on other platforms
-		if cfg.Tools.IsToolEnabled("i2c") {
+		if acfg.Tools.IsToolEnabled("i2c") {
 			agent.Tools.Register(tools.NewI2CTool())
 		}
-		if cfg.Tools.IsToolEnabled("spi") {
+		if acfg.Tools.IsToolEnabled("spi") {
 			agent.Tools.Register(tools.NewSPITool())
 		}
-		if cfg.Tools.IsToolEnabled("serial") {
+		if acfg.Tools.IsToolEnabled("serial") {
 			agent.Tools.Register(tools.NewSerialTool())
 		}
 
 		// Message tool
-		if cfg.Tools.IsToolEnabled("message") {
+		if acfg.Tools.IsToolEnabled("message") {
 			messageTool := tools.NewMessageTool()
-			if cfg.Tools.Message.MediaEnabled {
+			if acfg.Tools.Message.MediaEnabled {
 				messageTool.ConfigureLocalMedia(
 					agent.Workspace,
-					cfg.Agents.Defaults.RestrictToWorkspace,
-					cfg.Agents.Defaults.GetMaxMediaSize(),
+					acfg.Agents.Defaults.RestrictToWorkspace,
+					acfg.Agents.Defaults.GetMaxMediaSize(),
 					allowReadPaths,
 				)
 			}
@@ -218,7 +224,7 @@ func registerSharedTools(
 			})
 			agent.Tools.Register(messageTool)
 		}
-		if cfg.Tools.IsToolEnabled("reaction") {
+		if acfg.Tools.IsToolEnabled("reaction") {
 			reactionTool := tools.NewReactionTool()
 			reactionTool.SetReactionCallback(func(ctx context.Context, channel, chatID, messageID string) error {
 				if al.channelManager == nil {
@@ -239,11 +245,11 @@ func registerSharedTools(
 		}
 
 		// Send file tool (outbound media via MediaStore — store injected later by SetMediaStore)
-		if cfg.Tools.IsToolEnabled("send_file") {
+		if acfg.Tools.IsToolEnabled("send_file") {
 			sendFileTool := tools.NewSendFileTool(
 				agent.Workspace,
-				cfg.Agents.Defaults.RestrictToWorkspace,
-				cfg.Agents.Defaults.GetMaxMediaSize(),
+				acfg.Agents.Defaults.RestrictToWorkspace,
+				acfg.Agents.Defaults.GetMaxMediaSize(),
 				nil,
 				allowReadPaths,
 			)
@@ -254,11 +260,11 @@ func registerSharedTools(
 			agent.Tools.Register(tools.NewSendTTSTool(ttsProvider, nil))
 		}
 
-		if cfg.Tools.IsToolEnabled("load_image") {
+		if acfg.Tools.IsToolEnabled("load_image") {
 			loadImageTool := tools.NewLoadImageTool(
 				agent.Workspace,
-				cfg.Agents.Defaults.RestrictToWorkspace,
-				cfg.Agents.Defaults.GetMaxMediaSize(),
+				acfg.Agents.Defaults.RestrictToWorkspace,
+				acfg.Agents.Defaults.GetMaxMediaSize(),
 				nil,
 				allowReadPaths,
 			)
@@ -266,16 +272,16 @@ func registerSharedTools(
 		}
 
 		// Skill discovery and installation tools
-		skills_enabled := cfg.Tools.IsToolEnabled("skills")
-		find_skills_enable := cfg.Tools.IsToolEnabled("find_skills")
-		install_skills_enable := cfg.Tools.IsToolEnabled("install_skill")
+		skills_enabled := acfg.Tools.IsToolEnabled("skills")
+		find_skills_enable := acfg.Tools.IsToolEnabled("find_skills")
+		install_skills_enable := acfg.Tools.IsToolEnabled("install_skill")
 		if skills_enabled && (find_skills_enable || install_skills_enable) {
-			registryMgr := skills.NewRegistryManagerFromToolsConfig(cfg.Tools.Skills)
+			registryMgr := skills.NewRegistryManagerFromToolsConfig(acfg.Tools.Skills)
 
 			if find_skills_enable {
 				searchCache := skills.NewSearchCache(
-					cfg.Tools.Skills.SearchCache.MaxSize,
-					time.Duration(cfg.Tools.Skills.SearchCache.TTLSeconds)*time.Second,
+					acfg.Tools.Skills.SearchCache.MaxSize,
+					time.Duration(acfg.Tools.Skills.SearchCache.TTLSeconds)*time.Second,
 				)
 				agent.Tools.Register(tools.NewFindSkillsTool(registryMgr, searchCache))
 			}
@@ -287,9 +293,9 @@ func registerSharedTools(
 
 		// Spawn and spawn_status tools share a SubagentManager.
 		// Construct it when either tool is enabled (both require subagent).
-		spawnEnabled := cfg.Tools.IsToolEnabled("spawn")
-		spawnStatusEnabled := cfg.Tools.IsToolEnabled("spawn_status")
-		if (spawnEnabled || spawnStatusEnabled) && cfg.Tools.IsToolEnabled("subagent") {
+		spawnEnabled := acfg.Tools.IsToolEnabled("spawn")
+		spawnStatusEnabled := acfg.Tools.IsToolEnabled("spawn_status")
+		if (spawnEnabled || spawnStatusEnabled) && acfg.Tools.IsToolEnabled("subagent") {
 			subagentManager := tools.NewSubagentManager(provider, agent.Model, agent.Workspace)
 			subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
 
@@ -298,7 +304,7 @@ func registerSharedTools(
 			// This keeps subagent vision support working even when the optimized
 			// sub-turn spawner path is unavailable.
 			subagentManager.SetMediaResolver(func(msgs []providers.Message) []providers.Message {
-				return resolveMediaRefs(msgs, al.mediaStore, cfg.Agents.Defaults.GetMaxMediaSize(), 0)
+				return resolveMediaRefs(msgs, al.mediaStore, acfg.Agents.Defaults.GetMaxMediaSize(), 0)
 			})
 
 			// Set the spawner that links into AgentLoop's turnState
@@ -384,7 +390,7 @@ func registerSharedTools(
 			if spawnStatusEnabled {
 				agent.Tools.Register(tools.NewSpawnStatusTool(subagentManager))
 			}
-		} else if (spawnEnabled || spawnStatusEnabled) && !cfg.Tools.IsToolEnabled("subagent") {
+		} else if (spawnEnabled || spawnStatusEnabled) && !acfg.Tools.IsToolEnabled("subagent") {
 			logger.WarnCF("agent", "spawn/spawn_status tools require subagent to be enabled", nil)
 		}
 

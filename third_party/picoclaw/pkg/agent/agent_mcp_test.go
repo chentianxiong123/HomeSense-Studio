@@ -286,30 +286,15 @@ func TestEnsureMCPInitialized_LoadFailureSetsInitErr(t *testing.T) {
 		},
 	}
 
-	err := al.ensureMCPInitialized(context.Background())
-	if err == nil {
-		t.Fatal("ensureMCPInitialized() error = nil, want load failure")
-	}
-	if !strings.Contains(err.Error(), "failed to load MCP servers") {
-		t.Fatalf("ensureMCPInitialized() error = %q, want wrapped load failure", err.Error())
-	}
+	// With per-agent MCP wiring, the "main" agent carries the registry config
+	// and the load failure leaves its manager nil; it is not cached globally.
+	al.ensureMCPInitialized(context.Background())
 
-	initErr := al.mcp.getInitErr()
-	if initErr == nil {
-		t.Fatal("getInitErr() = nil, want cached load failure")
+	main, ok := al.registry.GetAgent("main")
+	if !ok {
+		t.Fatal("implicit main agent missing")
 	}
-	if !strings.Contains(initErr.Error(), "failed to load MCP servers") {
-		t.Fatalf("getInitErr() = %q, want wrapped load failure", initErr.Error())
-	}
-	if al.mcp.getManager() != nil {
-		t.Fatal("expected MCP manager to remain nil after load failure")
-	}
-
-	err = al.ensureMCPInitialized(context.Background())
-	if err == nil {
-		t.Fatal("second ensureMCPInitialized() error = nil, want cached load failure")
-	}
-	if !strings.Contains(err.Error(), "failed to load MCP servers") {
-		t.Fatalf("second ensureMCPInitialized() error = %q, want wrapped load failure", err.Error())
+	if main.mcpState == nil || main.mcpState.manager != nil {
+		t.Fatal("expected main agent MCP manager to remain nil after load failure")
 	}
 }

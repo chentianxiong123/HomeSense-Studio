@@ -12,6 +12,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/isolation"
 	"github.com/sipeed/picoclaw/pkg/logger"
+	"github.com/sipeed/picoclaw/pkg/mcp"
 	"github.com/sipeed/picoclaw/pkg/media"
 	"github.com/sipeed/picoclaw/pkg/memory"
 	"github.com/sipeed/picoclaw/pkg/providers"
@@ -29,6 +30,10 @@ type AgentInstance struct {
 	Model                     string
 	Fallbacks                 []string
 	Workspace                 string
+	// Config is the configuration this instance was materialized from. In
+	// multi-tenant deployments it is a per-tenant deep copy, so shared tools
+	// and MCP wiring can read each tenant's own settings.
+	Config                    *config.Config
 	MaxIterations             int
 	MaxTokens                 int
 	Temperature               float64
@@ -47,6 +52,12 @@ type AgentInstance struct {
 	MCPServerAllowlist        map[string]struct{}
 	Candidates                []providers.FallbackCandidate
 	ImageCandidates           []providers.FallbackCandidate
+
+	// mcpState holds this agent's own MCP manager. It is a pointer so that
+	// shallow copies of AgentInstance (e.g. sub-turn agents) never copy a
+	// lock; in multi-tenant mode every agent owns an isolated manager derived
+	// from its own per-tenant config.
+	mcpState *agentMCPState
 
 	// Router is non-nil when model routing is configured and the light model
 	// was successfully resolved. It scores each incoming message and decides
@@ -327,6 +338,7 @@ func NewAgentInstance(
 		Model:                     model,
 		Fallbacks:                 fallbacks,
 		Workspace:                 workspace,
+		Config:                    cfg,
 		MaxIterations:             maxIter,
 		MaxTokens:                 maxTokens,
 		Temperature:               temperature,
@@ -349,6 +361,7 @@ func NewAgentInstance(
 		LightCandidates:           lightCandidates,
 		LightProvider:             lightProvider,
 		CandidateProviders:        candidateProviders,
+		mcpState:                  &agentMCPState{},
 	}
 }
 
@@ -681,6 +694,7 @@ func mediaTempDirPattern() string {
 
 // Close releases resources held by the agent's providers and session store.
 func (a *AgentInstance) Close() error {
+	a.CloseMCP()
 	modelMu := a.modelStateMutex()
 	modelMu.Lock()
 	defer modelMu.Unlock()
@@ -694,6 +708,31 @@ func (a *AgentInstance) Close() error {
 		return a.Sessions.Close()
 	}
 	return nil
+}
+
+// agentMCPState bundles the per-agent MCP manager with its locking. Kept as a
+// pointer so shallow copies of AgentInstance do not copy a sync.Mutex.
+type agentMCPState struct {
+	mu      sync.Mutex
+	manager *mcp.Manager
+}
+
+// CloseMCP shuts down this agent's own MCP manager, releasing its per-tenant
+// server connections / child processes. It is safe to call multiple times.
+func (a *AgentInstance) CloseMCP() {
+	if a == nil || a.mcpState == nil {
+		return
+	}
+	a.mcpState.mu.Lock()
+	mgr := a.mcpState.manager
+	a.mcpState.manager = nil
+	a.mcpState.mu.Unlock()
+	if mgr != nil {
+		if err := mgr.Close(); err != nil {
+			logger.ErrorCF("agent", "Failed to close per-agent MCP manager",
+				map[string]any{"agent_id": a.ID, "error": err.Error()})
+		}
+	}
 }
 
 func (a *AgentInstance) modelStateMutex() *sync.RWMutex {
