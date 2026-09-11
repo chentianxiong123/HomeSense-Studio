@@ -504,7 +504,7 @@ const EditChannel = () => {
                   <ModelMappingEditor
                     value={inputs.model_mapping}
                     onChange={(v) => setInputs((inputs) => ({...inputs, model_mapping: v}))}
-                    modelOptions={modelOptions.map((o) => o.key)}
+                    modelOptions={inputs.models}
                     disabled={false}
                   />
                 </Form.Field>
@@ -513,7 +513,7 @@ const EditChannel = () => {
                   <ModelParamsEditor
                     value={inputs.model_params}
                     onChange={(v) => setInputs((inputs) => ({...inputs, model_params: v}))}
-                    modelOptions={modelOptions.map((o) => o.key)}
+                    modelOptions={inputs.models}
                     disabled={false}
                   />
                 </Form.Field>
