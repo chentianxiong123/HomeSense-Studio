@@ -43,22 +43,22 @@ interface MCPServerDraft {
 }
 
 const HIGH_RISK_TOOLS: { name: string; hint: string }[] = [
-  { name: "exec", hint: "Shell command execution on the host" },
-  { name: "cron", hint: "Scheduled commands" },
-  { name: "spawn", hint: "Spawn sub-agents" },
-  { name: "spawn_status", hint: "Sub-agent status" },
-  { name: "subagent", hint: "Sub-agent tool" },
-  { name: "send_file", hint: "Send files out" },
-  { name: "message", hint: "Send messages to channels" },
-  { name: "reaction", hint: "React to messages" },
-  { name: "load_image", hint: "Load local images" },
-  { name: "send_tts", hint: "Text-to-speech" },
-  { name: "skills", hint: "Skill registries" },
-  { name: "find_skills", hint: "Search skills" },
-  { name: "install_skill", hint: "Install skills" },
-  { name: "i2c", hint: "I2C hardware" },
-  { name: "spi", hint: "SPI hardware" },
-  { name: "serial", hint: "Serial ports" },
+  { name: "exec", hint: "在主机上执行命令" },
+  { name: "cron", hint: "定时任务" },
+  { name: "spawn", hint: "派生子代理" },
+  { name: "spawn_status", hint: "子代理状态" },
+  { name: "subagent", hint: "子代理工具" },
+  { name: "send_file", hint: "向外发送文件" },
+  { name: "message", hint: "向频道发送消息" },
+  { name: "reaction", hint: "对消息作出反应" },
+  { name: "load_image", hint: "加载本地图片" },
+  { name: "send_tts", hint: "文本转语音" },
+  { name: "skills", hint: "技能注册表" },
+  { name: "find_skills", hint: "搜索技能" },
+  { name: "install_skill", hint: "安装技能" },
+  { name: "i2c", hint: "I2C 硬件" },
+  { name: "spi", hint: "SPI 硬件" },
+  { name: "serial", hint: "串口" },
 ]
 
 function asObj(v: unknown): Record<string, unknown> {
@@ -202,14 +202,14 @@ export function V7ConfigPage() {
   if (loading) {
     return (
       <div className="p-6">
-        <PageHeader title="Configuration" />
+        <PageHeader title="配置" />
       </div>
     )
   }
   if (error || !cfg) {
     return (
       <div className="p-6">
-        <PageHeader title={error || "unavailable"} />
+        <PageHeader title={error || "配置不可用"} />
       </div>
     )
   }
@@ -237,39 +237,39 @@ export function V7ConfigPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Runtime parameters</CardTitle>
+          <CardTitle>运行参数</CardTitle>
           <CardDescription>
-            Applied to this tenant's agent on the next message.
+            应用于该租户智能体的下一条消息。
           </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <NumberField
-            label="Max tokens"
+            label="最大 token 数"
             value={agentDefault(cur, "max_tokens")}
             onChange={(v) => setCfg((c) => patchAgent(c ?? cur, "max_tokens", v))}
           />
           <NumberField
-            label="Context window"
+            label="上下文窗口"
             value={agentDefault(cur, "context_window")}
             onChange={(v) => setCfg((c) => patchAgent(c ?? cur, "context_window", v))}
           />
           <NumberField
-            label="Max tool iterations"
+            label="最大工具迭代次数"
             value={agentDefault(cur, "max_tool_iterations")}
             onChange={(v) => setCfg((c) => patchAgent(c ?? cur, "max_tool_iterations", v))}
           />
           <NumberField
-            label="Summarize threshold"
+            label="摘要阈值"
             value={agentDefault(cur, "summarize_message_threshold")}
             onChange={(v) => setCfg((c) => patchAgent(c ?? cur, "summarize_message_threshold", v))}
           />
           <NumberField
-            label="Summarize token %"
+            label="摘要 token 占比"
             value={agentDefault(cur, "summarize_token_percent")}
             onChange={(v) => setCfg((c) => patchAgent(c ?? cur, "summarize_token_percent", v))}
           />
           <NumberField
-            label="Temperature"
+            label="温度"
             value={agentDefault(cur, "temperature")}
             onChange={(v) => setCfg((c) => patchAgent(c ?? cur, "temperature", v))}
           />
@@ -278,10 +278,9 @@ export function V7ConfigPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Tools</CardTitle>
+          <CardTitle>工具</CardTitle>
           <CardDescription>
-            High-risk tools default to off. Toggle to enable for this tenant
-            only.
+            高危工具默认关闭。仅为本租户开启。
           </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -311,10 +310,9 @@ export function V7ConfigPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>MCP servers</CardTitle>
+          <CardTitle>MCP 服务器</CardTitle>
           <CardDescription>
-            Your own devices (e.g. phone executor) that the cloud agent
-            connects to as an MCP client.
+            你自己的设备（如手机执行器），云端 agent 作为 MCP 客户端接入。
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
@@ -324,7 +322,7 @@ export function V7ConfigPage() {
               className="grid grid-cols-1 gap-2 rounded-md border p-3 sm:grid-cols-2 lg:grid-cols-4"
             >
               <Input
-                placeholder="name (e.g. phone)"
+                placeholder="名称（如 phone）"
                 value={d.name}
                 onChange={(e) =>
                   setDrafts((ds) =>
@@ -333,7 +331,7 @@ export function V7ConfigPage() {
                 }
               />
               <Input
-                placeholder="type (sse|http|stdio)"
+                placeholder="类型（sse|http|stdio）"
                 value={d.type}
                 onChange={(e) =>
                   setDrafts((ds) =>
@@ -342,7 +340,7 @@ export function V7ConfigPage() {
                 }
               />
               <Input
-                placeholder="url (http://phone:51122/executor)"
+                placeholder="地址（http://phone:51122/executor）"
                 value={d.url}
                 onChange={(e) =>
                   setDrafts((ds) =>
@@ -351,7 +349,7 @@ export function V7ConfigPage() {
                 }
               />
               <Input
-                placeholder="Bearer token (optional)"
+                placeholder="访问令牌（可选）"
                 value={d.token}
                 onChange={(e) =>
                   setDrafts((ds) =>
@@ -369,7 +367,7 @@ export function V7ConfigPage() {
                       )
                     }
                   />
-                  Enabled
+                  启用
                 </Label>
                 <Button
                   variant="ghost"
@@ -377,7 +375,7 @@ export function V7ConfigPage() {
                   className="ml-auto"
                   onClick={() => setDrafts((ds) => ds.filter((_, j) => j !== i))}
                 >
-                  Remove
+                  移除
                 </Button>
               </div>
             </div>
@@ -392,17 +390,16 @@ export function V7ConfigPage() {
               ])
             }
           >
-            + Add server
+            + 添加服务器
           </Button>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Raw config.json</CardTitle>
+          <CardTitle>原始 config.json</CardTitle>
           <CardDescription>
-            Full tenant configuration (advanced). Fields not written inherit
-            the platform defaults.
+            完整租户配置（高级）。未填写的字段沿用平台默认值。
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -424,7 +421,7 @@ export function V7ConfigPage() {
       <div className="flex justify-end">
         <Button onClick={save} disabled={saving}>
           <IconDeviceFloppy className="size-4" />
-          {saving ? "Saving…" : "Save"}
+          {saving ? "保存中…" : "保存"}
         </Button>
       </div>
     </div>
