@@ -1,4 +1,5 @@
 import { isLauncherAuthPathname } from "@/lib/launcher-login-path"
+import { authHeader, getV6Token } from "@/api/v6-auth"
 
 function isLauncherAuthPath(): boolean {
   if (typeof globalThis.location === "undefined") {
@@ -24,9 +25,15 @@ export async function launcherFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<Response> {
+  const headers = new Headers(init?.headers)
+  const token = getV6Token()
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", authHeader(token))
+  }
   const res = await fetch(input, {
     credentials: "same-origin",
     ...init,
+    headers,
   })
   if (res.status === 401) {
     const ct = res.headers.get("content-type") || ""

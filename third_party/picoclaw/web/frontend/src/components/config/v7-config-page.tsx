@@ -83,39 +83,6 @@ function setToolEnabled(cfg: TenantConfig, tool: string, enabled: boolean) {
   cfg.tools = tools
 }
 
-function agentDefault(
-  cfg: TenantConfig,
-  key: string,
-  fallback = "",
-): string {
-  const agents = asObj(cfg.agents)
-  const defs = asObj(agents.defaults)
-  const v = defs[key]
-  return v === undefined || v === null ? fallback : String(v)
-}
-
-function setAgentDefault(
-  cfg: TenantConfig,
-  key: string,
-  value: string,
-) {
-  const agents = asObj(cfg.agents)
-  const defs = asObj(agents.defaults)
-  if (value.trim() === "") {
-    delete defs[key]
-  } else {
-    defs[key] = maybeNumber(value)
-  }
-  agents.defaults = defs
-  cfg.agents = agents
-}
-
-function maybeNumber(v: string): string | number {
-  const t = v.trim()
-  if (t !== "" && !Number.isNaN(Number(t))) return Number(t)
-  return v
-}
-
 function serversToDrafts(cfg: TenantConfig): MCPServerDraft[] {
   const tools = asObj(cfg.tools)
   const mcp = asObj(tools.mcp)
@@ -234,47 +201,6 @@ export function V7ConfigPage() {
   return (
     <div className="flex flex-col gap-6 p-6">
       <PageHeader title={t("navigation.config")} />
-
-      <Card>
-        <CardHeader>
-          <CardTitle>运行参数</CardTitle>
-          <CardDescription>
-            应用于该租户智能体的下一条消息。
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <NumberField
-            label="最大 token 数"
-            value={agentDefault(cur, "max_tokens")}
-            onChange={(v) => setCfg((c) => patchAgent(c ?? cur, "max_tokens", v))}
-          />
-          <NumberField
-            label="上下文窗口"
-            value={agentDefault(cur, "context_window")}
-            onChange={(v) => setCfg((c) => patchAgent(c ?? cur, "context_window", v))}
-          />
-          <NumberField
-            label="最大工具迭代次数"
-            value={agentDefault(cur, "max_tool_iterations")}
-            onChange={(v) => setCfg((c) => patchAgent(c ?? cur, "max_tool_iterations", v))}
-          />
-          <NumberField
-            label="摘要阈值"
-            value={agentDefault(cur, "summarize_message_threshold")}
-            onChange={(v) => setCfg((c) => patchAgent(c ?? cur, "summarize_message_threshold", v))}
-          />
-          <NumberField
-            label="摘要 token 占比"
-            value={agentDefault(cur, "summarize_token_percent")}
-            onChange={(v) => setCfg((c) => patchAgent(c ?? cur, "summarize_token_percent", v))}
-          />
-          <NumberField
-            label="温度"
-            value={agentDefault(cur, "temperature")}
-            onChange={(v) => setCfg((c) => patchAgent(c ?? cur, "temperature", v))}
-          />
-        </CardContent>
-      </Card>
 
       <Card>
         <CardHeader>
@@ -428,33 +354,3 @@ export function V7ConfigPage() {
   )
 }
 
-function patchAgent(
-  cfg: TenantConfig,
-  key: string,
-  value: string,
-): TenantConfig {
-  const next = structuredClone(cfg)
-  setAgentDefault(next, key, value)
-  return next
-}
-
-function NumberField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string
-  value: string
-  onChange: (v: string) => void
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <Label className="text-sm">{label}</Label>
-      <Input
-        type="number"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    </div>
-  )
-}
