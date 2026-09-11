@@ -157,7 +157,21 @@
         "tencent": "按照如下格式输入：AppId|SecretId|SecretKey"
       },
       "model_params": "模型参数",
-      "model_params_placeholder": "此项可选，按模型强制覆盖运行参数。JSON 字符串，键为模型名称，值为要强制设置的请求字段（max_tokens / temperature / top_p / n）"
+      "model_params_placeholder": "此项可选，按模型强制覆盖运行参数。JSON 字符串，键为模型名称，值为要强制设置的请求字段（max_tokens / temperature / top_p / n）",
+      "mapping_tab_visual": "可视化",
+      "mapping_tab_json": "JSON",
+      "mapping_fill_template": "填入模板",
+      "mapping_empty": "尚未配置重定向。点击「添加重定向」开始配置。",
+      "mapping_add": "添加重定向",
+      "mapping_from": "原始模型",
+      "mapping_to": "替换模型",
+      "model_mapping_duplicate": "存在重复的原始模型：{{models}}，请修改后再保存",
+      "params_model": "模型",
+      "params_key": "参数名",
+      "params_value": "参数值",
+      "params_add": "添加参数",
+      "params_add_model": "添加模型",
+      "params_empty": "尚未配置模型参数。点击「添加模型」即可按模型配置运行参数。"
     }
   },
   "token": {

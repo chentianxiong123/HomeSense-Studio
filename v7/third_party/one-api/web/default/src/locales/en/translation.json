@@ -157,7 +157,21 @@
         "tencent": "Enter in format: AppId|SecretId|SecretKey"
       },
       "model_params": "Model Params",
-      "model_params_placeholder": "Optional, admin-enforced per-model request parameters. JSON string keyed by model name with fields to force (max_tokens / temperature / top_p / n)"
+      "model_params_placeholder": "Optional, admin-enforced per-model request parameters. JSON string keyed by model name with fields to force (max_tokens / temperature / top_p / n)",
+      "mapping_tab_visual": "Visual",
+      "mapping_tab_json": "JSON",
+      "mapping_fill_template": "Fill Template",
+      "mapping_empty": "No mappings configured. Click \"Add Mapping\" to get started.",
+      "mapping_add": "Add Mapping",
+      "mapping_from": "Original Model",
+      "mapping_to": "Replacement Model",
+      "model_mapping_duplicate": "Duplicate source model(s): {{models}}. Please fix before saving.",
+      "params_model": "Model",
+      "params_key": "Parameter",
+      "params_value": "Value",
+      "params_add": "Add Parameter",
+      "params_add_model": "Add Model",
+      "params_empty": "No model params configured. Click \"Add Model\" to configure per-model parameters."
     }
   },
   "token": {
