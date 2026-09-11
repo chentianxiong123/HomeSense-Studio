@@ -12,6 +12,11 @@ const MODEL_MAPPING_EXAMPLE = {
   'gpt-4-32k-0314': 'gpt-4-32k',
 };
 
+const MODEL_PARAMS_EXAMPLE = {
+  auto: {max_tokens: 8192, temperature: 0.7},
+  'Qwen3.8-27B': {max_tokens: 4096, temperature: 0.5},
+};
+
 function type2secretPrompt(type, t) {
   switch (type) {
     case 15:
@@ -45,6 +50,7 @@ const EditChannel = () => {
     base_url: '',
     other: '',
     model_mapping: '',
+    model_params: '',
     system_prompt: '',
     models: [],
     groups: ['default'],
@@ -100,6 +106,15 @@ const EditChannel = () => {
           null,
           2
         );
+      }
+      if (data.model_params !== '' && data.model_params !== null && data.model_params !== undefined) {
+        data.model_params = JSON.stringify(
+          JSON.parse(data.model_params),
+          null,
+          2
+        );
+      } else {
+        data.model_params = '';
       }
       setInputs(data);
       if (data.config !== '') {
@@ -189,6 +204,10 @@ const EditChannel = () => {
     }
     if (inputs.model_mapping !== '' && !verifyJSON(inputs.model_mapping)) {
       showInfo(t('channel.edit.messages.model_mapping_invalid'));
+      return;
+    }
+    if ((inputs.model_params || '') !== '' && !verifyJSON(inputs.model_params)) {
+      showInfo(t('channel.edit.messages.model_params_invalid'));
       return;
     }
     let localInputs = { ...inputs };
@@ -500,6 +519,22 @@ const EditChannel = () => {
                     value={inputs.model_mapping}
                     style={{
                       minHeight: 150,
+                      fontFamily: 'JetBrains Mono, Consolas',
+                    }}
+                    autoComplete='new-password'
+                  />
+                </Form.Field>
+                <Form.Field>
+                  <Form.TextArea
+                    label={t('channel.edit.model_params')}
+                    placeholder={`${t(
+                      'channel.edit.model_params_placeholder'
+                    )}\n${JSON.stringify(MODEL_PARAMS_EXAMPLE, null, 2)}`}
+                    name='model_params'
+                    onChange={handleInputChange}
+                    value={inputs.model_params}
+                    style={{
+                      minHeight: 120,
                       fontFamily: 'JetBrains Mono, Consolas',
                     }}
                     autoComplete='new-password'
