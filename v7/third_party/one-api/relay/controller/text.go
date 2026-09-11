@@ -20,6 +20,7 @@ import (
 	"github.com/songquanpeng/one-api/relay/channeltype"
 	"github.com/songquanpeng/one-api/relay/meta"
 	"github.com/songquanpeng/one-api/relay/model"
+	datamodel "github.com/songquanpeng/one-api/model"
 )
 
 func RelayTextHelper(c *gin.Context) *model.ErrorWithStatusCode {
@@ -37,6 +38,15 @@ func RelayTextHelper(c *gin.Context) *model.ErrorWithStatusCode {
 	meta.OriginModelName = textRequest.Model
 	textRequest.Model, _ = getMappedModelName(textRequest.Model, meta.ModelMapping)
 	meta.ActualModelName = textRequest.Model
+
+	// enforce admin-configured per-model parameters
+	if len(meta.ModelParams) > 0 {
+		if params, ok := meta.ModelParams[meta.OriginModelName]; ok {
+			if applyModelParams(textRequest, &params) {
+				meta.InjectedModelParams = true
+			}
+		}
+	}
 	// set system prompt if not empty
 	systemPromptReset := setSystemPrompt(ctx, textRequest, meta.ForcedSystemPrompt)
 	// get model ratio & group ratio
@@ -92,7 +102,8 @@ func getRequestBody(c *gin.Context, meta *meta.Meta, textRequest *model.GeneralO
 		meta.APIType == apitype.OpenAI &&
 		meta.OriginModelName == meta.ActualModelName &&
 		meta.ChannelType != channeltype.Baichuan &&
-		meta.ForcedSystemPrompt == "" {
+		meta.ForcedSystemPrompt == "" &&
+		!meta.InjectedModelParams {
 		// no need to convert request for openai
 		return c.Request.Body, nil
 	}
@@ -112,4 +123,28 @@ func getRequestBody(c *gin.Context, meta *meta.Meta, textRequest *model.GeneralO
 	logger.Debugf(c.Request.Context(), "converted request: \n%s", string(jsonData))
 	requestBody = bytes.NewBuffer(jsonData)
 	return requestBody, nil
+}
+
+// applyModelParams overwrites a request's fields with any admin-configured
+// per-model parameters. It reports whether anything was changed.
+func applyModelParams(req *model.GeneralOpenAIRequest, p *datamodel.ModelParamsConfig) bool {
+	changed := false
+	if p.MaxTokens != nil && *p.MaxTokens > 0 {
+		req.MaxTokens = *p.MaxTokens
+		req.MaxCompletionTokens = nil
+		changed = true
+	}
+	if p.Temperature != nil {
+		req.Temperature = p.Temperature
+		changed = true
+	}
+	if p.TopP != nil {
+		req.TopP = p.TopP
+		changed = true
+	}
+	if p.N != nil && *p.N > 0 {
+		req.N = *p.N
+		changed = true
+	}
+	return changed
 }

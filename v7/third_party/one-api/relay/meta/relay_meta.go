@@ -21,6 +21,9 @@ type Meta struct {
 	UserId       int
 	Group        string
 	ModelMapping map[string]string
+	// ModelParams holds admin-configured per-model request parameters
+	// (max_tokens, temperature, ...), keyed by model name.
+	ModelParams map[string]model.ModelParamsConfig
 	// BaseURL is the proxy url set in the channel config
 	BaseURL  string
 	APIKey   string
@@ -35,6 +38,9 @@ type Meta struct {
 	PromptTokens       int // only for DoResponse
 	ForcedSystemPrompt string
 	StartTime          time.Time
+	// InjectedModelParams is set when admin-configured per-model parameters
+	// were applied to the request, forcing a re-serialized body downstream.
+	InjectedModelParams bool
 }
 
 func GetByContext(c *gin.Context) *Meta {
@@ -57,6 +63,11 @@ func GetByContext(c *gin.Context) *Meta {
 	cfg, ok := c.Get(ctxkey.Config)
 	if ok {
 		meta.Config = cfg.(model.ChannelConfig)
+	}
+	if v, ok := c.Get(ctxkey.ModelParams); ok {
+		if params, ok2 := v.(map[string]model.ModelParamsConfig); ok2 {
+			meta.ModelParams = params
+		}
 	}
 	if meta.BaseURL == "" {
 		meta.BaseURL = channeltype.ChannelBaseURLs[meta.ChannelType]

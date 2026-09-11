@@ -38,6 +38,20 @@ type Channel struct {
 	Priority           *int64  `json:"priority" gorm:"bigint;default:0"`
 	Config             string  `json:"config"`
 	SystemPrompt       *string `json:"system_prompt" gorm:"type:text"`
+	// ModelParams is an optional admin-configured map of model name to runtime
+	// request parameters (max_tokens, temperature, ...). Matching fields are
+	// enforced on every request that names that model.
+	ModelParams *string `json:"model_params" gorm:"type:text"`
+}
+
+// ModelParamsConfig holds admin-enforced per-model request parameters. Only
+// fields present in the JSON are applied; absent ones leave the client value
+// untouched.
+type ModelParamsConfig struct {
+	MaxTokens   *int     `json:"max_tokens,omitempty"`
+	Temperature *float64 `json:"temperature,omitempty"`
+	TopP        *float64 `json:"top_p,omitempty"`
+	N           *int     `json:"n,omitempty"`
 }
 
 type ChannelConfig struct {
@@ -122,6 +136,20 @@ func (channel *Channel) GetModelMapping() map[string]string {
 		return nil
 	}
 	return modelMapping
+}
+
+// GetModelParams parses the channel's admin-configured per-model request
+// parameters, keyed by model name. Returns nil when unset or invalid.
+func (channel *Channel) GetModelParams() map[string]ModelParamsConfig {
+	if channel.ModelParams == nil || *channel.ModelParams == "" || *channel.ModelParams == "{}" {
+		return nil
+	}
+	params := make(map[string]ModelParamsConfig)
+	if err := json.Unmarshal([]byte(*channel.ModelParams), &params); err != nil {
+		logger.SysError(fmt.Sprintf("failed to unmarshal model params for channel %d, error: %s", channel.Id, err.Error()))
+		return nil
+	}
+	return params
 }
 
 func (channel *Channel) Insert() error {
