@@ -1,17 +1,35 @@
 import type { ReactNode } from "react"
+import * as React from "react"
 import { Toaster } from "sonner"
 
-import { AppHeader } from "@/components/app-header"
+import {
+  AppHeader,
+  HeaderExpandHandle,
+} from "@/components/app-header"
 import { AppSidebar } from "@/components/app-sidebar"
 import { TourGuide } from "@/components/tour/tour-guide"
 import { SidebarProvider } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
 export function AppLayout({ children }: { children: ReactNode }) {
+  const [headerExpanded, setHeaderExpanded] = React.useState(true)
   return (
     <TooltipProvider>
-      <SidebarProvider className="flex h-dvh flex-col overflow-hidden">
-        <AppHeader />
+      <SidebarProvider
+        className="flex h-dvh flex-col overflow-hidden"
+        style={
+          {
+            "--header-height": headerExpanded ? "3.5rem" : "0px",
+          } as React.CSSProperties
+        }
+      >
+        <AppHeader
+          expanded={headerExpanded}
+          onToggle={() => setHeaderExpanded((v) => !v)}
+        />
+        {!headerExpanded && (
+          <HeaderExpandHandle onClick={() => setHeaderExpanded(true)} />
+        )}
 
         <div className="flex flex-1 overflow-hidden">
           <AppSidebar />
