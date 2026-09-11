@@ -199,10 +199,14 @@ func userProviderFor(cfg *config.Config, u User) providers.LLMProvider {
 		return nil
 	}
 	base := cfg.ModelList[0].APIBase
+	modelName := u.Model
+	if modelName == "" {
+		modelName = cfg.ModelList[0].ModelName
+	}
 	modelCfg := &config.ModelConfig{
-		ModelName: cfg.ModelList[0].ModelName,
+		ModelName: modelName,
 		Provider:  "openai",
-		Model:     cfg.ModelList[0].Model,
+		Model:     modelName,
 		APIBase:   base,
 	}
 	if modelCfg.APIBase == "" {

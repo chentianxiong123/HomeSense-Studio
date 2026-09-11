@@ -105,6 +105,11 @@ func init() {
 	}
 	channelId2Models = make(map[int][]string)
 	for i := 1; i < channeltype.Dummy; i++ {
+		// Keep only the standard preset templates: OpenAI, Anthropic (Claude)
+		// and Gemini. All other channel-type model lists are dropped.
+		if i != channeltype.OpenAI && i != channeltype.Anthropic && i != channeltype.Gemini {
+			continue
+		}
 		adaptor := relay.GetAdaptor(channeltype.ToAPIType(i))
 		meta := &meta.Meta{
 			ChannelType: i,

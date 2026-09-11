@@ -158,6 +158,18 @@ func (s *Store) ListUsers() ([]User, error) {
 	return users, rows.Err()
 }
 
+// UpdateUserModel persists the tenant's chosen default model name.
+func (s *Store) UpdateUserModel(id, model string) error {
+	res, err := s.db.Exec(`UPDATE users SET model = ? WHERE id = ?`, model, id)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return fmt.Errorf("user %s not found", id)
+	}
+	return nil
+}
+
 // RemoveUser deletes a user row (workspace/personal DB are left on disk by
 // design; the control plane calls registry.RemoveUserAgent separately).
 func (s *Store) RemoveUser(id string) error {

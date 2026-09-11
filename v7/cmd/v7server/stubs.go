@@ -47,35 +47,5 @@ func (s *Server) handleGatewayClearLogs(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// handleModels reports the single shared model (root provider) plus empty
-// provider catalogs, so the chat UI unblocks its composer.
-func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
-	respondJSON(w, http.StatusOK, map[string]any{
-		"models": []map[string]any{{
-			"index":                 0,
-			"model_name":            s.cfg.Model,
-			"provider":              "openai",
-			"model":                 s.cfg.Model,
-			"api_base":              s.cfg.GatewayBase,
-			"api_key":               "",
-			"enabled":               true,
-			"available":             true,
-			"status":                "available",
-			"is_default":            true,
-			"is_virtual":            false,
-			"default_model_allowed": true,
-		}},
-		"total":            1,
-		"default_model":    s.cfg.Model,
-		"default_provider": "openai",
-		"fallback_chain":   []string{},
-		"provider_options": []any{},
-	})
-}
-
-func (s *Server) handleSetDefaultModel(w http.ResponseWriter, r *http.Request) {
-	respondJSON(w, http.StatusOK, map[string]any{
-		"status":        "success",
-		"default_model": s.cfg.Model,
-	})
-}
+// handleModels / handleSetDefaultModel live in models.go (real one-api model
+// catalog via the per-user token).
