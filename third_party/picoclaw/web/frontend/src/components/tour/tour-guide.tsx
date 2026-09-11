@@ -1,5 +1,4 @@
 import {
-  IconBook,
   IconChevronLeft,
   IconChevronRight,
 } from "@tabler/icons-react"
@@ -42,26 +41,24 @@ export function TourGuide() {
       description: t("tour.welcome.description"),
       position: "bottom",
     },
-    models: {
-      title: t("tour.models.title"),
-      description: t("tour.models.description"),
-      targetSelector: "[data-tour='models-nav']",
+    chat: {
+      title: t("tour.chat.title"),
+      description: t("tour.chat.description"),
+      targetSelector: "[data-tour='chat-composer']",
+      position: "bottom",
+      offsetY: 8,
+    },
+    config: {
+      title: t("tour.config.title"),
+      description: t("tour.config.description"),
+      targetSelector: "[data-tour='config-nav']",
       position: "right",
     },
-    gateway: {
-      title: t("tour.gateway.title"),
-      description: t("tour.gateway.description"),
-      targetSelector: "[data-tour='gateway-button']",
-      position: "left",
-      offsetY: 60,
-    },
-    docs: {
-      title: t("tour.docs.title"),
-      description: t("tour.docs.description"),
-      targetSelector: "[data-tour='docs-button']",
-      position: "left",
-      icon: <IconBook className="size-4" />,
-      offsetY: 60,
+    logs: {
+      title: t("tour.logs.title"),
+      description: t("tour.logs.description"),
+      targetSelector: "[data-tour='logs-nav']",
+      position: "right",
     },
     completed: {
       title: "",
@@ -73,9 +70,9 @@ export function TourGuide() {
   const currentConfig = steps[tourState.currentStep]
   const stepOrder: TourStep[] = [
     "welcome",
-    "models",
-    "gateway",
-    "docs",
+    "chat",
+    "config",
+    "logs",
     "completed",
   ]
   const currentStepIndex = stepOrder.indexOf(tourState.currentStep)

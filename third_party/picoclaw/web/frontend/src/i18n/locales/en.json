@@ -131,6 +131,8 @@
     }
   },
   "header": {
+    "collapse": "Collapse toolbar",
+    "expand": "Expand toolbar",
     "logout": {
       "tooltip": "Sign out",
       "confirm": "Sign out",
@@ -983,20 +985,20 @@
     "next": "Next",
     "finish": "Finish",
     "welcome": {
-      "title": "Welcome to PicoClaw",
-      "description": "PicoClaw is a powerful AI assistant platform. Let's take a few seconds to help you complete the basic setup."
+      "title": "Welcome to HomeSense",
+      "description": "Your AI home manager. Chat, control devices and get tasks done — let's take a few seconds to learn the basics."
     },
-    "models": {
-      "title": "Configure Models",
-      "description": "Click the \"Models\" menu on the left to configure API keys for AI providers. Only configured models can be used for chat."
+    "chat": {
+      "title": "Start a conversation",
+      "description": "Type what you need in the box below. HomeSense will plan and call its tools to get it done."
     },
-    "gateway": {
-      "title": "Start Gateway",
-      "description": "After configuring models, click the \"Start Gateway\" button at the top to begin chatting with AI."
+    "config": {
+      "title": "Personalize your setup",
+      "description": "In \"Configuration\" you manage runtime parameters, toggle tools on/off, and connect your devices (MCP servers)."
     },
-    "docs": {
-      "title": "View Documentation",
-      "description": "Need more help? Click the documentation button in the top right corner to view detailed guides and configuration docs."
+    "logs": {
+      "title": "Watch it work",
+      "description": "The \"Logs\" page shows the step-by-step record of every task — find what happened whenever something goes wrong."
     }
   }
 }
