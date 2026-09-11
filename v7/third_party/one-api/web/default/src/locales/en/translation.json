@@ -126,7 +126,8 @@
         "models_required": "Please select at least one model!",
         "model_mapping_invalid": "Model mapping must be valid JSON format!",
         "update_success": "Channel updated successfully!",
-        "create_success": "Channel created successfully!"
+        "create_success": "Channel created successfully!",
+        "model_params_invalid": "Model params must be valid JSON"
       },
       "spark_version": "Model Version",
       "spark_version_placeholder": "Please enter Spark model version from API URL, e.g.: v2.1",
@@ -154,7 +155,9 @@
         "spark": "Enter in format: APPID|APISecret|APIKey",
         "fastgpt": "Enter in format: APIKey-AppId, e.g.: fastgpt-0sp2gtvfdgyi4k30jwlgwf1i-64f335d84283f05518e9e041",
         "tencent": "Enter in format: AppId|SecretId|SecretKey"
-      }
+      },
+      "model_params": "Model Params",
+      "model_params_placeholder": "Optional, admin-enforced per-model request parameters. JSON string keyed by model name with fields to force (max_tokens / temperature / top_p / n)"
     }
   },
   "token": {

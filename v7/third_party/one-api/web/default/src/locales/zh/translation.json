@@ -126,7 +126,8 @@
         "models_required": "请至少选择一个模型！",
         "model_mapping_invalid": "模型映射必须是合法的 JSON 格式！",
         "update_success": "渠道更新成功！",
-        "create_success": "渠道创建成功！"
+        "create_success": "渠道创建成功！",
+        "model_params_invalid": "模型参数必须是合法的 JSON"
       },
       "spark_version": "模型版本",
       "spark_version_placeholder": "请输入星火大模型版本，注意是接口地址中的版本号，例如：v2.1",
@@ -154,7 +155,9 @@
         "spark": "按照如下格式输入：APPID|APISecret|APIKey",
         "fastgpt": "按照如下格式输入：APIKey-AppId，例如：fastgpt-0sp2gtvfdgyi4k30jwlgwf1i-64f335d84283f05518e9e041",
         "tencent": "按照如下格式输入：AppId|SecretId|SecretKey"
-      }
+      },
+      "model_params": "模型参数",
+      "model_params_placeholder": "此项可选，按模型强制覆盖运行参数。JSON 字符串，键为模型名称，值为要强制设置的请求字段（max_tokens / temperature / top_p / n）"
     }
   },
   "token": {
