@@ -5,17 +5,8 @@ import {useNavigate, useParams} from 'react-router-dom';
 import {API, copy, getChannelModels, showError, showInfo, showSuccess, verifyJSON,} from '../../helpers';
 import {CHANNEL_OPTIONS} from '../../constants';
 import {renderChannelTip} from '../../helpers/render';
-
-const MODEL_MAPPING_EXAMPLE = {
-  'gpt-3.5-turbo-0301': 'gpt-3.5-turbo',
-  'gpt-4-0314': 'gpt-4',
-  'gpt-4-32k-0314': 'gpt-4-32k',
-};
-
-const MODEL_PARAMS_EXAMPLE = {
-  auto: {max_tokens: 8192, temperature: 0.7},
-  'Qwen3.8-27B': {max_tokens: 4096, temperature: 0.5},
-};
+import ModelMappingEditor from '../../components/ModelMappingEditor';
+import ModelParamsEditor from '../../components/ModelParamsEditor';
 
 function type2secretPrompt(type, t) {
   switch (type) {
@@ -509,35 +500,21 @@ const EditChannel = () => {
             {inputs.type !== 43 && (
               <>
                 <Form.Field>
-                  <Form.TextArea
-                    label={t('channel.edit.model_mapping')}
-                    placeholder={`${t(
-                      'channel.edit.model_mapping_placeholder'
-                    )}\n${JSON.stringify(MODEL_MAPPING_EXAMPLE, null, 2)}`}
-                    name='model_mapping'
-                    onChange={handleInputChange}
+                  <label>{t('channel.edit.model_mapping')}</label>
+                  <ModelMappingEditor
                     value={inputs.model_mapping}
-                    style={{
-                      minHeight: 150,
-                      fontFamily: 'JetBrains Mono, Consolas',
-                    }}
-                    autoComplete='new-password'
+                    onChange={(v) => setInputs((inputs) => ({...inputs, model_mapping: v}))}
+                    modelOptions={modelOptions.map((o) => o.key)}
+                    disabled={false}
                   />
                 </Form.Field>
                 <Form.Field>
-                  <Form.TextArea
-                    label={t('channel.edit.model_params')}
-                    placeholder={`${t(
-                      'channel.edit.model_params_placeholder'
-                    )}\n${JSON.stringify(MODEL_PARAMS_EXAMPLE, null, 2)}`}
-                    name='model_params'
-                    onChange={handleInputChange}
+                  <label>{t('channel.edit.model_params')}</label>
+                  <ModelParamsEditor
                     value={inputs.model_params}
-                    style={{
-                      minHeight: 120,
-                      fontFamily: 'JetBrains Mono, Consolas',
-                    }}
-                    autoComplete='new-password'
+                    onChange={(v) => setInputs((inputs) => ({...inputs, model_params: v}))}
+                    modelOptions={modelOptions.map((o) => o.key)}
+                    disabled={false}
                   />
                 </Form.Field>
                 <Form.Field>
