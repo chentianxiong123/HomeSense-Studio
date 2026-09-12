@@ -438,6 +438,15 @@ func (s *Server) handleUserByID(w http.ResponseWriter, r *http.Request) {
 	case suffix == "memory-config":
 		s.handleMemoryConfig(w, r, userID)
 
+	case suffix == "memory-notes":
+		s.handleMemoryNotes(w, r, userID)
+
+	case suffix == "memory-files":
+		s.handleMemoryFiles(w, r, userID)
+
+	case suffix == "agent-file":
+		s.handleAgentFile(w, r, userID)
+
 	case r.Method == http.MethodGet:
 		u, err := s.store.GetUser(userID)
 		if err != nil {

@@ -35,10 +35,14 @@ type memoryFileConfig struct {
 // MemoryStore manages persistent memory for the agent.
 // - Long-term memory: memory/MEMORY.md
 // - Daily notes: memory/YYYYMM/YYYYMMDD.md
+// - Profile: memory/MEMORY_PROFILE.md (auto-generated recent summary)
 type MemoryStore struct {
 	workspace          string
 	memoryDir          string
 	memoryFile         string
+	profileFile        string
+	profileTurnCount   int
+	profileThreshold   int
 	dailyRetentionDays int
 	enabled            bool
 	dailyNotesEnabled  bool
@@ -57,6 +61,7 @@ func NewMemoryStoreWithOptions(workspace string, dailyRetentionDays int) *Memory
 	}
 	memoryDir := filepath.Join(workspace, "memory")
 	memoryFile := filepath.Join(memoryDir, "MEMORY.md")
+	profileFile := filepath.Join(memoryDir, "MEMORY_PROFILE.md")
 
 	// Ensure memory directory exists
 	os.MkdirAll(memoryDir, 0o755)
@@ -65,6 +70,9 @@ func NewMemoryStoreWithOptions(workspace string, dailyRetentionDays int) *Memory
 		workspace:          workspace,
 		memoryDir:          memoryDir,
 		memoryFile:         memoryFile,
+		profileFile:        profileFile,
+		profileTurnCount:   0,
+		profileThreshold:   20, // default: generate profile every 20 turns
 		dailyRetentionDays: dailyRetentionDays,
 		enabled:            true,
 		dailyNotesEnabled:  true,
@@ -72,6 +80,8 @@ func NewMemoryStoreWithOptions(workspace string, dailyRetentionDays int) *Memory
 
 	// Try to read memory.json for overrides
 	ms.loadConfig()
+	// Load turn counter
+	ms.loadProfileCounter()
 
 	return ms
 }
@@ -93,6 +103,56 @@ func (ms *MemoryStore) loadConfig() {
 	if fc.Memory.DailyNotes.RetentionDays > 0 {
 		ms.dailyRetentionDays = fc.Memory.DailyNotes.RetentionDays
 	}
+}
+
+// profileCounterFile stores the turn count for profile generation.
+func (ms *MemoryStore) profileCounterFile() string {
+	return filepath.Join(ms.memoryDir, ".profile_counter")
+}
+
+// loadProfileCounter reads the saved turn count.
+func (ms *MemoryStore) loadProfileCounter() {
+	data, err := os.ReadFile(ms.profileCounterFile())
+	if err != nil {
+		return
+	}
+	fmt.Sscanf(string(data), "%d", &ms.profileTurnCount)
+}
+
+// saveProfileCounter persists the turn count.
+func (ms *MemoryStore) saveProfileCounter() {
+	os.WriteFile(ms.profileCounterFile(), []byte(fmt.Sprintf("%d", ms.profileTurnCount)), 0o644)
+}
+
+// IncrementProfileTurnCount increments the counter and returns true if threshold reached.
+func (ms *MemoryStore) IncrementProfileTurnCount() bool {
+	ms.profileTurnCount++
+	if ms.profileTurnCount >= ms.profileThreshold {
+		ms.profileTurnCount = 0
+		ms.saveProfileCounter()
+		return true
+	}
+	ms.saveProfileCounter()
+	return false
+}
+
+// GetProfileThreshold returns the configured threshold.
+func (ms *MemoryStore) GetProfileThreshold() int {
+	return ms.profileThreshold
+}
+
+// WriteProfile writes the MEMORY_PROFILE.md file (overwrites previous).
+func (ms *MemoryStore) WriteProfile(content string) error {
+	return os.WriteFile(ms.profileFile, []byte(content), 0o644)
+}
+
+// ReadProfile reads the MEMORY_PROFILE.md file.
+func (ms *MemoryStore) ReadProfile() string {
+	data, err := os.ReadFile(ms.profileFile)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 // getTodayFile returns the path to today's daily note file (memory/YYYYMM/YYYYMMDD.md).
@@ -183,6 +243,44 @@ func (ms *MemoryStore) GetRecentDailyNotes(days int) string {
 	return sb.String()
 }
 
+// GetAllDailyNotes reads ALL daily notes from all months (permanent storage).
+func (ms *MemoryStore) GetAllDailyNotes() string {
+	var sb strings.Builder
+	first := true
+
+	entries, err := os.ReadDir(ms.memoryDir)
+	if err != nil {
+		return ""
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		monthDir := filepath.Join(ms.memoryDir, entry.Name())
+		files, err := os.ReadDir(monthDir)
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			if f.IsDir() || !strings.HasSuffix(f.Name(), ".md") {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(monthDir, f.Name()))
+			if err != nil {
+				continue
+			}
+			if !first {
+				sb.WriteString("\n\n---\n\n")
+			}
+			sb.Write(data)
+			first = false
+		}
+	}
+
+	return sb.String()
+}
+
 // GetMemoryContext returns formatted memory context for the agent prompt.
 // Includes long-term memory and recent daily notes.
 // Returns empty if memory is disabled via config.
@@ -195,7 +293,7 @@ func (ms *MemoryStore) GetMemoryContext() string {
 
 	var recentNotes string
 	if ms.dailyNotesEnabled {
-		recentNotes = ms.GetRecentDailyNotes(ms.dailyRetentionDays)
+		recentNotes = ms.GetAllDailyNotes()
 	}
 
 	if longTerm == "" && recentNotes == "" {
