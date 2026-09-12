@@ -209,6 +209,23 @@ func newPicoBridge(s *Server, pcCfg *config.Config, mb *bus.MessageBus) (*picoBr
 	return b, nil
 }
 
+// fixedSessionHandler pins every WebSocket connection to a deterministic
+// per-user session id ("user:<userID>"). One user == one long conversation:
+// no matter what session_id a client sends, it always resolves to the same
+// single session for that user. Combined with the SQLite session store this
+// guarantees each user has exactly one persistent session.
+func fixedSessionHandler(b *picoBridge, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userID, ok := b.resolveUser(r)
+		if ok {
+			q := r.URL.Query()
+			q.Set("session_id", "user:"+userID)
+			r.URL.RawQuery = q.Encode()
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // resolveUser extracts the v7 session token from the WebSocket request and
 // returns the owning user ID. Token sources: Authorization: Bearer header,
 // "token.<value>" subprotocol, or ?token= query parameter.
