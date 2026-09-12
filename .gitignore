@@ -43,3 +43,4 @@ web/dist/
 
 # new-api runtime logs
 /logs/
+v7/cmd/v7server/homesense

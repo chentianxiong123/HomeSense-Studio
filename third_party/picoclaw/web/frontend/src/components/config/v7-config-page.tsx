@@ -2,16 +2,22 @@
  * HomeSense tenant configuration page.
  *
  * Replaces the upstream single-node config panel with a per-tenant view:
- *   - runtime parameters (tokens / iterations / summarize / temperature)
  *   - high-risk tool toggles (default off; tenants opt in per their own copy)
  *   - MCP servers (the tenant's own devices / executor endpoints)
+ *   - memory settings (long-term memory, daily notes, history search)
  *   - raw config.json editor for advanced tenants
  */
 import { IconDeviceFloppy } from "@tabler/icons-react"
-import { useMemo, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
+import {
+  getMemoryConfig,
+  saveMemoryConfig,
+  type MemoryConfig,
+  DEFAULT_MEMORY_CONFIG,
+} from "@/api/memory-config"
 import {
   getUserConfig,
   getCurrentUserId,
@@ -69,9 +75,6 @@ function toolEnabled(cfg: TenantConfig, tool: string): boolean {
   const tools = asObj(cfg.tools)
   const t = asObj(tools[tool])
   if (typeof t.enabled === "boolean") return t.enabled
-  // Absent in the tenant file = inherits the platform default. Report the
-  // conservative value (off) for high-risk tools; treat the presence of an
-  // explicit true as on.
   return t.enabled === true
 }
 
@@ -139,22 +142,27 @@ function draftsToConfig(cfg: TenantConfig, drafts: MCPServerDraft[]) {
 export function V7ConfigPage() {
   const { t } = useTranslation()
   const [cfg, setCfg] = useState<TenantConfig | null>(null)
+  const [memCfg, setMemCfg] = useState<MemoryConfig>(DEFAULT_MEMORY_CONFIG)
   const [userId, setUserId] = useState("")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
   const [drafts, setDrafts] = useState<MCPServerDraft[]>([])
 
-  useMemo(() => {
+  useEffect(() => {
     let alive = true
     ;(async () => {
       try {
         const uid = await getCurrentUserId()
-        const loaded = await getUserConfig()
+        const [loaded, memLoaded] = await Promise.all([
+          getUserConfig(),
+          getMemoryConfig().catch(() => DEFAULT_MEMORY_CONFIG),
+        ])
         if (!alive) return
         setUserId(uid)
         setCfg(loaded)
         setDrafts(serversToDrafts(loaded))
+        setMemCfg(memLoaded)
       } catch (e) {
         if (alive) setError(String(e))
       } finally {
@@ -165,6 +173,25 @@ export function V7ConfigPage() {
       alive = false
     }
   }, [])
+
+  const save = useCallback(async () => {
+    if (!cfg) return
+    setSaving(true)
+    try {
+      const next = structuredClone(cfg)
+      draftsToConfig(next, drafts)
+      await Promise.all([
+        saveUserConfigFor(userId, next),
+        saveMemoryConfig(memCfg),
+      ])
+      setCfg(next)
+      toast.success(t("pages.config.saved"))
+    } catch (e) {
+      toast.error(String(e))
+    } finally {
+      setSaving(false)
+    }
+  }, [cfg, userId, drafts, memCfg, t])
 
   if (loading) {
     return (
@@ -180,28 +207,13 @@ export function V7ConfigPage() {
       </div>
     )
   }
-  // Non-null alias: closures don't inherit the guard's narrowing.
   const cur = cfg
-
-  const save = async () => {
-    setSaving(true)
-    try {
-      const next = structuredClone(cur)
-      draftsToConfig(next, drafts)
-      await saveUserConfigFor(userId, next)
-      setCfg(next)
-      toast.success(t("pages.config.saved"))
-    } catch (e) {
-      toast.error(String(e))
-    } finally {
-      setSaving(false)
-    }
-  }
 
   return (
     <div className="flex flex-col gap-6 p-6">
       <PageHeader title={t("navigation.config")} />
 
+      {/* ── Tools ── */}
       <Card>
         <CardHeader>
           <CardTitle>工具</CardTitle>
@@ -234,6 +246,7 @@ export function V7ConfigPage() {
         </CardContent>
       </Card>
 
+      {/* ── MCP Servers ── */}
       <Card>
         <CardHeader>
           <CardTitle>MCP 服务器</CardTitle>
@@ -321,6 +334,120 @@ export function V7ConfigPage() {
         </CardContent>
       </Card>
 
+      {/* ── Memory ── */}
+      <Card>
+        <CardHeader>
+          <CardTitle>记忆</CardTitle>
+          <CardDescription>
+            控制 agent 的记忆行为。修改后下一条消息生效。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          {/* Long-term memory */}
+          <div className="flex items-center justify-between rounded-md border px-3 py-2">
+            <div>
+              <div className="text-sm font-medium">长期记忆 (MEMORY.md)</div>
+              <div className="text-xs text-muted-foreground">
+                agent 跨会话记住的稳定事实
+              </div>
+            </div>
+            <Switch
+              checked={memCfg.enabled}
+              onCheckedChange={(on) =>
+                setMemCfg((c) => ({ ...c, enabled: on }))
+              }
+            />
+          </div>
+
+          {/* Daily notes */}
+          <div className="flex items-center justify-between rounded-md border px-3 py-2">
+            <div>
+              <div className="text-sm font-medium">每日笔记</div>
+              <div className="text-xs text-muted-foreground">
+                每天自动记录，最近 N 天注入上下文
+              </div>
+            </div>
+            <Switch
+              checked={memCfg.daily_notes.enabled}
+              onCheckedChange={(on) =>
+                setMemCfg((c) => ({
+                  ...c,
+                  daily_notes: { ...c.daily_notes, enabled: on },
+                }))
+              }
+            />
+          </div>
+
+          {/* Retention days */}
+          <div className="flex items-center justify-between rounded-md border px-3 py-2">
+            <div>
+              <div className="text-sm font-medium">笔记保留天数</div>
+              <div className="text-xs text-muted-foreground">
+                注入 prompt 的最近天数（1-30）
+              </div>
+            </div>
+            <Input
+              type="number"
+              min={1}
+              max={30}
+              className="w-20 text-right"
+              value={memCfg.daily_notes.retention_days}
+              onChange={(e) => {
+                const v = Math.max(1, Math.min(30, parseInt(e.target.value) || 3))
+                setMemCfg((c) => ({
+                  ...c,
+                  daily_notes: { ...c.daily_notes, retention_days: v },
+                }))
+              }}
+            />
+          </div>
+
+          {/* History search */}
+          <div className="flex items-center justify-between rounded-md border px-3 py-2">
+            <div>
+              <div className="text-sm font-medium">历史搜索</div>
+              <div className="text-xs text-muted-foreground">
+                agent 可搜索过去的对话记录
+              </div>
+            </div>
+            <Switch
+              checked={memCfg.history_search.enabled}
+              onCheckedChange={(on) =>
+                setMemCfg((c) => ({
+                  ...c,
+                  history_search: { ...c.history_search, enabled: on },
+                }))
+              }
+            />
+          </div>
+
+          {/* History search max results */}
+          <div className="flex items-center justify-between rounded-md border px-3 py-2">
+            <div>
+              <div className="text-sm font-medium">搜索结果数</div>
+              <div className="text-xs text-muted-foreground">
+                每次搜索返回的最大条目（1-20）
+              </div>
+            </div>
+            <Input
+              type="number"
+              min={1}
+              max={20}
+              className="w-20 text-right"
+              value={memCfg.history_search.max_results}
+              onChange={(e) => {
+                const v = Math.max(1, Math.min(20, parseInt(e.target.value) || 8))
+                setMemCfg((c) => ({
+                  ...c,
+                  history_search: { ...c.history_search, max_results: v },
+                }))
+              }}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Raw config.json ── */}
       <Card>
         <CardHeader>
           <CardTitle>原始 config.json</CardTitle>
@@ -353,4 +480,3 @@ export function V7ConfigPage() {
     </div>
   )
 }
-
