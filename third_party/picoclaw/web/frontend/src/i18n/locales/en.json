@@ -970,27 +970,5 @@
       "clear": "Clear logs",
       "empty": "Waiting for logs..."
     }
-  },
-  "tour": {
-    "skip": "Skip tour",
-    "prev": "Previous",
-    "next": "Next",
-    "finish": "Finish",
-    "welcome": {
-      "title": "Welcome to HomeSense",
-      "description": "Your AI home manager. Chat, control devices and get tasks done — let's take a few seconds to learn the basics."
-    },
-    "chat": {
-      "title": "Start a conversation",
-      "description": "Type what you need in the box below. HomeSense will plan and call its tools to get it done."
-    },
-    "config": {
-      "title": "Personalize your setup",
-      "description": "In \"Configuration\" you manage runtime parameters, toggle tools on/off, and connect your devices (MCP servers)."
-    },
-    "logs": {
-      "title": "Watch it work",
-      "description": "The \"Logs\" page shows the step-by-step record of every task — find what happened whenever something goes wrong."
-    }
   }
 }

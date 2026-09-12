@@ -970,27 +970,5 @@
       "clear": "清空日志",
       "empty": "等待日志中..."
     }
-  },
-  "tour": {
-    "skip": "跳过引导",
-    "prev": "上一步",
-    "next": "下一步",
-    "finish": "完成",
-    "welcome": {
-      "title": "欢迎使用 HomeSense",
-      "description": "你的 AI 家庭管家，可以对话、操控设备并帮你完成任务。花几秒钟了解一下它的核心用法。"
-    },
-    "chat": {
-      "title": "开始对话",
-      "description": "在下方输入框描述你的需求，HomeSense 会规划并调用工具来帮你完成。"
-    },
-    "config": {
-      "title": "个性化配置",
-      "description": "在「配置」里管理运行参数、开启或关闭工具，以及连接你的设备（MCP 服务器）。"
-    },
-    "logs": {
-      "title": "查看运行情况",
-      "description": "在「日志」里查看每次任务的逐步执行记录，出问题时第一时间定位。"
-    }
   }
 }

@@ -956,27 +956,5 @@
       "clear": "Vymazat logy",
       "empty": "Čekám na logy..."
     }
-  },
-  "tour": {
-    "skip": "Přeskočit průvodce",
-    "prev": "Předchozí",
-    "next": "Další",
-    "finish": "Dokončit",
-    "welcome": {
-      "title": "Vítejte v PicoClaw",
-      "description": "PicoClaw je výkonná platforma pro AI asistenty. Pojďme si dát chvíli na dokončení základního nastavení."
-    },
-    "models": {
-      "title": "Nakonfigurujte modely",
-      "description": "Klikněte na nabídku \"Modely\" vlevo pro nastavení API klíčů pro AI providery. V chatu lze použít pouze nakonfigurované modely."
-    },
-    "gateway": {
-      "title": "Spusťte gateway",
-      "description": "Po nakonfigurování modelů klikněte na tlačítko \"Spustit gateway\" nahoře pro zahájení chatu s AI."
-    },
-    "docs": {
-      "title": "Zobrazit dokumentaci",
-      "description": "Potřebujete další pomoc? Klikněte na tlačítko dokumentace v pravém horním rohu pro zobrazení podrobných průvodců a dokumentace ke konfiguraci."
-    }
   }
 }
