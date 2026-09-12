@@ -8,10 +8,6 @@ import {
   assistantDetailVisibilityStorage,
   shouldShowAssistantMessage,
 } from "@/features/chat/detail-visibility"
-import {
-  getInitialActiveSessionId,
-  writeStoredSessionId,
-} from "@/features/chat/state"
 
 export interface ChatAttachment {
   type: "image" | "audio" | "video" | "file"
@@ -79,7 +75,7 @@ const DEFAULT_CHAT_STATE: ChatStoreState = {
   messages: [],
   connectionState: "disconnected",
   isTyping: false,
-  activeSessionId: getInitialActiveSessionId(),
+  activeSessionId: "",
   hasHydratedActiveSession: false,
 }
 
@@ -108,13 +104,7 @@ export function updateChatStore(
 ) {
   store.set(chatAtom, (prev) => {
     const nextPatch = typeof patch === "function" ? patch(prev) : patch
-    const next = { ...prev, ...nextPatch }
-
-    if (next.activeSessionId !== prev.activeSessionId) {
-      writeStoredSessionId(next.activeSessionId)
-    }
-
-    return next
+    return { ...prev, ...nextPatch }
   })
 }
 

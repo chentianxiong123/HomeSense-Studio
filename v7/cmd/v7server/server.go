@@ -323,7 +323,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/models", s.handleModels)
 	mux.HandleFunc("/api/models/default", s.handleSetDefaultModel)
 	if s.bridge != nil {
-		mux.Handle("/pico/", s.bridge.ch)
+		mux.Handle("/pico/", fixedSessionHandler(s.bridge, s.bridge.ch))
 	}
 	if s.web != nil {
 		mux.Handle("/", s.web)

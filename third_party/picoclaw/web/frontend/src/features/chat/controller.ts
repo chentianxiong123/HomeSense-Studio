@@ -6,10 +6,6 @@ import {
 } from "@/features/chat/history"
 import { type PicoMessage, handlePicoMessage } from "@/features/chat/protocol"
 import { getSessions } from "@/api/sessions"
-import {
-  generateSessionId,
-  readStoredSessionId,
-} from "@/features/chat/state"
 import { invalidateSocket, isCurrentSocket } from "@/features/chat/websocket"
 import { getV6Token } from "@/api/v6-auth"
 import {
@@ -239,27 +235,11 @@ export function disconnectChat() {
   disconnectChatInternal({ clearDesiredConnection: true })
 }
 
-// Resolves the single conversation session for a user:
-// 1. Most recent session from the server (long conversation resume).
-// 2. Fallback to a locally stored session id.
-// 3. Otherwise generate a fresh id; the first message creates it server-side.
+// Resolves the single conversation session for a user. Because v7 pins one
+// user to one session server-side, there is at most one session to load.
 async function resolveActiveSessionId(): Promise<string> {
-  try {
-    const sessions = await getSessions(0, 1)
-    const latest = sessions[0]
-    if (latest?.id) {
-      return latest.id
-    }
-  } catch (error) {
-    console.warn("Failed to fetch latest session:", error)
-  }
-
-  const storedSessionId = readStoredSessionId()
-  if (storedSessionId) {
-    return storedSessionId
-  }
-
-  return generateSessionId()
+  const sessions = await getSessions(0, 1)
+  return sessions[0]?.id ?? ""
 }
 
 export async function hydrateActiveSession() {
