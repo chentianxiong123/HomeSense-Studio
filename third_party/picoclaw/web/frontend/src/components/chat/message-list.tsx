@@ -74,7 +74,7 @@ export const MessageList = memo(function MessageList({
         return (
           <div
             key={virtualRow.key}
-            className="absolute top-0 flex w-full"
+            className="absolute top-0 flex w-full pb-8"
             ref={virtualizer.measureElement}
             data-index={virtualRow.index}
             style={{
