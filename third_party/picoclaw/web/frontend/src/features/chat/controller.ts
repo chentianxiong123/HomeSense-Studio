@@ -1,19 +1,17 @@
 import { getDefaultStore } from "jotai"
-import { toast } from "sonner"
 
 import {
   loadSessionMessages,
   mergeHistoryMessages,
 } from "@/features/chat/history"
 import { type PicoMessage, handlePicoMessage } from "@/features/chat/protocol"
+import { getSessions } from "@/api/sessions"
 import {
-  clearStoredSessionId,
   generateSessionId,
   readStoredSessionId,
 } from "@/features/chat/state"
 import { invalidateSocket, isCurrentSocket } from "@/features/chat/websocket"
 import { getV6Token } from "@/api/v6-auth"
-import i18n from "@/i18n"
 import {
   type ChatAttachment,
   getChatState,
@@ -69,13 +67,8 @@ function scheduleReconnect(generation: number, sessionId: string) {
 
 function needsActiveSessionHydration(): boolean {
   const state = getChatState()
-  const storedSessionId = readStoredSessionId()
 
-  return Boolean(
-    storedSessionId &&
-    storedSessionId === state.activeSessionId &&
-    !state.hasHydratedActiveSession,
-  )
+  return Boolean(state.activeSessionId && !state.hasHydratedActiveSession)
 }
 
 function setActiveSessionId(sessionId: string) {
@@ -246,29 +239,48 @@ export function disconnectChat() {
   disconnectChatInternal({ clearDesiredConnection: true })
 }
 
+// Resolves the single conversation session for a user:
+// 1. Most recent session from the server (long conversation resume).
+// 2. Fallback to a locally stored session id.
+// 3. Otherwise generate a fresh id; the first message creates it server-side.
+async function resolveActiveSessionId(): Promise<string> {
+  try {
+    const sessions = await getSessions(0, 1)
+    const latest = sessions[0]
+    if (latest?.id) {
+      return latest.id
+    }
+  } catch (error) {
+    console.warn("Failed to fetch latest session:", error)
+  }
+
+  const storedSessionId = readStoredSessionId()
+  if (storedSessionId) {
+    return storedSessionId
+  }
+
+  return generateSessionId()
+}
+
 export async function hydrateActiveSession() {
   if (hydratePromise) {
     return hydratePromise
   }
 
   const state = getChatState()
-  const storedSessionId = readStoredSessionId()
+  const sessionId = state.activeSessionId
 
-  if (
-    !storedSessionId ||
-    state.hasHydratedActiveSession ||
-    storedSessionId !== state.activeSessionId
-  ) {
+  if (!sessionId || state.hasHydratedActiveSession) {
     if (!state.hasHydratedActiveSession) {
       updateChatStore({ hasHydratedActiveSession: true })
     }
     return
   }
 
-  hydratePromise = loadSessionMessages(storedSessionId)
+  hydratePromise = loadSessionMessages(sessionId)
     .then((historyMessages) => {
       const currentState = getChatState()
-      if (currentState.activeSessionId !== storedSessionId) {
+      if (currentState.activeSessionId !== sessionId) {
         return
       }
 
@@ -293,7 +305,7 @@ export async function hydrateActiveSession() {
       console.error("Failed to restore last session history:", error)
 
       const currentState = getChatState()
-      if (currentState.activeSessionId !== storedSessionId) {
+      if (currentState.activeSessionId !== sessionId) {
         return
       }
 
@@ -302,7 +314,6 @@ export async function hydrateActiveSession() {
         return
       }
 
-      clearStoredSessionId()
       updateChatStore({
         messages: [],
         isTyping: false,
@@ -381,54 +392,7 @@ export function sendChatMessage({
   }
 }
 
-export async function switchChatSession(sessionId: string) {
-  if (sessionId === activeSessionIdRef) {
-    return
-  }
-
-  try {
-    const historyMessages = await loadSessionMessages(sessionId)
-
-    disconnectChatInternal({ clearDesiredConnection: false })
-    setActiveSessionId(sessionId)
-    updateChatStore({
-      messages: historyMessages,
-      isTyping: false,
-      hasHydratedActiveSession: true,
-      contextUsage: undefined,
-    })
-
-    if (store.get(gatewayAtom).status === "running") {
-      shouldMaintainConnection = true
-      await connectChat()
-    }
-  } catch (error) {
-    console.error("Failed to load session history:", error)
-    toast.error(i18n.t("chat.historyOpenFailed"))
-  }
-}
-
-export async function newChatSession() {
-  if (getChatState().messages.length === 0) {
-    return
-  }
-
-  disconnectChatInternal({ clearDesiredConnection: false })
-  setActiveSessionId(generateSessionId())
-  updateChatStore({
-    messages: [],
-    isTyping: false,
-    hasHydratedActiveSession: true,
-    contextUsage: undefined,
-  })
-
-  if (store.get(gatewayAtom).status === "running") {
-    shouldMaintainConnection = true
-    await connectChat()
-  }
-}
-
-export function initializeChatStore() {
+export async function initializeChatStore() {
   if (initialized) {
     return
   }
@@ -460,18 +424,20 @@ export function initializeChatStore() {
 
   unsubscribeGateway = store.sub(gatewayAtom, syncConnectionWithGateway)
 
-  if (!readStoredSessionId()) {
-    updateChatStore({ hasHydratedActiveSession: true })
-    syncConnectionWithGateway(true)
-    return
-  }
+  void (async () => {
+    const sessionId = await resolveActiveSessionId()
+    if (!initialized) {
+      return
+    }
+    activeSessionIdRef = sessionId
+    setActiveSessionId(sessionId)
 
-  void hydrateActiveSession().finally(() => {
+    await hydrateActiveSession()
     if (!initialized) {
       return
     }
     syncConnectionWithGateway(true)
-  })
+  })()
 }
 
 export function teardownChatStore() {

@@ -61,7 +61,6 @@
       "websocketError": "Unable to chat: WebSocket connection failed. Check network and gateway status, then retry.",
       "noDefaultModel": "Unable to chat: No default model is selected. Set a default model on the Models page."
     },
-    "newChat": "New Chat",
     "notConnected": "Gateway is not running. Start it to chat.",
     "thinking": {
       "step1": "Thinking...",
@@ -90,13 +89,6 @@
     "disableCodeWrap": "Disable wrap",
     "expandCode": "Expand code",
     "collapseCode": "Collapse code",
-    "history": "History",
-    "noHistory": "No chat history yet",
-    "historyLoadFailed": "Failed to load chat history",
-    "historyOpenFailed": "Failed to open this chat history",
-    "loadingMore": "Loading more...",
-    "deleteSession": "Delete session",
-    "messagesCount": "{{count}} messages",
     "noModel": "Select model",
     "inputDisabled": {
       "notConnected": "Gateway is not running. Start it to chat.",

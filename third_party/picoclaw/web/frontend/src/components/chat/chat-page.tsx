@@ -1,4 +1,3 @@
-import { IconPlus } from "@tabler/icons-react"
 import { useAtom } from "jotai"
 import {
   type ChangeEvent,
@@ -17,10 +16,8 @@ import {
 import { ChatEmptyState } from "@/components/chat/chat-empty-state"
 import { MessageList } from "@/components/chat/message-list"
 import { ModelSelector } from "@/components/chat/model-selector"
-import { SessionHistoryMenu } from "@/components/chat/session-history-menu"
 import { TypingIndicator } from "@/components/chat/typing-indicator"
 import { PageHeader } from "@/components/page-header"
-import { Button } from "@/components/ui/button"
 import {
   Select,
   SelectContent,
@@ -37,7 +34,6 @@ import {
 import { useChatModels } from "@/hooks/use-chat-models"
 import { useGateway } from "@/hooks/use-gateway"
 import { usePicoChat } from "@/hooks/use-pico-chat"
-import { useSessionHistory } from "@/hooks/use-session-history"
 import type { AssistantDetailVisibility } from "@/store/chat"
 import type { ConnectionState } from "@/store/chat"
 import type { ChatAttachment } from "@/store/chat"
@@ -126,11 +122,8 @@ export function ChatPage() {
     messages,
     connectionState,
     isTyping,
-    activeSessionId,
     contextUsage,
     sendMessage,
-    switchSession,
-    newChat,
   } = usePicoChat()
 
   const { state: gwState } = useGateway()
@@ -152,19 +145,6 @@ export function ChatPage() {
     gatewayState: gwState,
   })
   const canInput = inputDisabledReason === null
-
-  const {
-    sessions,
-    hasMore,
-    loadError,
-    loadErrorMessage,
-    observerRef,
-    loadSessions,
-    handleDeleteSession,
-  } = useSessionHistory({
-    activeSessionId,
-    onDeletedActiveSession: newChat,
-  })
 
   const syncScrollState = useCallback((element: HTMLDivElement) => {
     const { clientHeight, scrollHeight, scrollTop } = element
@@ -362,32 +342,6 @@ export function ChatPage() {
             </SelectContent>
           </Select>
         </div>
-
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={newChat}
-          className="h-9 gap-2"
-        >
-          <IconPlus className="size-4" />
-          <span className="hidden sm:inline">{t("chat.newChat")}</span>
-        </Button>
-
-        <SessionHistoryMenu
-          sessions={sessions}
-          activeSessionId={activeSessionId}
-          hasMore={hasMore}
-          loadError={loadError}
-          loadErrorMessage={loadErrorMessage}
-          observerRef={observerRef}
-          onOpenChange={(open) => {
-            if (open) {
-              void loadSessions(true)
-            }
-          }}
-          onSwitchSession={switchSession}
-          onDeleteSession={handleDeleteSession}
-        />
       </PageHeader>
 
       <div

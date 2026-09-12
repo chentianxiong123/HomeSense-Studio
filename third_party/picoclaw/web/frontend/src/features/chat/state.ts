@@ -51,7 +51,7 @@ export function generateSessionId(): string {
 }
 
 export function getInitialActiveSessionId(): string {
-  return readStorageValue() || generateSessionId()
+  return readStorageValue()
 }
 
 export function normalizeUnixTimestamp(timestamp: number): number {

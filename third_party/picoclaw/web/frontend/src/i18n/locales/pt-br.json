@@ -51,7 +51,6 @@
       "websocketError": "Não é possível conversar: a conexão WebSocket falhou. Verifique a rede e o status do gateway e tente novamente.",
       "noDefaultModel": "Não é possível conversar: nenhum modelo padrão está selecionado. Defina um modelo padrão na página de Modelos."
     },
-    "newChat": "Novo Chat",
     "notConnected": "O Gateway não está rodando. Inicie-o para conversar.",
     "thinking": {
       "step1": "Pensando...",
@@ -80,13 +79,6 @@
     "disableCodeWrap": "Desativar quebra",
     "expandCode": "Expandir código",
     "collapseCode": "Recolher código",
-    "history": "Histórico",
-    "noHistory": "Nenhum histórico de chat ainda",
-    "historyLoadFailed": "Falha ao carregar histórico de chat",
-    "historyOpenFailed": "Falha ao abrir este histórico de chat",
-    "loadingMore": "Carregando mais...",
-    "deleteSession": "Excluir sessão",
-    "messagesCount": "{{count}} mensagens",
     "noModel": "Selecionar modelo",
     "inputDisabled": {
       "notConnected": "O Gateway não está rodando. Inicie-o para conversar.",
