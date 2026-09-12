@@ -251,6 +251,26 @@ func (s *Server) ensureUserAgent(userID string) (*agent.AgentInstance, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		// Register history_search tool for conversation recall.
+		var histTool *historySearchTool
+		if ht, herr := newHistorySearchTool(u.Workspace); herr == nil {
+			inst.Tools.Register(ht)
+			histTool = ht
+		}
+
+		// Register knowledge base tool.
+		var kStore *KnowledgeStore
+		if ks, kerr := NewKnowledgeStore(u.Workspace); kerr == nil {
+			inst.Tools.Register(newKnowledgeTool(ks))
+			kStore = ks
+		}
+
+		// Register multi-source recall (fusion search) tool.
+		if kStore != nil {
+			inst.Tools.Register(newFusionSearchTool(kStore, histTool))
+		}
+
 		log.Printf("lazily materialized agent %s", userID)
 		return inst, nil
 	})
