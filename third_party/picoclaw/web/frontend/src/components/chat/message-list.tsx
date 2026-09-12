@@ -31,12 +31,16 @@ export const MessageList = memo(function MessageList({
   const isAtBottomRef = useRef(isAtBottom)
   isAtBottomRef.current = isAtBottom
 
+  const visibleMessages = messages.filter((msg) =>
+    shouldShowAssistantMessage(assistantDetailVisibility, msg.kind),
+  )
+
   const virtualizer = useVirtualizer({
-    count: messages.length,
+    count: visibleMessages.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => DEFAULT_ROW_HEIGHT,
     overscan: 12,
-    getItemKey: (index) => messages[index].id,
+    getItemKey: (index) => visibleMessages[index]?.id ?? index,
   })
 
   useEffect(() => {
@@ -52,7 +56,7 @@ export const MessageList = memo(function MessageList({
         element.scrollTop = element.scrollHeight
       })
     }
-  }, [messages.length, isAtBottom, scrollRef, virtualizer])
+  }, [visibleMessages.length, isAtBottom, scrollRef, virtualizer])
 
   return (
     <div
@@ -62,11 +66,8 @@ export const MessageList = memo(function MessageList({
       }}
     >
       {virtualizer.getVirtualItems().map((virtualRow) => {
-        const msg = messages[virtualRow.index]
-        if (
-          !msg ||
-          !shouldShowAssistantMessage(assistantDetailVisibility, msg.kind)
-        ) {
+        const msg = visibleMessages[virtualRow.index]
+        if (!msg) {
           return null
         }
 
