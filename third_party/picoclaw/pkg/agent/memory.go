@@ -7,6 +7,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,28 +17,81 @@ import (
 	"github.com/sipeed/picoclaw/pkg/fileutil"
 )
 
+// memoryFileConfig is the JSON shape stored in <workspace>/memory.json.
+type memoryFileConfig struct {
+	Memory struct {
+		Enabled       bool `json:"enabled"`
+		DailyNotes    struct {
+			Enabled       bool `json:"enabled"`
+			RetentionDays int  `json:"retention_days"`
+		} `json:"daily_notes"`
+		HistorySearch struct {
+			Enabled    bool `json:"enabled"`
+			MaxResults int  `json:"max_results"`
+		} `json:"history_search"`
+	} `json:"memory"`
+}
+
 // MemoryStore manages persistent memory for the agent.
 // - Long-term memory: memory/MEMORY.md
 // - Daily notes: memory/YYYYMM/YYYYMMDD.md
 type MemoryStore struct {
-	workspace  string
-	memoryDir  string
-	memoryFile string
+	workspace          string
+	memoryDir          string
+	memoryFile         string
+	dailyRetentionDays int
+	enabled            bool
+	dailyNotesEnabled  bool
 }
 
 // NewMemoryStore creates a new MemoryStore with the given workspace path.
-// It ensures the memory directory exists.
+// It ensures the memory directory exists. Reads memory.json for config.
 func NewMemoryStore(workspace string) *MemoryStore {
+	return NewMemoryStoreWithOptions(workspace, 3)
+}
+
+// NewMemoryStoreWithOptions creates a MemoryStore with custom daily retention.
+func NewMemoryStoreWithOptions(workspace string, dailyRetentionDays int) *MemoryStore {
+	if dailyRetentionDays <= 0 {
+		dailyRetentionDays = 3
+	}
 	memoryDir := filepath.Join(workspace, "memory")
 	memoryFile := filepath.Join(memoryDir, "MEMORY.md")
 
 	// Ensure memory directory exists
 	os.MkdirAll(memoryDir, 0o755)
 
-	return &MemoryStore{
-		workspace:  workspace,
-		memoryDir:  memoryDir,
-		memoryFile: memoryFile,
+	ms := &MemoryStore{
+		workspace:          workspace,
+		memoryDir:          memoryDir,
+		memoryFile:         memoryFile,
+		dailyRetentionDays: dailyRetentionDays,
+		enabled:            true,
+		dailyNotesEnabled:  true,
+	}
+
+	// Try to read memory.json for overrides
+	ms.loadConfig()
+
+	return ms
+}
+
+// loadConfig reads memory.json from the workspace root (if it exists)
+// and overrides the default settings.
+func (ms *MemoryStore) loadConfig() {
+	cfgPath := filepath.Join(ms.workspace, "memory.json")
+	data, err := os.ReadFile(cfgPath)
+	if err != nil || len(data) == 0 {
+		return
+	}
+	var fc memoryFileConfig
+	if err := json.Unmarshal(data, &fc); err != nil {
+		return
+	}
+	ms.enabled = fc.Memory.Enabled
+	ms.dailyNotesEnabled = fc.Memory.DailyNotes.Enabled
+	if fc.Memory.DailyNotes.RetentionDays > 0 {
+		ms.dailyRetentionDays = fc.Memory.DailyNotes.RetentionDays
 	}
 }
 
@@ -131,9 +185,18 @@ func (ms *MemoryStore) GetRecentDailyNotes(days int) string {
 
 // GetMemoryContext returns formatted memory context for the agent prompt.
 // Includes long-term memory and recent daily notes.
+// Returns empty if memory is disabled via config.
 func (ms *MemoryStore) GetMemoryContext() string {
+	if !ms.enabled {
+		return ""
+	}
+
 	longTerm := ms.ReadLongTerm()
-	recentNotes := ms.GetRecentDailyNotes(3)
+
+	var recentNotes string
+	if ms.dailyNotesEnabled {
+		recentNotes = ms.GetRecentDailyNotes(ms.dailyRetentionDays)
+	}
 
 	if longTerm == "" && recentNotes == "" {
 		return ""
