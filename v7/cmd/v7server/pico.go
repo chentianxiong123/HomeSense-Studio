@@ -272,13 +272,64 @@ func (b *picoBridge) handleInbound(ctx context.Context, userID, sessionID string
 	lock.Lock()
 	defer lock.Unlock()
 
-	if _, err := b.srv.ensureUserAgent(userID); err != nil {
+	inst, err := b.srv.ensureUserAgent(userID)
+	if err != nil {
 		return fmt.Errorf("agent unavailable for %s: %w", userID, err)
 	}
 
 	chatID := "pico:" + sessionID
 	if _, err := b.srv.loop.ProcessToAgent(ctx, userID, content, sessionID, "pico", chatID); err != nil {
 		return err
+	}
+
+	// Check if profile generation should trigger.
+	profilePath := filepath.Join(inst.Workspace, "memory", ".profile_counter")
+	_ = b.checkAndTriggerProfile(userID, profilePath)
+
+	return nil
+}
+
+// checkAndTriggerProfile increments turn counter and injects profile generation
+// prompt when threshold is reached.
+func (b *picoBridge) checkAndTriggerProfile(userID, counterFile string) error {
+	// Read current count
+	count := 0
+	if data, err := os.ReadFile(counterFile); err == nil {
+		fmt.Sscanf(string(data), "%d", &count)
+	}
+	count++
+
+	// Default threshold: 20 turns
+	threshold := 20
+	if count >= threshold {
+		count = 0
+		os.WriteFile(counterFile, []byte("0"), 0o644)
+		// Inject profile generation instruction as a system message.
+		// The agent will see this and generate a profile.
+		go func() {
+			profileInstruction := `【系统指令】你刚刚完成了 20 轮对话。请立即：
+1. 回顾本次对话中的所有内容
+2. 总结用户的需求、偏好、习惯、关注点
+3. 将总结写入 memory/MEMORY_PROFILE.md（使用 write_file 工具）
+4. 继续正常回复用户
+
+画像格式：
+# 近期记忆画像
+生成时间：当前时间
+对话轮数：20 轮
+
+## 用户画像
+- 需求：
+- 偏好：
+- 习惯：
+- 关注点：
+
+## 近期要点
+- ...`
+			b.srv.loop.ProcessToAgent(context.Background(), userID, profileInstruction, "user:"+userID, "system", "system:profile")
+		}()
+	} else {
+		os.WriteFile(counterFile, []byte(fmt.Sprintf("%d", count)), 0o644)
 	}
 	return nil
 }

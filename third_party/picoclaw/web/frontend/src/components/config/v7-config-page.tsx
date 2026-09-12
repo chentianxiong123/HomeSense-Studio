@@ -19,6 +19,15 @@ import {
   DEFAULT_MEMORY_CONFIG,
 } from "@/api/memory-config"
 import {
+  listMemoryNotes,
+  readMemoryFile,
+  type DailyNote,
+} from "@/api/memory-notes"
+import {
+  readAgentFile,
+  writeAgentFile,
+} from "@/api/agent-file"
+import {
   getUserConfig,
   getCurrentUserId,
   saveUserConfigFor,
@@ -35,6 +44,7 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 
@@ -148,7 +158,14 @@ export function V7ConfigPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
   const [drafts, setDrafts] = useState<MCPServerDraft[]>([])
-
+  const [notes, setNotes] = useState<DailyNote[]>([])
+  const [memoryMd, setMemoryMd] = useState("")
+  const [selectedNote, setSelectedNote] = useState<DailyNote | null>(null)
+  const [notesLoading, setNotesLoading] = useState(false)
+  const [agentMd, setAgentMd] = useState("")
+  const [agentMdDirty, setAgentMdDirty] = useState(false)
+  const [memoryProfile, setMemoryProfile] = useState("")
+  const [profileLoading, setProfileLoading] = useState(false)
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -174,6 +191,34 @@ export function V7ConfigPage() {
     }
   }, [])
 
+  // Load memory notes, MEMORY.md, AGENT.md, and memory profile on mount.
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      setNotesLoading(true)
+      setProfileLoading(true)
+      try {
+        const [notesRes, memFile, agentFile, profileFile] = await Promise.all([
+          listMemoryNotes().catch(() => ({ notes: [], total: 0 })),
+          readMemoryFile("MEMORY.md").catch(() => ({ content: "" })),
+          readAgentFile("AGENT.md").catch(() => ({ content: "", exists: false })),
+          readMemoryFile("MEMORY_PROFILE.md").catch(() => ({ content: "" })),
+        ])
+        if (!alive) return
+        setNotes(notesRes.notes || [])
+        setMemoryMd(memFile.content || "")
+        setAgentMd(agentFile.content || "")
+        setMemoryProfile(profileFile.content || "")
+      } finally {
+        if (alive) {
+          setNotesLoading(false)
+          setProfileLoading(false)
+        }
+      }
+    })()
+    return () => { alive = false }
+  }, [])
+
   const save = useCallback(async () => {
     if (!cfg) return
     setSaving(true)
@@ -183,15 +228,17 @@ export function V7ConfigPage() {
       await Promise.all([
         saveUserConfigFor(userId, next),
         saveMemoryConfig(memCfg),
+        agentMdDirty ? writeAgentFile("AGENT.md", agentMd) : Promise.resolve(),
       ])
       setCfg(next)
+      setAgentMdDirty(false)
       toast.success(t("pages.config.saved"))
     } catch (e) {
       toast.error(String(e))
     } finally {
       setSaving(false)
     }
-  }, [cfg, userId, drafts, memCfg, t])
+  }, [cfg, userId, drafts, memCfg, agentMd, agentMdDirty, t])
 
   if (loading) {
     return (
@@ -364,7 +411,7 @@ export function V7ConfigPage() {
             <div>
               <div className="text-sm font-medium">每日笔记</div>
               <div className="text-xs text-muted-foreground">
-                每天自动记录，最近 N 天注入上下文
+                每天自动记录，永久保存
               </div>
             </div>
             <Switch
@@ -377,97 +424,103 @@ export function V7ConfigPage() {
               }
             />
           </div>
-
-          {/* Retention days */}
-          <div className="flex items-center justify-between rounded-md border px-3 py-2">
-            <div>
-              <div className="text-sm font-medium">笔记保留天数</div>
-              <div className="text-xs text-muted-foreground">
-                注入 prompt 的最近天数（1-30）
-              </div>
-            </div>
-            <Input
-              type="number"
-              min={1}
-              max={30}
-              className="w-20 text-right"
-              value={memCfg.daily_notes.retention_days}
-              onChange={(e) => {
-                const v = Math.max(1, Math.min(30, parseInt(e.target.value) || 3))
-                setMemCfg((c) => ({
-                  ...c,
-                  daily_notes: { ...c.daily_notes, retention_days: v },
-                }))
-              }}
-            />
-          </div>
-
-          {/* History search */}
-          <div className="flex items-center justify-between rounded-md border px-3 py-2">
-            <div>
-              <div className="text-sm font-medium">历史搜索</div>
-              <div className="text-xs text-muted-foreground">
-                agent 可搜索过去的对话记录
-              </div>
-            </div>
-            <Switch
-              checked={memCfg.history_search.enabled}
-              onCheckedChange={(on) =>
-                setMemCfg((c) => ({
-                  ...c,
-                  history_search: { ...c.history_search, enabled: on },
-                }))
-              }
-            />
-          </div>
-
-          {/* History search max results */}
-          <div className="flex items-center justify-between rounded-md border px-3 py-2">
-            <div>
-              <div className="text-sm font-medium">搜索结果数</div>
-              <div className="text-xs text-muted-foreground">
-                每次搜索返回的最大条目（1-20）
-              </div>
-            </div>
-            <Input
-              type="number"
-              min={1}
-              max={20}
-              className="w-20 text-right"
-              value={memCfg.history_search.max_results}
-              onChange={(e) => {
-                const v = Math.max(1, Math.min(20, parseInt(e.target.value) || 8))
-                setMemCfg((c) => ({
-                  ...c,
-                  history_search: { ...c.history_search, max_results: v },
-                }))
-              }}
-            />
-          </div>
         </CardContent>
       </Card>
 
-      {/* ── Raw config.json ── */}
+      {/* ── Memory Content ── */}
       <Card>
         <CardHeader>
-          <CardTitle>原始 config.json</CardTitle>
+          <CardTitle>记忆内容</CardTitle>
           <CardDescription>
-            完整租户配置（高级）。未填写的字段沿用平台默认值。
+            agent 的规则、记忆、笔记和画像。
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <Textarea
-            rows={12}
-            className="font-mono text-xs"
-            value={JSON.stringify(cur, null, 2)}
-            onChange={(e) => {
-              try {
-                setCfg(JSON.parse(e.target.value))
-              } catch {
-                /* keep last valid while typing */
-              }
-            }}
-          />
+        <CardContent className="flex flex-col gap-4">
+          {/* AGENT.md editor */}
+          <div>
+            <div className="text-sm font-medium mb-2">AGENT.md（行为规则）</div>
+            <Textarea
+              rows={8}
+              className="font-mono text-xs"
+              placeholder={"# Agent 规则\n\n例如：\n- 你是我的家庭助手\n- 回复简洁\n- 不要执行危险命令"}
+              value={agentMd}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
+                setAgentMd(e.target.value)
+                setAgentMdDirty(true)
+              }}
+            />
+            {agentMdDirty && (
+              <div className="text-xs text-orange-500 mt-1">已修改，点击保存生效</div>
+            )}
+          </div>
+
+          {/* MEMORY.md read-only */}
+          <div>
+            <div className="text-sm font-medium mb-2">MEMORY.md（长期记忆）</div>
+            <ScrollArea className="h-32 rounded-md border p-3">
+              <pre className="text-xs whitespace-pre-wrap font-mono">
+                {memoryMd || "（暂无内容）"}
+              </pre>
+            </ScrollArea>
+          </div>
+
+          {/* Memory profile read-only */}
+          <div>
+            <div className="text-sm font-medium mb-2">记忆画像</div>
+            {profileLoading ? (
+              <div className="text-xs text-muted-foreground">加载中…</div>
+            ) : memoryProfile ? (
+              <ScrollArea className="h-32 rounded-md border p-3">
+                <pre className="text-xs whitespace-pre-wrap font-mono">
+                  {memoryProfile}
+                </pre>
+              </ScrollArea>
+            ) : (
+              <div className="text-xs text-muted-foreground">暂无画像</div>
+            )}
+          </div>
+
+          {/* Daily notes list */}
+          <div>
+            <div className="text-sm font-medium mb-2">
+              每日笔记 {notes.length > 0 && `(${notes.length} 篇)`}
+            </div>
+            {notesLoading ? (
+              <div className="text-xs text-muted-foreground">加载中…</div>
+            ) : notes.length === 0 ? (
+              <div className="text-xs text-muted-foreground">暂无笔记</div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {notes.map((n) => (
+                  <div
+                    key={n.date}
+                    className="rounded-md border px-3 py-2 cursor-pointer hover:bg-accent transition-colors"
+                    onClick={() =>
+                      setSelectedNote(selectedNote?.date === n.date ? null : n)
+                    }
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-mono">{n.date}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {(n.size / 1024).toFixed(1)} KB
+                      </span>
+                    </div>
+                    {selectedNote?.date === n.date ? (
+                      <ScrollArea className="mt-2 h-40">
+                        <pre className="text-xs whitespace-pre-wrap font-mono">
+                          {n.content}
+                        </pre>
+                      </ScrollArea>
+                    ) : (
+                      <div className="text-xs text-muted-foreground mt-1 truncate">
+                        {n.content.slice(0, 100)}…
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
 
