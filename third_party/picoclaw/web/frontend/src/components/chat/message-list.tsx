@@ -22,6 +22,8 @@ interface MessageListProps {
 
 const DEFAULT_ROW_HEIGHT = 72
 
+const VIRTUALIZE_THRESHOLD = 200
+
 export const MessageList = memo(function MessageList({
   messages,
   assistantDetailVisibility,
@@ -35,8 +37,11 @@ export const MessageList = memo(function MessageList({
     shouldShowAssistantMessage(assistantDetailVisibility, msg.kind),
   )
 
+  const shouldVirtualize = visibleMessages.length >= VIRTUALIZE_THRESHOLD
+
   const virtualizer = useVirtualizer({
     count: visibleMessages.length,
+    enabled: shouldVirtualize,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => DEFAULT_ROW_HEIGHT,
     overscan: 12,
@@ -49,14 +54,42 @@ export const MessageList = memo(function MessageList({
       return
     }
 
-    virtualizer.measure()
-
     if (isAtBottomRef.current) {
       requestAnimationFrame(() => {
         element.scrollTop = element.scrollHeight
       })
     }
-  }, [visibleMessages.length, isAtBottom, scrollRef, virtualizer])
+  }, [visibleMessages.length, isAtBottom, scrollRef])
+
+  const renderMessage = (msg: ChatMessage) =>
+    msg.role === "assistant" ? (
+      <AssistantMessage
+        content={msg.content}
+        attachments={msg.attachments}
+        kind={msg.kind}
+        modelName={msg.modelName}
+        toolCalls={msg.toolCalls}
+        timestamp={msg.timestamp}
+      />
+    ) : (
+      <UserMessage
+        content={msg.content}
+        attachments={msg.attachments}
+        timestamp={msg.timestamp}
+      />
+    )
+
+  if (!shouldVirtualize) {
+    return (
+      <div className="flex w-full flex-col gap-8 pb-8">
+        {visibleMessages.map((msg) => (
+          <div key={msg.id} className="flex w-full">
+            {renderMessage(msg)}
+          </div>
+        ))}
+      </div>
+    )
+  }
 
   return (
     <div
@@ -81,22 +114,7 @@ export const MessageList = memo(function MessageList({
               transform: `translateY(${virtualRow.start}px)`,
             }}
           >
-            {msg.role === "assistant" ? (
-              <AssistantMessage
-                content={msg.content}
-                attachments={msg.attachments}
-                kind={msg.kind}
-                modelName={msg.modelName}
-                toolCalls={msg.toolCalls}
-                timestamp={msg.timestamp}
-              />
-            ) : (
-              <UserMessage
-                content={msg.content}
-                attachments={msg.attachments}
-                timestamp={msg.timestamp}
-              />
-            )}
+            {renderMessage(msg)}
           </div>
         )
       })}
