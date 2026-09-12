@@ -2,7 +2,6 @@ import {
   IconBook,
   IconChevronDown,
   IconChevronUp,
-  IconLanguage,
   IconLoader2,
   IconLogout,
   IconMenu2,
@@ -28,12 +27,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog.tsx"
 import { Button } from "@/components/ui/button.tsx"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu.tsx"
 import { Separator } from "@/components/ui/separator.tsx"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import {
@@ -51,7 +44,7 @@ export function AppHeader({
   expanded: boolean
   onToggle: () => void
 }) {
-  const { i18n, t } = useTranslation()
+  const { t } = useTranslation()
   const { theme, toggleTheme } = useTheme()
   const {
     state: gwState,
@@ -307,32 +300,6 @@ export function AppHeader({
             <IconBook className="size-4.5" />
           </a>
         </Button>
-
-        {/* Language Switcher */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="size-8">
-              <IconLanguage className="size-4.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => i18n.changeLanguage("en")}>
-              English
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => i18n.changeLanguage("pt-BR")}>
-              Português (Brasil)
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => i18n.changeLanguage("bn-IN")}>
-              বাংলা
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => i18n.changeLanguage("zh")}>
-              简体中文
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => i18n.changeLanguage("cs")}>
-              Čeština
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
 
         {/* Theme Toggle */}
         <Button
