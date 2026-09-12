@@ -1,11 +1,7 @@
 import dayjs from "dayjs"
 import { useAtomValue } from "jotai"
 
-import {
-  newChatSession,
-  sendChatMessage,
-  switchChatSession,
-} from "@/features/chat/controller"
+import { sendChatMessage } from "@/features/chat/controller"
 import { chatAtom } from "@/store/chat"
 
 const UNIX_MS_THRESHOLD = 1e12
@@ -65,7 +61,5 @@ export function usePicoChat() {
     activeSessionId,
     contextUsage,
     sendMessage: sendChatMessage,
-    switchSession: switchChatSession,
-    newChat: newChatSession,
   }
 }
