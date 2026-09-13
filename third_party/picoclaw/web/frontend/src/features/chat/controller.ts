@@ -28,6 +28,7 @@ let connectionGeneration = 0
 let reconnectTimer: number | null = null
 let reconnectAttempts = 0
 let shouldMaintainConnection = false
+let lastInitToken = ""
 
 function clearReconnectTimer() {
   if (reconnectTimer !== null) {
@@ -63,6 +64,13 @@ function scheduleReconnect(generation: number, sessionId: string) {
 
 function needsActiveSessionHydration(): boolean {
   const state = getChatState()
+
+  // No session resolved yet — must wait for resolveActiveSessionId() to run.
+  // This prevents connectChat from creating a WebSocket with an empty session_id
+  // when gateway polling completes before the session is fetched.
+  if (!state.activeSessionId) {
+    return true
+  }
 
   return Boolean(state.activeSessionId && !state.hasHydratedActiveSession)
 }
@@ -374,10 +382,19 @@ export function sendChatMessage({
 
 export async function initializeChatStore() {
   if (initialized) {
-    return
+    // Re-init if the auth token changed (login/logout).
+    const currentToken = getV6Token()
+    if (!currentToken || currentToken === lastInitToken) {
+      return
+    }
+    // Token changed: drop the old subscription and socket before re-init.
+    unsubscribeGateway?.()
+    unsubscribeGateway = null
+    disconnectChatInternal({ clearDesiredConnection: true })
+    lastInitToken = currentToken
   }
-
   initialized = true
+  lastInitToken = getV6Token()
   activeSessionIdRef = getChatState().activeSessionId
   let lastGatewayStatus: GatewayState | null = null
 
@@ -405,14 +422,20 @@ export async function initializeChatStore() {
   unsubscribeGateway = store.sub(gatewayAtom, syncConnectionWithGateway)
 
   void (async () => {
-    const sessionId = await resolveActiveSessionId()
-    if (!initialized) {
-      return
+    // Session restore must never break the connection: any failure here
+    // (401, timeout, network error) must still fall through to connect.
+    try {
+      const sessionId = await resolveActiveSessionId()
+      if (!initialized) {
+        return
+      }
+      activeSessionIdRef = sessionId
+      setActiveSessionId(sessionId)
+      await hydrateActiveSession()
+    } catch (error) {
+      console.error("Failed to restore session:", error)
+      updateChatStore({ hasHydratedActiveSession: true })
     }
-    activeSessionIdRef = sessionId
-    setActiveSessionId(sessionId)
-
-    await hydrateActiveSession()
     if (!initialized) {
       return
     }
