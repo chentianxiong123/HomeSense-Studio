@@ -170,7 +170,7 @@ export function V7ConfigPage() {
   const [agentMdDirty, setAgentMdDirty] = useState(false)
   const [memoryProfile, setMemoryProfile] = useState("")
   const [profileLoading, setProfileLoading] = useState(false)
-  const isAdmin = getV6Role() === 100
+  const isAdmin = getV6Role() >= 100
   useEffect(() => {
     let alive = true
     ;(async () => {
