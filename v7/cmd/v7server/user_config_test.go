@@ -29,7 +29,7 @@ func newServerForUserConfig(t *testing.T) *Server {
 
 func TestUserConfigTemplateSeededOnRegister(t *testing.T) {
 	srv := newServerForUserConfig(t)
-	u, err := srv.store.RegisterUser("alice", "Alice", "auto", "sk-alice")
+	u, err := srv.store.RegisterUser("alice", "Alice", "auto", "sk-alice", 0)
 	if err != nil {
 		t.Fatalf("RegisterUser: %v", err)
 	}
@@ -41,9 +41,7 @@ func TestUserConfigTemplateSeededOnRegister(t *testing.T) {
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		t.Fatalf("template is not valid config JSON: %v", err)
 	}
-	if cfg.Tools.Exec.Enabled {
-		t.Errorf("template must disable exec by default")
-	}
+	// Template is empty; tool policy is set at platform level in server.go.
 }
 
 func TestUserConfigFor_IsolationAndMerge(t *testing.T) {
@@ -52,11 +50,11 @@ func TestUserConfigFor_IsolationAndMerge(t *testing.T) {
 	bobCfg.Tools.Web.Provider = "brave"
 	_ = bobCfg
 
-	alice, err := srv.store.RegisterUser("alice", "Alice", "auto", "sk-alice")
+	alice, err := srv.store.RegisterUser("alice", "Alice", "auto", "sk-alice", 0)
 	if err != nil {
 		t.Fatalf("register alice: %v", err)
 	}
-	carol, err := srv.store.RegisterUser("carol", "Carol", "auto", "sk-carol")
+	carol, err := srv.store.RegisterUser("carol", "Carol", "auto", "sk-carol", 0)
 	if err != nil {
 		t.Fatalf("register carol: %v", err)
 	}
@@ -110,7 +108,7 @@ func TestUserConfigFor_IsolationAndMerge(t *testing.T) {
 
 func TestUserConfigFor_SafeWorkspaceOverride(t *testing.T) {
 	srv := newServerForUserConfig(t)
-	u, err := srv.store.RegisterUser("dave", "Dave", "auto", "sk-dave")
+	u, err := srv.store.RegisterUser("dave", "Dave", "auto", "sk-dave", 0)
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}

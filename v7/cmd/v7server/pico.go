@@ -519,7 +519,7 @@ func (h *authHandlers) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// gateway key so the chat still works.
 	apiKey := h.srv.cfg.GatewayKey
 	if _, err := h.srv.store.GetUser(userID); err != nil {
-		if _, rerr := h.srv.store.RegisterUser(userID, username, h.srv.cfg.Model, apiKey); rerr != nil {
+		if _, rerr := h.srv.store.RegisterUser(userID, username, h.srv.cfg.Model, apiKey, na.Data.Role); rerr != nil {
 			respondErr(w, http.StatusInternalServerError, "register v7 user: "+rerr.Error())
 			return
 		}
@@ -532,6 +532,7 @@ func (h *authHandlers) handleLogin(w http.ResponseWriter, r *http.Request) {
 		"token":    token,
 		"user_id":  userID,
 		"username": username,
+		"role":     na.Data.Role,
 		"model":    h.srv.cfg.Model,
 		"gateway":  "one-api",
 	})
@@ -598,7 +599,7 @@ func (h *authHandlers) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	userID := "u" + strconv.FormatInt(na.Data.Id, 10)
 	if _, err := h.srv.store.GetUser(userID); err != nil {
-		if _, rerr := h.srv.store.RegisterUser(userID, req.Username, h.srv.cfg.Model, key); rerr != nil {
+		if _, rerr := h.srv.store.RegisterUser(userID, req.Username, h.srv.cfg.Model, key, na.Data.Role); rerr != nil {
 			respondErr(w, http.StatusInternalServerError, "register v7 user: "+rerr.Error())
 			return
 		}
@@ -609,6 +610,7 @@ func (h *authHandlers) handleRegister(w http.ResponseWriter, r *http.Request) {
 		"token":    token,
 		"user_id":  userID,
 		"username": req.Username,
+		"role":     na.Data.Role,
 		"model":    h.srv.cfg.Model,
 		"gateway":  "one-api",
 	})
