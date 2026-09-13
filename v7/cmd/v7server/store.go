@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -24,7 +25,15 @@ type User struct {
 	Workspace string    `json:"workspace"`
 	Model     string    `json:"model,omitempty"`
 	Role      int       `json:"role"`
+	FamilyID  string    `json:"family_id,omitempty"`
 	APIKey    string    `json:"-"` // per-user new-api token (never serialized)
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Family represents a multi-user household sharing context.
+type Family struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -62,6 +71,8 @@ func NewStore(dataDir, corpusDir string) (*Store, error) {
 	}
 	// Migration: add role column to existing DBs.
 	db.Exec(`ALTER TABLE users ADD COLUMN role INTEGER NOT NULL DEFAULT 0`)
+	// Migration: add family_id column to existing DBs.
+	db.Exec(`ALTER TABLE users ADD COLUMN family_id TEXT NOT NULL DEFAULT ''`)
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS revoked_tokens (
 			jti        TEXT PRIMARY KEY,
@@ -71,6 +82,17 @@ func NewStore(dataDir, corpusDir string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("create revoked_tokens table: %w", err)
 	}
+	// Create families table.
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS families (
+			id         TEXT PRIMARY KEY,
+			name       TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMP NOT NULL
+		);
+	`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("create families table: %w", err)
+	}
 	return &Store{db: db, dataDir: dataDir, corpusDir: corpusDir}, nil
 }
 
@@ -79,7 +101,7 @@ func (s *Store) Close() error { return s.db.Close() }
 
 // RegisterUser creates a user row, its personal SQLite database, and its
 // workspace directory. No agent instance is created yet (lazy warm-up).
-func (s *Store) RegisterUser(id, name, model, apiKey string, role int) (User, error) {
+func (s *Store) RegisterUser(id, name, model, apiKey string, role int, familyID string) (User, error) {
 	if id == "" {
 		return User{}, errors.New("user id is required")
 	}
@@ -120,12 +142,13 @@ func (s *Store) RegisterUser(id, name, model, apiKey string, role int) (User, er
 		Workspace: wsDir,
 		Model:     model,
 		Role:      role,
+		FamilyID:  familyID,
 		APIKey:    apiKey,
 		CreatedAt: time.Now().UTC(),
 	}
 	_, err = s.db.Exec(
-		`INSERT INTO users (id, name, workspace, model, api_key, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		u.ID, u.Name, u.Workspace, u.Model, u.APIKey, u.Role, u.CreatedAt,
+		`INSERT INTO users (id, name, workspace, model, api_key, role, family_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		u.ID, u.Name, u.Workspace, u.Model, u.APIKey, u.Role, u.FamilyID, u.CreatedAt,
 	)
 	if err != nil {
 		return User{}, fmt.Errorf("insert user: %w", err)
@@ -136,9 +159,9 @@ func (s *Store) RegisterUser(id, name, model, apiKey string, role int) (User, er
 // GetUser returns a user row by ID.
 func (s *Store) GetUser(id string) (User, error) {
 	row := s.db.QueryRow(
-		`SELECT id, name, workspace, model, api_key, role, created_at FROM users WHERE id = ?`, id)
+		`SELECT id, name, workspace, model, api_key, role, family_id, created_at FROM users WHERE id = ?`, id)
 	var u User
-	if err := row.Scan(&u.ID, &u.Name, &u.Workspace, &u.Model, &u.APIKey, &u.Role, &u.CreatedAt); err != nil {
+	if err := row.Scan(&u.ID, &u.Name, &u.Workspace, &u.Model, &u.APIKey, &u.Role, &u.FamilyID, &u.CreatedAt); err != nil {
 		return User{}, err
 	}
 	return u, nil
@@ -147,7 +170,7 @@ func (s *Store) GetUser(id string) (User, error) {
 // ListUsers returns all registered users.
 func (s *Store) ListUsers() ([]User, error) {
 	rows, err := s.db.Query(
-		`SELECT id, name, workspace, model, api_key, role, created_at FROM users ORDER BY created_at`)
+		`SELECT id, name, workspace, model, api_key, role, family_id, created_at FROM users ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +178,7 @@ func (s *Store) ListUsers() ([]User, error) {
 	var users []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Name, &u.Workspace, &u.Model, &u.APIKey, &u.Role, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Name, &u.Workspace, &u.Model, &u.APIKey, &u.Role, &u.FamilyID, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		users = append(users, u)
@@ -242,4 +265,134 @@ func (s *Store) TokenRevoked(jti string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// ---------- Family helpers ----------
+
+// CreateFamily creates a new family. Returns error if family ID already exists.
+func (s *Store) CreateFamily(id, name string) (Family, error) {
+	if id == "" {
+		return Family{}, errors.New("family id is required")
+	}
+	f := Family{
+		ID:        id,
+		Name:      name,
+		CreatedAt: time.Now().UTC(),
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO families (id, name, created_at) VALUES (?, ?, ?)`,
+		f.ID, f.Name, f.CreatedAt,
+	)
+	if err != nil {
+		return Family{}, fmt.Errorf("create family: %w", err)
+	}
+	// Ensure family workspace directory exists
+	os.MkdirAll(filepath.Join(s.dataDir, "families", id), 0o755)
+	return f, nil
+}
+
+// GetFamily returns a family by ID.
+func (s *Store) GetFamily(id string) (Family, error) {
+	var f Family
+	err := s.db.QueryRow(
+		`SELECT id, name, created_at FROM families WHERE id = ?`, id).
+		Scan(&f.ID, &f.Name, &f.CreatedAt)
+	if err != nil {
+		return Family{}, err
+	}
+	return f, nil
+}
+
+// ListFamilies returns all families.
+func (s *Store) ListFamilies() ([]Family, error) {
+	rows, err := s.db.Query(`SELECT id, name, created_at FROM families ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var families []Family
+	for rows.Next() {
+		var f Family
+		if err := rows.Scan(&f.ID, &f.Name, &f.CreatedAt); err != nil {
+			return nil, err
+		}
+		families = append(families, f)
+	}
+	return families, rows.Err()
+}
+
+// SetUserFamily assigns a user to a family.
+func (s *Store) SetUserFamily(userID, familyID string) error {
+	// Ensure family workspace directory exists when assigning to a family
+	if familyID != "" {
+		os.MkdirAll(filepath.Join(s.dataDir, "families", familyID), 0o755)
+	}
+	res, err := s.db.Exec(`UPDATE users SET family_id = ? WHERE id = ?`, familyID, userID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); err == nil && n == 0 {
+		return fmt.Errorf("user %s not found", userID)
+	}
+	return err
+}
+
+// GetUserFamily returns the family a user belongs to (empty if none).
+func (s *Store) GetUserFamily(userID string) (Family, error) {
+	var f Family
+	err := s.db.QueryRow(`
+		SELECT f.id, f.name, f.created_at FROM families f
+		JOIN users u ON u.family_id = f.id WHERE u.id = ?`, userID).
+		Scan(&f.ID, &f.Name, &f.CreatedAt)
+	if err == sql.ErrNoRows {
+		return Family{}, nil
+	}
+	return f, err
+}
+
+// ListFamilyMembers returns all users in a family, ordered by created_at.
+func (s *Store) ListFamilyMembers(familyID string) ([]User, error) {
+	rows, err := s.db.Query(
+		`SELECT id, name, workspace, model, api_key, role, family_id, created_at FROM users WHERE family_id = ? ORDER BY created_at`,
+		familyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var users []User
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.ID, &u.Name, &u.Workspace, &u.Model, &u.APIKey, &u.Role, &u.FamilyID, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
+// FamilyContext builds a human-readable summary of a family for agent injection.
+func (s *Store) FamilyContext(familyID string) (string, error) {
+	f, err := s.GetFamily(familyID)
+	if err != nil {
+		return "", err
+	}
+	members, err := s.ListFamilyMembers(familyID)
+	if err != nil {
+		return "", err
+	}
+	if len(members) == 0 {
+		return "", nil
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("## Family: %s\n\n", f.Name))
+	sb.WriteString("### Members\n\n")
+	for _, m := range members {
+		switch {
+		case m.Role >= 100:
+			sb.WriteString(fmt.Sprintf("- **%s** (管理员)\n", m.Name))
+		default:
+			sb.WriteString(fmt.Sprintf("- %s\n", m.Name))
+		}
+	}
+	return sb.String(), nil
 }

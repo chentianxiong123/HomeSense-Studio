@@ -183,6 +183,9 @@ func NewAgentInstance(
 			mcpDiscoveryActive && cfg.Tools.MCP.Discovery.UseRegex,
 		).
 		WithSplitOnMarker(cfg.Agents.Defaults.SplitOnMarker)
+	if agentCfg != nil && agentCfg.FamilyWorkspace != "" {
+		contextBuilder = contextBuilder.WithFamilyWorkspace(expandHome(agentCfg.FamilyWorkspace))
+	}
 
 	agentID := routing.DefaultAgentID
 	agentName := ""

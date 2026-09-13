@@ -22,6 +22,7 @@ import (
 )
 
 type ContextBuilder struct {
+	familyWorkspace string
 	workspace      string
 	skillsLoader   *skills.SkillsLoader
 	memory         *MemoryStore
@@ -127,6 +128,17 @@ func (cb *ContextBuilder) RegisterPromptSource(desc PromptSourceDescriptor) erro
 		cb.InvalidateCache()
 	}
 	return err
+}
+
+// WithFamilyWorkspace sets the family workspace for shared memory access.
+func (cb *ContextBuilder) WithFamilyWorkspace(familyWorkspace string) *ContextBuilder {
+	if familyWorkspace == "" {
+		return cb
+	}
+	cb.familyWorkspace = familyWorkspace
+	cb.memory = NewMemoryStoreWithFamily(cb.workspace, familyWorkspace, 3)
+	cb.InvalidateCache()
+	return cb
 }
 
 func (cb *ContextBuilder) RegisterPromptContributor(contributor PromptContributor) error {
