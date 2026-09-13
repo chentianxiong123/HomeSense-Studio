@@ -37,6 +37,7 @@ type memoryFileConfig struct {
 // - Daily notes: memory/YYYYMM/YYYYMMDD.md
 // - Profile: memory/MEMORY_PROFILE.md (auto-generated recent summary)
 type MemoryStore struct {
+	familyWorkspace string
 	workspace          string
 	memoryDir          string
 	memoryFile         string
@@ -56,6 +57,10 @@ func NewMemoryStore(workspace string) *MemoryStore {
 
 // NewMemoryStoreWithOptions creates a MemoryStore with custom daily retention.
 func NewMemoryStoreWithOptions(workspace string, dailyRetentionDays int) *MemoryStore {
+	return NewMemoryStoreWithFamily(workspace, "", dailyRetentionDays)
+}
+
+func NewMemoryStoreWithFamily(workspace, familyWorkspace string, dailyRetentionDays int) *MemoryStore {
 	if dailyRetentionDays <= 0 {
 		dailyRetentionDays = 3
 	}
@@ -67,6 +72,7 @@ func NewMemoryStoreWithOptions(workspace string, dailyRetentionDays int) *Memory
 	os.MkdirAll(memoryDir, 0o755)
 
 	ms := &MemoryStore{
+		familyWorkspace:      familyWorkspace,
 		workspace:          workspace,
 		memoryDir:          memoryDir,
 		memoryFile:         memoryFile,
@@ -289,6 +295,15 @@ func (ms *MemoryStore) GetMemoryContext() string {
 		return ""
 	}
 
+	// Family memory (shared across all family members)
+	var familyMemory string
+	if ms.familyWorkspace != "" {
+		familyMemoryFile := filepath.Join(ms.familyWorkspace, "memory", "MEMORY.md")
+		if data, err := os.ReadFile(familyMemoryFile); err == nil {
+			familyMemory = string(data)
+		}
+	}
+
 	longTerm := ms.ReadLongTerm()
 
 	var recentNotes string
@@ -296,19 +311,27 @@ func (ms *MemoryStore) GetMemoryContext() string {
 		recentNotes = ms.GetAllDailyNotes()
 	}
 
-	if longTerm == "" && recentNotes == "" {
+	if longTerm == "" && recentNotes == "" && familyMemory == "" {
 		return ""
 	}
 
 	var sb strings.Builder
 
+	if familyMemory != "" {
+		sb.WriteString("## Family Memory\n\n")
+		sb.WriteString(familyMemory)
+	}
+
 	if longTerm != "" {
+		if familyMemory != "" {
+			sb.WriteString("\n\n---\n\n")
+		}
 		sb.WriteString("## Long-term Memory\n\n")
 		sb.WriteString(longTerm)
 	}
 
 	if recentNotes != "" {
-		if longTerm != "" {
+		if longTerm != "" || familyMemory != "" {
 			sb.WriteString("\n\n---\n\n")
 		}
 		sb.WriteString("## Recent Daily Notes\n\n")

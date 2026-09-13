@@ -17,6 +17,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -196,16 +197,23 @@ func buildRootProvider(cfg *config.Config) providers.LLMProvider {
 }
 
 // userAgentConfig maps a stored user row to a picoclaw AgentConfig.
-func userAgentConfig(u User) *config.AgentConfig {
+func userAgentConfig(u User, dataDir string) *config.AgentConfig {
 	ac := &config.AgentConfig{
-		ID:        u.ID,
-		Name:      u.Name,
-		Workspace: u.Workspace,
+		ID:              u.ID,
+		Name:            u.Name,
+		Workspace:       u.Workspace,
+		FamilyWorkspace: familyWorkspacePath(dataDir, u.FamilyID),
 	}
 	if u.Model != "" {
 		ac.Model = &config.AgentModelConfig{Primary: u.Model}
 	}
 	return ac
+}
+func familyWorkspacePath(dataDir, familyID string) string {
+	if familyID == "" {
+		return ""
+	}
+	return filepath.Join(dataDir, "families", familyID)
 }
 
 // userProviderFor builds a per-user provider (own token through one-api) or nil
@@ -263,7 +271,7 @@ func (s *Server) ensureUserAgent(userID string) (*agent.AgentInstance, error) {
 			return nil, err
 		}
 
-		inst, err := s.loop.MaterializeUserAgent(userAgentConfig(u), ucfg, userProviderFor(s.rootCfg, u))
+		inst, err := s.loop.MaterializeUserAgent(userAgentConfig(u, s.cfg.DataDir), ucfg, userProviderFor(s.rootCfg, u))
 		if err != nil {
 			return nil, err
 		}
@@ -358,6 +366,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/sessions/", s.handleSessionByID)
 	mux.HandleFunc("/api/models", s.handleModels)
 	mux.HandleFunc("/api/models/default", s.handleSetDefaultModel)
+	mux.HandleFunc("/api/v1/families", s.handleFamilies)
+	mux.HandleFunc("/api/v1/families/", s.handleFamilyByID)
 	if s.bridge != nil {
 		mux.Handle("/pico/", fixedSessionHandler(s.bridge, s.bridge.ch))
 	}
@@ -382,17 +392,18 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
 		var body struct {
-			ID     string `json:"id"`
-			Name   string `json:"name"`
-			Model  string `json:"model"`
-			APIKey string `json:"api_key"`
-			Role   int    `json:"role"`
+			ID       string `json:"id"`
+			Name     string `json:"name"`
+			Model    string `json:"model"`
+			APIKey   string `json:"api_key"`
+			Role     int    `json:"role"`
+			FamilyID string `json:"family_id"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			respondErr(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 			return
 		}
-		u, err := s.store.RegisterUser(body.ID, body.Name, firstNonEmpty(body.Model, s.cfg.Model), body.APIKey, body.Role)
+		u, err := s.store.RegisterUser(body.ID, body.Name, firstNonEmpty(body.Model, s.cfg.Model), body.APIKey, body.Role, body.FamilyID)
 		if err != nil {
 			respondErr(w, http.StatusConflict, err.Error())
 			return
@@ -524,3 +535,109 @@ func firstNonEmpty(a, b string) string {
 }
 
 var _ = os.MkdirAll
+
+// handleFamilies handles POST /api/v1/families (create) and GET /api/v1/families (list).
+func (s *Server) handleFamilies(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		var body struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			respondErr(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+			return
+		}
+		if strings.TrimSpace(body.ID) == "" || strings.TrimSpace(body.Name) == "" {
+			respondErr(w, http.StatusBadRequest, "id and name are required")
+			return
+		}
+		f, err := s.store.CreateFamily(body.ID, body.Name)
+		if err != nil {
+			respondErr(w, http.StatusConflict, err.Error())
+			return
+		}
+		respondJSON(w, http.StatusCreated, f)
+
+	case http.MethodGet:
+		families, err := s.store.ListFamilies()
+		if err != nil {
+			respondErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		respondJSON(w, http.StatusOK, families)
+
+	default:
+		respondErr(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+// handleFamilyByID handles family detail and member management.
+// GET  /api/v1/families/{id}             — family info
+// GET  /api/v1/families/{id}/members      — list members
+// POST /api/v1/families/{id}/members      — add member (body: user_id)
+// DELETE /api/v1/families/{id}/members/{uid} — remove member
+func (s *Server) handleFamilyByID(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/api/v1/families/")
+	parts := strings.SplitN(rest, "/", 3)
+	familyID := parts[0]
+	if familyID == "" {
+		respondErr(w, http.StatusBadRequest, "family id required")
+		return
+	}
+
+	switch {
+	case len(parts) == 1 && r.Method == http.MethodGet:
+		f, err := s.store.GetFamily(familyID)
+		if err == sql.ErrNoRows {
+			respondErr(w, http.StatusNotFound, "family not found")
+			return
+		}
+		if err != nil {
+			respondErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		respondJSON(w, http.StatusOK, f)
+
+	case len(parts) == 2 && parts[1] == "members" && r.Method == http.MethodGet:
+		members, err := s.store.ListFamilyMembers(familyID)
+		if err != nil {
+			respondErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		respondJSON(w, http.StatusOK, members)
+
+	case len(parts) == 2 && parts[1] == "members" && r.Method == http.MethodPost:
+		var body struct {
+			UserID string `json:"user_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			respondErr(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+			return
+		}
+		if strings.TrimSpace(body.UserID) == "" {
+			respondErr(w, http.StatusBadRequest, "user_id is required")
+			return
+		}
+		if _, err := s.store.GetUser(body.UserID); err != nil {
+			respondErr(w, http.StatusNotFound, "user not found")
+			return
+		}
+		if err := s.store.SetUserFamily(body.UserID, familyID); err != nil {
+			respondErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+
+	case len(parts) == 3 && parts[1] == "members" && r.Method == http.MethodDelete:
+		userID := parts[2]
+		if err := s.store.SetUserFamily(userID, ""); err != nil {
+			respondErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+
+	default:
+		respondErr(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}

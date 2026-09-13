@@ -518,24 +518,34 @@ func (h *authHandlers) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// missing (e.g. the row predates v7 key minting), fall back to the shared
 	// gateway key so the chat still works.
 	apiKey := h.srv.cfg.GatewayKey
-	if _, err := h.srv.store.GetUser(userID); err != nil {
-		if _, rerr := h.srv.store.RegisterUser(userID, username, h.srv.cfg.Model, apiKey, na.Data.Role); rerr != nil {
+	familyID := ""
+	if u, err := h.srv.store.GetUser(userID); err == nil {
+		familyID = u.FamilyID
+		if u.APIKey != "" {
+			apiKey = u.APIKey
+		}
+	} else {
+		if _, rerr := h.srv.store.RegisterUser(userID, username, h.srv.cfg.Model, apiKey, na.Data.Role, ""); rerr != nil {
 			respondErr(w, http.StatusInternalServerError, "register v7 user: "+rerr.Error())
 			return
 		}
-	} else if u, gerr := h.srv.store.GetUser(userID); gerr == nil && u.APIKey != "" {
-		apiKey = u.APIKey
 	}
 
 	token := h.srv.sessions.issue(userID, username)
-	respondJSON(w, http.StatusOK, map[string]any{
+	loginResp := map[string]any{
 		"token":    token,
 		"user_id":  userID,
 		"username": username,
 		"role":     na.Data.Role,
 		"model":    h.srv.cfg.Model,
 		"gateway":  "one-api",
-	})
+	}
+	if familyID != "" {
+		if ctx, err := h.srv.store.FamilyContext(familyID); err == nil {
+			loginResp["family_context"] = ctx
+		}
+	}
+	respondJSON(w, http.StatusOK, loginResp)
 }
 
 // handleRegister creates a one-api account and mints its per-user key, then
@@ -598,22 +608,31 @@ func (h *authHandlers) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := "u" + strconv.FormatInt(na.Data.Id, 10)
-	if _, err := h.srv.store.GetUser(userID); err != nil {
-		if _, rerr := h.srv.store.RegisterUser(userID, req.Username, h.srv.cfg.Model, key, na.Data.Role); rerr != nil {
+	familyID := ""
+	if u, err := h.srv.store.GetUser(userID); err == nil {
+		familyID = u.FamilyID
+	} else {
+		if _, rerr := h.srv.store.RegisterUser(userID, req.Username, h.srv.cfg.Model, key, na.Data.Role, ""); rerr != nil {
 			respondErr(w, http.StatusInternalServerError, "register v7 user: "+rerr.Error())
 			return
 		}
 	}
 
 	token := h.srv.sessions.issue(userID, req.Username)
-	respondJSON(w, http.StatusOK, map[string]any{
+	loginResp := map[string]any{
 		"token":    token,
 		"user_id":  userID,
 		"username": req.Username,
 		"role":     na.Data.Role,
 		"model":    h.srv.cfg.Model,
 		"gateway":  "one-api",
-	})
+	}
+	if familyID != "" {
+		if ctx, err := h.srv.store.FamilyContext(familyID); err == nil {
+			loginResp["family_context"] = ctx
+		}
+	}
+	respondJSON(w, http.StatusOK, loginResp)
 }
 
 func (h *authHandlers) handleLogout(w http.ResponseWriter, r *http.Request) {
