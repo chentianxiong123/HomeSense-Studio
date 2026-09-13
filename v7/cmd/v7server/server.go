@@ -386,12 +386,13 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			Name   string `json:"name"`
 			Model  string `json:"model"`
 			APIKey string `json:"api_key"`
+			Role   int    `json:"role"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			respondErr(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 			return
 		}
-		u, err := s.store.RegisterUser(body.ID, body.Name, firstNonEmpty(body.Model, s.cfg.Model), body.APIKey)
+		u, err := s.store.RegisterUser(body.ID, body.Name, firstNonEmpty(body.Model, s.cfg.Model), body.APIKey, body.Role)
 		if err != nil {
 			respondErr(w, http.StatusConflict, err.Error())
 			return

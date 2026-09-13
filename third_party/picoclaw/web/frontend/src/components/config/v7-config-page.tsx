@@ -11,6 +11,7 @@ import { IconDeviceFloppy } from "@tabler/icons-react"
 import { useCallback, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
+import { getV6Role } from "@/api/v6-auth"
 
 import {
   getMemoryConfig,
@@ -169,6 +170,7 @@ export function V7ConfigPage() {
   const [agentMdDirty, setAgentMdDirty] = useState(false)
   const [memoryProfile, setMemoryProfile] = useState("")
   const [profileLoading, setProfileLoading] = useState(false)
+  const isAdmin = getV6Role() === 100
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -268,7 +270,9 @@ export function V7ConfigPage() {
         <CardHeader>
           <CardTitle>工具</CardTitle>
           <CardDescription>
-            高危工具默认关闭，仅为本租户开启。灰色项为平台级禁用，不可开启。
+            {isAdmin
+              ? "管理员视角：可控制所有工具的开关。"
+              : "高危工具默认关闭，仅为本租户开启。"}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -293,18 +297,30 @@ export function V7ConfigPage() {
               />
             </div>
           ))}
-          {PLATFORM_DISABLED_TOOLS.map((tool) => (
-            <div
-              key={tool.name}
-              className="flex items-center justify-between rounded-md border border-muted px-3 py-2 opacity-50"
-            >
-              <div>
-                <div className="text-sm font-medium">{tool.name}</div>
-                <div className="text-xs text-muted-foreground">{tool.hint}</div>
+          {isAdmin &&
+            PLATFORM_DISABLED_TOOLS.map((tool) => (
+              <div
+                key={tool.name}
+                className="flex items-center justify-between rounded-md border px-3 py-2"
+              >
+                <div>
+                  <div className="text-sm font-medium">{tool.name}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {tool.hint}
+                  </div>
+                </div>
+                <Switch
+                  checked={toolEnabled(cur, tool.name)}
+                  onCheckedChange={(on) => {
+                    setCfg((c) => {
+                      const next = structuredClone(c ?? cur)
+                      setToolEnabled(next, tool.name, on)
+                      return next
+                    })
+                  }}
+                />
               </div>
-              <span className="text-xs text-muted-foreground">平台禁用</span>
-            </div>
-          ))}
+            ))}
         </CardContent>
       </Card>
 

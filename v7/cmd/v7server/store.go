@@ -23,6 +23,7 @@ type User struct {
 	Name      string    `json:"name"`
 	Workspace string    `json:"workspace"`
 	Model     string    `json:"model,omitempty"`
+	Role      int       `json:"role"`
 	APIKey    string    `json:"-"` // per-user new-api token (never serialized)
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -52,12 +53,15 @@ func NewStore(dataDir, corpusDir string) (*Store, error) {
 			workspace TEXT NOT NULL,
 			model     TEXT NOT NULL DEFAULT '',
 			api_key   TEXT NOT NULL DEFAULT '',
+			role      INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMP NOT NULL
 		);
 	`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("create users table: %w", err)
 	}
+	// Migration: add role column to existing DBs.
+	db.Exec(`ALTER TABLE users ADD COLUMN role INTEGER NOT NULL DEFAULT 0`)
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS revoked_tokens (
 			jti        TEXT PRIMARY KEY,
@@ -75,7 +79,7 @@ func (s *Store) Close() error { return s.db.Close() }
 
 // RegisterUser creates a user row, its personal SQLite database, and its
 // workspace directory. No agent instance is created yet (lazy warm-up).
-func (s *Store) RegisterUser(id, name, model, apiKey string) (User, error) {
+func (s *Store) RegisterUser(id, name, model, apiKey string, role int) (User, error) {
 	if id == "" {
 		return User{}, errors.New("user id is required")
 	}
@@ -115,12 +119,13 @@ func (s *Store) RegisterUser(id, name, model, apiKey string) (User, error) {
 		Name:      name,
 		Workspace: wsDir,
 		Model:     model,
+		Role:      role,
 		APIKey:    apiKey,
 		CreatedAt: time.Now().UTC(),
 	}
 	_, err = s.db.Exec(
-		`INSERT INTO users (id, name, workspace, model, api_key, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		u.ID, u.Name, u.Workspace, u.Model, u.APIKey, u.CreatedAt,
+		`INSERT INTO users (id, name, workspace, model, api_key, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		u.ID, u.Name, u.Workspace, u.Model, u.APIKey, u.Role, u.CreatedAt,
 	)
 	if err != nil {
 		return User{}, fmt.Errorf("insert user: %w", err)
@@ -131,9 +136,9 @@ func (s *Store) RegisterUser(id, name, model, apiKey string) (User, error) {
 // GetUser returns a user row by ID.
 func (s *Store) GetUser(id string) (User, error) {
 	row := s.db.QueryRow(
-		`SELECT id, name, workspace, model, api_key, created_at FROM users WHERE id = ?`, id)
+		`SELECT id, name, workspace, model, api_key, role, created_at FROM users WHERE id = ?`, id)
 	var u User
-	if err := row.Scan(&u.ID, &u.Name, &u.Workspace, &u.Model, &u.APIKey, &u.CreatedAt); err != nil {
+	if err := row.Scan(&u.ID, &u.Name, &u.Workspace, &u.Model, &u.APIKey, &u.Role, &u.CreatedAt); err != nil {
 		return User{}, err
 	}
 	return u, nil
@@ -142,7 +147,7 @@ func (s *Store) GetUser(id string) (User, error) {
 // ListUsers returns all registered users.
 func (s *Store) ListUsers() ([]User, error) {
 	rows, err := s.db.Query(
-		`SELECT id, name, workspace, model, api_key, created_at FROM users ORDER BY created_at`)
+		`SELECT id, name, workspace, model, api_key, role, created_at FROM users ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +155,7 @@ func (s *Store) ListUsers() ([]User, error) {
 	var users []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Name, &u.Workspace, &u.Model, &u.APIKey, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Name, &u.Workspace, &u.Model, &u.APIKey, &u.Role, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		users = append(users, u)

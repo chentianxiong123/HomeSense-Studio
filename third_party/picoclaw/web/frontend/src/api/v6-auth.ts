@@ -7,6 +7,7 @@
  */
 
 const V6_TOKEN_KEY = "homesense:v6-token"
+const V6_ROLE_KEY = "homesense:v6-role"
 
 export type V6LoginResult =
   | {
@@ -14,6 +15,7 @@ export type V6LoginResult =
       token: string
       userId: string
       username: string
+      role: number
       model: string
     }
   | { ok: false; status: number; error: string }
@@ -22,6 +24,7 @@ export type V6LoginResponse = {
   token: string
   user_id: string
   username: string
+  role: number
   model: string
 }
 
@@ -45,11 +48,13 @@ export async function v6Login(
     const data = (await res.json()) as V6LoginResponse
     if (data.token) {
       setV6Token(data.token)
+      setV6Role(data.role)
       return {
         ok: true,
         token: data.token,
         userId: data.user_id,
         username: data.username,
+        role: data.role,
         model: data.model,
       }
     }
@@ -84,11 +89,13 @@ export async function v6Register(
     const data = (await res.json()) as V6LoginResponse
     if (data.token) {
       setV6Token(data.token)
+      setV6Role(data.role)
       return {
         ok: true,
         token: data.token,
         userId: data.user_id,
         username: data.username,
+        role: data.role,
         model: data.model,
       }
     }
@@ -109,8 +116,17 @@ export function getV6Token(): string {
   return globalThis.localStorage?.getItem(V6_TOKEN_KEY)?.trim() || ""
 }
 
+export function setV6Role(role: number) {
+  globalThis.localStorage?.setItem(V6_ROLE_KEY, String(role))
+}
+
+export function getV6Role(): number {
+  return Number(globalThis.localStorage?.getItem(V6_ROLE_KEY) || "0")
+}
+
 export function clearV6Token() {
   globalThis.localStorage?.removeItem(V6_TOKEN_KEY)
+  globalThis.localStorage?.removeItem(V6_ROLE_KEY)
 }
 
 export async function v6Logout(): Promise<void> {
