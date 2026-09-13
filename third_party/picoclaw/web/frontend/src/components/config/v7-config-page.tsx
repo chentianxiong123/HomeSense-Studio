@@ -61,13 +61,16 @@ interface MCPServerDraft {
 const HIGH_RISK_TOOLS: { name: string; hint: string }[] = [
   { name: "exec", hint: "在主机上执行命令" },
   { name: "cron", hint: "定时任务" },
+  { name: "send_file", hint: "向外发送文件" },
+  { name: "message", hint: "向频道发送消息" },
+  { name: "load_image", hint: "加载本地图片" },
+]
+
+const PLATFORM_DISABLED_TOOLS: { name: string; hint: string }[] = [
   { name: "spawn", hint: "派生子代理" },
   { name: "spawn_status", hint: "子代理状态" },
   { name: "subagent", hint: "子代理工具" },
-  { name: "send_file", hint: "向外发送文件" },
-  { name: "message", hint: "向频道发送消息" },
   { name: "reaction", hint: "对消息作出反应" },
-  { name: "load_image", hint: "加载本地图片" },
   { name: "send_tts", hint: "文本转语音" },
   { name: "skills", hint: "技能注册表" },
   { name: "find_skills", hint: "搜索技能" },
@@ -265,7 +268,7 @@ export function V7ConfigPage() {
         <CardHeader>
           <CardTitle>工具</CardTitle>
           <CardDescription>
-            高危工具默认关闭。仅为本租户开启。
+            高危工具默认关闭，仅为本租户开启。灰色项为平台级禁用，不可开启。
           </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -288,6 +291,18 @@ export function V7ConfigPage() {
                   })
                 }}
               />
+            </div>
+          ))}
+          {PLATFORM_DISABLED_TOOLS.map((tool) => (
+            <div
+              key={tool.name}
+              className="flex items-center justify-between rounded-md border border-muted px-3 py-2 opacity-50"
+            >
+              <div>
+                <div className="text-sm font-medium">{tool.name}</div>
+                <div className="text-xs text-muted-foreground">{tool.hint}</div>
+              </div>
+              <span className="text-xs text-muted-foreground">平台禁用</span>
             </div>
           ))}
         </CardContent>

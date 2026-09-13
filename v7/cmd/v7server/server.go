@@ -113,6 +113,22 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	pcCfg.Agents.Defaults.SessionStorage = "sqlite"
 	pcCfg.Session.Dimensions = []string{"chat"}
 
+	// ── Platform-level tool policy ──
+	// Disable tools that are unnecessary for cloud deployment.
+	// Tenants cannot override these via their config.json.
+	pcCfg.Tools.Spawn = config.ToolConfig{Enabled: false}
+	pcCfg.Tools.SpawnStatus = config.ToolConfig{Enabled: false}
+	pcCfg.Tools.Subagent = config.ToolConfig{Enabled: false}
+	pcCfg.Tools.SendTTS = config.ToolConfig{Enabled: false}
+	pcCfg.Tools.I2C = config.ToolConfig{Enabled: false}
+	pcCfg.Tools.SPI = config.ToolConfig{Enabled: false}
+	pcCfg.Tools.Serial = config.ToolConfig{Enabled: false}
+	pcCfg.Tools.FindSkills = config.ToolConfig{Enabled: false}
+	pcCfg.Tools.InstallSkill = config.ToolConfig{Enabled: false}
+	pcCfg.Tools.Skills = config.SkillsToolsConfig{
+		ToolConfig: config.ToolConfig{Enabled: false},
+	}
+
 	// Single model channel through one-api (OpenAI-compatible). The gateway
 	// key is the one-api admin token: it proxies the root provider, while
 	// per-user providers use the per-user key minted at login.
