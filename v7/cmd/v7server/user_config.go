@@ -20,29 +20,10 @@ import (
 	"github.com/sipeed/picoclaw/pkg/config"
 )
 
-// userConfigTemplateJSON is the baseline every tenant starts from. High-risk
-// tools are off by default; the tenant can re-enable them in their own file,
-// and any key they leave out inherits the platform root config.
-const userConfigTemplateJSON = `{
-  "tools": {
-    "exec":           {"enabled": false, "allow_remote": false, "enable_deny_patterns": true},
-    "cron":           {"enabled": false, "allow_command": false},
-    "spawn":          {"enabled": false},
-    "spawn_status":   {"enabled": false},
-    "subagent":       {"enabled": false},
-    "send_file":      {"enabled": false},
-    "message":        {"enabled": false},
-    "reaction":       {"enabled": false},
-    "load_image":     {"enabled": false},
-    "send_tts":       {"enabled": false},
-    "i2c":            {"enabled": false},
-    "spi":            {"enabled": false},
-    "serial":         {"enabled": false},
-    "find_skills":    {"enabled": false},
-    "install_skill":  {"enabled": false},
-    "skills":         {"enabled": false}
-  }
-}
+// userConfigTemplateJSON is the baseline every tenant starts from.
+// Tool policy is set at the platform level in server.go.
+// Tenant config.json only contains user-specific overrides (e.g. MCP servers).
+const userConfigTemplateJSON = `{}
 `
 
 // userConfigFor renders a tenant's fully independent picoclaw Config. The
